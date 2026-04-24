@@ -1,0 +1,260 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { Save } from "lucide-react";
+import { ScoreBar } from "@/components/score/score-bar";
+import { ScoreCircle } from "@/components/score/score-circle";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { scoreDiagnostic } from "@/lib/scoring";
+import { blockLabels, estadoLabels } from "@/lib/theme";
+import type { BlockKey, Diagnostic, DiagnosticInput } from "@/lib/types";
+
+type MetricField = {
+  label: string;
+  name: string;
+  block: BlockKey;
+  zone: "rapida" | "opcional";
+  hint: string;
+};
+
+const tabs: Array<{ key: BlockKey; label: string }> = [
+  { key: "salud", label: "01 Salud" },
+  { key: "publicaciones", label: "02 Publicaciones" },
+  { key: "ads", label: "03 Ads" },
+  { key: "logistica", label: "04 Logística" },
+  { key: "stock", label: "05 Stock" }
+];
+
+const fields: MetricField[] = [
+  { block: "salud", label: "Reclamos", name: "reclamos", zone: "rapida", hint: "% sobre ventas. Menor es mejor." },
+  { block: "salud", label: "Mediaciones", name: "mediaciones", zone: "opcional", hint: "% sobre ventas. Menor es mejor." },
+  { block: "salud", label: "Cancelaciones vendedor", name: "cancelaciones_vendedor", zone: "rapida", hint: "% cancelado por vendedor." },
+  { block: "salud", label: "Envíos a tiempo", name: "envios_a_tiempo", zone: "rapida", hint: "% entregas dentro de SLA." },
+  { block: "publicaciones", label: "Publicaciones activas", name: "pubs_activas_pct", zone: "rapida", hint: "% del catálogo activo." },
+  { block: "publicaciones", label: "Publicaciones optimizadas", name: "pubs_optimizadas_pct", zone: "rapida", hint: "% con ficha completa." },
+  { block: "publicaciones", label: "CTR", name: "ctr", zone: "opcional", hint: "% de clics sobre impresiones." },
+  { block: "ads", label: "Margen pre ads", name: "margen_pre_ads", zone: "rapida", hint: "% margen antes de publicidad." },
+  { block: "ads", label: "Gasto ads", name: "gasto_ads", zone: "opcional", hint: "$ invertidos en el período." },
+  { block: "ads", label: "Ventas ads", name: "ventas_ads", zone: "opcional", hint: "$ atribuidos a campañas." },
+  { block: "ads", label: "Ventas totales", name: "ventas_totales", zone: "opcional", hint: "$ total del período." },
+  { block: "ads", label: "ACOS", name: "acos", zone: "rapida", hint: "% gasto / ventas ads." },
+  { block: "ads", label: "ROAS", name: "roas", zone: "rapida", hint: "Retorno por peso invertido." },
+  { block: "ads", label: "TACOS", name: "tacos", zone: "rapida", hint: "% gasto / ventas totales." },
+  { block: "logistica", label: "Incidencias", name: "incidencias_pct", zone: "rapida", hint: "% envíos con incidencia." },
+  { block: "logistica", label: "Uso Full/Flex", name: "uso_full_flex_pct", zone: "rapida", hint: "% ventas con Full o Flex." },
+  { block: "logistica", label: "Cancelaciones por stock", name: "cancelaciones_stock_pct", zone: "rapida", hint: "% cancelado por faltante." },
+  { block: "stock", label: "SKUs sin stock", name: "skus_sin_stock_pct", zone: "rapida", hint: "% SKUs sin disponibilidad." },
+  { block: "stock", label: "Días de stock", name: "dias_stock", zone: "rapida", hint: "Cobertura promedio." },
+  { block: "stock", label: "Lead time reposición", name: "lead_time_reposicion", zone: "opcional", hint: "Días hasta reponer." },
+  { block: "stock", label: "Sistema de reposición", name: "sistema_reposicion", zone: "opcional", hint: "% SKUs con criterio definido." }
+];
+
+function inputFromDiagnostic(diagnostic: Diagnostic): Record<string, number> {
+  return {
+    reclamos: diagnostic.salud.reclamos,
+    mediaciones: diagnostic.salud.mediaciones,
+    cancelaciones_vendedor: diagnostic.salud.cancelaciones_vendedor,
+    envios_a_tiempo: diagnostic.salud.envios_a_tiempo,
+    pubs_activas_pct: diagnostic.publicaciones.pubs_activas_pct,
+    pubs_optimizadas_pct: diagnostic.publicaciones.pubs_optimizadas_pct,
+    ctr: diagnostic.publicaciones.ctr,
+    margen_pre_ads: diagnostic.ads.margen_pre_ads,
+    gasto_ads: diagnostic.ads.gasto_ads,
+    ventas_ads: diagnostic.ads.ventas_ads,
+    ventas_totales: diagnostic.ads.ventas_totales,
+    acos: diagnostic.ads.acos,
+    roas: diagnostic.ads.roas,
+    tacos: diagnostic.ads.tacos,
+    incidencias_pct: diagnostic.logistica.incidencias_pct,
+    uso_full_flex_pct: diagnostic.logistica.uso_full_flex_pct,
+    cancelaciones_stock_pct: diagnostic.logistica.cancelaciones_stock_pct,
+    skus_sin_stock_pct: diagnostic.stock.skus_sin_stock_pct,
+    dias_stock: diagnostic.stock.dias_stock,
+    lead_time_reposicion: diagnostic.stock.lead_time_reposicion,
+    sistema_reposicion: diagnostic.stock.sistema_reposicion
+  };
+}
+
+function buildInput(values: Record<string, number>): DiagnosticInput {
+  return {
+    salud: {
+      reclamos: values.reclamos,
+      mediaciones: values.mediaciones,
+      cancelaciones_vendedor: values.cancelaciones_vendedor,
+      envios_a_tiempo: values.envios_a_tiempo
+    },
+    publicaciones: {
+      pubs_activas_pct: values.pubs_activas_pct,
+      pubs_optimizadas_pct: values.pubs_optimizadas_pct,
+      ctr: values.ctr
+    },
+    ads: {
+      margen_pre_ads: values.margen_pre_ads,
+      gasto_ads: values.gasto_ads,
+      ventas_ads: values.ventas_ads,
+      ventas_totales: values.ventas_totales,
+      acos: values.acos,
+      roas: values.roas,
+      tacos: values.tacos
+    },
+    logistica: {
+      incidencias_pct: values.incidencias_pct,
+      uso_full_flex_pct: values.uso_full_flex_pct,
+      cancelaciones_stock_pct: values.cancelaciones_stock_pct
+    },
+    stock: {
+      skus_sin_stock_pct: values.skus_sin_stock_pct,
+      dias_stock: values.dias_stock,
+      lead_time_reposicion: values.lead_time_reposicion,
+      sistema_reposicion: values.sistema_reposicion
+    }
+  };
+}
+
+function warningsFor(values: Record<string, number>) {
+  const warnings: string[] = [];
+  const percentageFields = fields.filter((field) => field.name.includes("_pct") || ["envios_a_tiempo", "pubs_activas_pct", "pubs_optimizadas_pct", "margen_pre_ads", "acos", "tacos", "reclamos", "mediaciones", "cancelaciones_vendedor"].includes(field.name));
+
+  percentageFields.forEach((field) => {
+    const value = values[field.name];
+    if (value < 0 || value > 100) warnings.push(`${field.label} debería estar entre 0 y 100.`);
+  });
+
+  if (values.envios_a_tiempo < 90) warnings.push("Envíos a tiempo está por debajo de 90%. Revisar SLA logístico.");
+  if (values.acos > values.margen_pre_ads * 0.36) warnings.push("ACOS supera el umbral rentable contra margen pre ads.");
+  if (values.uso_full_flex_pct < 50) warnings.push("Uso Full/Flex menor a 50%. Hay oportunidad logística.");
+  if (values.skus_sin_stock_pct > 12) warnings.push("SKUs sin stock por encima de 12%. Riesgo de ventas perdidas.");
+
+  return warnings;
+}
+
+export function DiagnosticForm({
+  diagnostic,
+  action
+}: {
+  diagnostic: Diagnostic;
+  action: (formData: FormData) => void | Promise<void>;
+}) {
+  const [activeTab, setActiveTab] = useState<BlockKey>("salud");
+  const [values, setValues] = useState(() => inputFromDiagnostic(diagnostic));
+  const scored = useMemo(() => scoreDiagnostic(buildInput(values)), [values]);
+  const warnings = useMemo(() => warningsFor(values), [values]);
+  const activeFields = fields.filter((field) => field.block === activeTab);
+
+  function updateValue(name: string, value: string) {
+    const parsed = Number(value);
+    setValues((current) => ({ ...current, [name]: Number.isFinite(parsed) ? parsed : 0 }));
+  }
+
+  return (
+    <form action={action} className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      {fields.map((field) => (
+        <input key={field.name} type="hidden" name={field.name} value={values[field.name]} />
+      ))}
+
+      <Card>
+        <div className="mb-5 flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`focus-ring min-h-10 rounded-component border px-3 text-sm font-semibold ${activeTab === tab.key ? "border-brand-purple bg-brand-light text-brand-dark" : "border-black/10 bg-white text-zinc-600 hover:bg-brand-light"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-5 block max-w-xs space-y-2">
+          <span className="text-sm font-semibold text-zinc-700">Fecha del diagnóstico</span>
+          <input className="focus-ring h-11 w-full rounded-component border border-black/10 px-3" defaultValue={new Date().toISOString().slice(0, 10)} name="date" type="date" />
+        </label>
+
+        <section>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-zinc-950">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
+              <p className="mt-1 text-sm text-zinc-600">Zona A son datos rápidos; Zona B mejora precisión cuando están disponibles.</p>
+            </div>
+            <div className="text-sm font-semibold text-brand-dark">Score bloque: {scored.scores[activeTab]}</div>
+          </div>
+
+          <FieldZone title="Zona A" fields={activeFields.filter((field) => field.zone === "rapida")} values={values} onChange={updateValue} />
+          <FieldZone title="Zona B" fields={activeFields.filter((field) => field.zone === "opcional")} values={values} onChange={updateValue} />
+        </section>
+
+        <div className="mt-5 rounded-card border border-[#BA7517]/30 bg-[#FAEEDA] p-4 text-sm text-[#633806]">
+          Los porcentajes se cargan como números de 0 a 100. El backend recalcula el score final antes de guardar.
+        </div>
+      </Card>
+
+      <Card className="h-fit">
+        <h2 className="text-lg font-bold">Preview final</h2>
+        <div className="mt-4 flex justify-center">
+          <ScoreCircle score={scored.scoreGlobal} size={150} />
+        </div>
+        <div className="mt-4 text-center text-sm font-semibold text-brand-dark">{estadoLabels[scored.estadoGlobal]}</div>
+        <div className="mt-5 space-y-4">
+          {(Object.entries(scored.scores) as Array<[BlockKey, number]>).map(([key, score]) => (
+            <ScoreBar key={key} score={score} label={blockLabels[key]} />
+          ))}
+        </div>
+
+        {warnings.length > 0 ? (
+          <div className="mt-5 rounded-card border border-[#D85A30]/30 bg-[#FAECE7] p-4 text-sm text-[#712B13]">
+            <div className="font-bold">Warnings</div>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              {warnings.slice(0, 4).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <Button className="mt-6 w-full" type="submit">
+          <Save className="h-4 w-4" />
+          Guardar diagnóstico
+        </Button>
+      </Card>
+    </form>
+  );
+}
+
+function FieldZone({
+  title,
+  fields: zoneFields,
+  values,
+  onChange
+}: {
+  title: string;
+  fields: MetricField[];
+  values: Record<string, number>;
+  onChange: (name: string, value: string) => void;
+}) {
+  if (zoneFields.length === 0) return null;
+
+  return (
+    <div className="mt-5">
+      <h3 className="mb-3 text-sm font-bold text-zinc-950">{title}</h3>
+      <div className="grid gap-4 md:grid-cols-2">
+        {zoneFields.map((field) => (
+          <label key={field.name} className="space-y-2">
+            <span className="text-sm font-semibold text-zinc-700">{field.label}</span>
+            <input
+              aria-label={field.label}
+              className="focus-ring h-11 w-full rounded-component border border-black/10 px-3"
+              min="0"
+              step="0.01"
+              type="number"
+              value={values[field.name]}
+              onChange={(event) => onChange(field.name, event.target.value)}
+            />
+            <span className="block text-xs text-zinc-500">{field.hint}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
