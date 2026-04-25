@@ -1,0 +1,996 @@
+Pegá esto en .cursor/rules/agente-ml.mdc:
+
+markdown
+---
+name: Agente ML
+description: Construye la integración completa con Mercado Libre — OAuth, API oficial, y pipeline de datos que pre-llena automáticamente el diagnóstico de cada cuenta. Es el puente entre ML y el motor de recomendaciones. El scraper existente queda como fallback.
+globs: ["lib/ml/**", "app/api/ml/**", "services/scraper/**", "supabase/functions/**"]
+alwaysApply: false
+---
+
+# Rol
+Sos el ingeniero de integraciones senior responsable de conectar Meli Growth con la API oficial de Mercado Libre. Tu trabajo es que los datos reales de cada cuenta lleguen automáticamente al sistema de diagnóstico — sin que el operador tenga que copiar y pegar números manualmente.
+
+El impacto directo de tu trabajo: Joaquín hoy tarda 10 minutos cargando datos manualmente. Con esta integración, los datos de los 5 bloques del diagnóstico llegan solos. Él solo revisa, ajusta si necesita, y genera las recomendaciones. El tiempo de diagnóstico baja a 2-3 minutos.
+
+Podés y debés crear todos los archivos necesarios en `lib/ml/` y `app/api/ml/`. El scraper Python existente en `services/scraper/` no se toca — queda como fallback cuando la API no cubre algo.
+
+---
+
+# La API de Mercado Libre — endpoints críticos para los 5 bloques
+
+## Autenticación — OAuth 2.0
+ML usa OAuth 2.0 con access tokens que expiran cada 6 horas y refresh tokens de larga duración.
+POST https://api.mercadolibre.com/oauth/token grant_type=authorization_code | refresh_token client_id, client_secret, code | refresh_token redirect_uri
+
+→ Retorna: access_token (6hs), refresh_token (6 meses), user_id
+
+
+El seller tiene que autorizar una vez via OAuth. Después el sistema renueva automáticamente con el refresh token.
+
+## Bloque 01 — Salud de cuenta
+GET https://api.mercadolibre.com/users/{seller_id}/seller_reputation Authorization: Bearer {access_token}
+
+→ Retorna:
+level_id: "5_green" | "4_light_green" | "3_yellow" | "2_orange" | "1_red"
+power_seller_status: "platinum" | "gold" | "silver" | null
+transactions.period: "historic" | "3 months" | "6 months"
+transactions.ratings.negative: % reclamos
+transactions.ratings.neutral: % mediaciones
+transactions.canceled: % cancelaciones vendedor
+metrics.sales.period: "60 days"
+metrics.sales.completed: ventas completadas
+metrics.delayed_handling_time.rate: % envíos a tiempo (inverso)
+metrics.cancellations.rate: % cancelaciones
+metrics.claims.rate: % reclamos activos
+
+
+## Bloque 02 — Publicaciones
+Total de publicaciones activas
+GET https://api.mercadolibre.com/users/{seller_id}/items/search?status=active → paging.total = cantidad de publicaciones activas
+
+Total de publicaciones (todas)
+GET https://api.mercadolibre.com/users/{seller_id}/items/search → paging.total = total del catálogo
+
+Calidad/performance de una publicación
+GET https://api.mercadolibre.com/item/{item_id}/performance → score: 0-100 → level_wording: "Platinum" | "Profesional" | ... → buckets: array de bloques (CHARACTERISTICS, PICTURES, etc.)
+
+CTR requiere Mercado Ads API o scraper
+→ fallback al scraper para esta métrica específica
+
+## Bloque 03 — Ads (Mercado Ads)
+GET https://api.mercadolibre.com/advertising/advertisers/{advertiser_id}/ads/campaigns Authorization: Bearer {access_token}
+
+Métricas de campaña
+GET https://api.mercadolibre.com/advertising/advertisers/{advertiser_id}/product_ads/reports date_from, date_to, dimensions, metrics
+
+→ Retorna:
+spend: gasto total en ads
+sales: ventas atribuidas a ads
+impressions, clicks, conversions
+→ ACOS = spend / sales (calculado en app)
+→ ROAS = sales / spend (calculado en app)
+
+
+## Bloque 04 — Logística
+Órdenes con estado de envío
+GET https://api.mercadolibre.com/orders/search?seller={seller_id}&order.status=paid → shipping.status, shipping.substatus → Calcular % incidencias = órdenes con problema / total órdenes
+
+Uso de Full/Flex
+GET https://api.mercadolibre.com/users/{seller_id}/items/search?logistic_type=fulfillment → paging.total = publicaciones en Full → % Full/Flex = full_items / total_items
+
+Cancelaciones por stock
+GET https://api.mercadolibre.com/orders/search?seller={seller_id}&order.status=cancelled → filtrar por cancel_reason = "out_of_stock" → % cancelaciones stock = canceladas_por_stock / total_ordenes
+
+
+## Bloque 05 — Stock
+Stock por ítem (Full/Flex)
+GET https://api.mercadolibre.com/items/{item_id}/variations/{variation_id}/available_quantity → available_quantity: stock disponible
+
+Stock en fulfillment
+GET https://api.mercadolibre.com/fulfillment/stock/users/{user_id}/items/search → Por SKU: available_quantity, reserved_quantity
+
+SKUs sin stock
+→ Calcular: items con available_quantity = 0 / total items activos
+
+Días de stock y lead time → no disponible en API oficial
+→ usar datos manuales o scraper como fallback
+
+---
+
+# Estructura de archivos — creá todo lo que necesites
+lib/
+└── ml/
+├── index.ts              ← punto de entrada, exporta todo
+├── auth.ts               ← OAuth flow, token management, refresh
+├── client.ts             ← HTTP client con retry y rate limiting
+├── endpoints/
+│   ├── reputation.ts     ← Bloque 01 Salud
+│   ├── listings.ts       ← Bloque 02 Publicaciones
+│   ├── ads.ts            ← Bloque 03 Ads
+│   ├── logistics.ts      ← Bloque 04 Logística
+│   └── stock.ts          ← Bloque 05 Stock
+├── mappers/
+│   ├── to-diagnostic.ts  ← mapea respuestas de API → campos del diagnóstico
+│   └── types.ts          ← tipos TypeScript de la API de ML
+└── pipeline.ts           ← orquesta todos los endpoints y devuelve diagnóstico completo
+
+app/
+└── api/
+└── ml/
+├── auth/
+│   ├── callback/route.ts   ← recibe el code de OAuth después del redirect
+│   └── refresh/route.ts    ← renueva access_token con refresh_token
+├── sync/
+│   └── route.ts            ← dispara sync manual de datos de una cuenta
+└── webhook/
+└── route.ts            ← recibe notificaciones de ML (opcional)
+
+
+---
+
+# Tarea 1 — OAuth flow completo [PRIMERO, todo depende de esto]
+
+```typescript
+// lib/ml/auth.ts
+
+import { createServerClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
+import { logServerError } from '@/lib/utils/errors'
+
+const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization'
+const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token'
+
+// Genera la URL de autorización para que el seller autorice
+export function getAuthorizationUrl(clientId: string, redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    state, // para prevenir CSRF — usar el client_id de la cuenta en Meli Growth
+  })
+  return `${ML_AUTH_URL}?${params.toString()}`
+}
+
+// Intercambia el code por access_token y refresh_token
+export async function exchangeCodeForTokens(
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<{ access_token: string; refresh_token: string; user_id: number; expires_in: number }> {
+  const response = await fetch(ML_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`ML OAuth error: ${error}`)
+  }
+
+  return response.json()
+}
+
+// Renueva el access_token usando el refresh_token
+export async function refreshAccessToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  const response = await fetch(ML_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`ML token refresh failed: ${await response.text()}`)
+  }
+
+  return response.json()
+}
+
+// Obtiene el access_token vigente para un cliente — renueva si está por vencer
+export async function getValidAccessToken(clientId: string): Promise<string> {
+  const supabase = createServiceClient() // necesita bypasear RLS para leer sesiones
+
+  const { data: session, error } = await supabase
+    .from('meli_sessions')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('status', 'validated')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (error || !session) {
+    throw new Error(`No hay sesión válida para el cliente ${clientId}`)
+  }
+
+  // El storage_path guarda el JSON con los tokens
+  // Obtener tokens del Storage de Supabase
+  const { data: tokenFile } = await supabase.storage
+    .from('meli-sessions')
+    .download(session.storage_path)
+
+  if (!tokenFile) throw new Error('No se pudo leer el archivo de sesión')
+
+  const tokens = JSON.parse(await tokenFile.text()) as {
+    access_token: string
+    refresh_token: string
+    expires_at: number // timestamp unix
+  }
+
+  // Si el token expira en menos de 5 minutos, renovar
+  const needsRefresh = Date.now() / 1000 > tokens.expires_at - 300
+
+  if (!needsRefresh) return tokens.access_token
+
+  // Renovar el token
+  const fresh = await refreshAccessToken(
+    tokens.refresh_token,
+    process.env.ML_CLIENT_ID!,
+    process.env.ML_CLIENT_SECRET!
+  )
+
+  // Guardar los tokens renovados
+  const updatedTokens = {
+    access_token: fresh.access_token,
+    refresh_token: fresh.refresh_token,
+    expires_at: Math.floor(Date.now() / 1000) + fresh.expires_in,
+  }
+
+  await supabase.storage
+    .from('meli-sessions')
+    .upload(session.storage_path, JSON.stringify(updatedTokens), { upsert: true })
+
+  // Actualizar el timestamp en la tabla
+  await supabase
+    .from('meli_sessions')
+    .update({ last_validated_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', session.id)
+
+  return fresh.access_token
+}
+```
+
+---
+
+# Tarea 2 — HTTP client con retry y rate limiting [IMPORTANTE]
+
+```typescript
+// lib/ml/client.ts
+
+const ML_BASE_URL = 'https://api.mercadolibre.com'
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 1000
+
+// Rate limit de ML: 3000 requests por día por aplicación para apps no certificadas
+// Con certificación: 30.000 por día
+// Estrategia: no más de 10 requests por segundo
+
+export async function mlFetch<T>(
+  path: string,
+  accessToken: string,
+  options?: RequestInit
+): Promise<T> {
+  const url = `${ML_BASE_URL}${path}`
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          ...options?.headers,
+        },
+      })
+
+      // Rate limit alcanzado — esperar y reintentar
+      if (response.status === 429) {
+        const retryAfter = parseInt(response.headers.get('Retry-After') ?? '60', 10)
+        await sleep(retryAfter * 1000)
+        continue
+      }
+
+      // Token expirado — no reintentar, propagar para que se renueve
+      if (response.status === 401) {
+        throw new MLAuthError('Token expirado o inválido')
+      }
+
+      if (!response.ok) {
+        const body = await response.text()
+        throw new MLApiError(`ML API error ${response.status}: ${body}`, response.status)
+      }
+
+      return response.json() as T
+
+    } catch (error) {
+      if (error instanceof MLAuthError) throw error // no reintentar errores de auth
+      lastError = error as Error
+      if (attempt < MAX_RETRIES - 1) await sleep(RETRY_DELAY_MS * (attempt + 1))
+    }
+  }
+
+  throw lastError ?? new Error(`ML API request failed after ${MAX_RETRIES} retries`)
+}
+
+export class MLAuthError extends Error { name = 'MLAuthError' }
+export class MLApiError extends Error {
+  constructor(message: string, public statusCode: number) { super(message) }
+}
+
+function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)) }
+```
+
+---
+
+# Tarea 3 — Endpoints por bloque [CRÍTICO]
+
+## `lib/ml/endpoints/reputation.ts` — Bloque 01 Salud
+```typescript
+import { mlFetch } from '../client'
+
+export type MLReputationResponse = {
+  level_id: string
+  power_seller_status: string | null
+  transactions: {
+    period: string
+    ratings: { positive: number; negative: number; neutral: number }
+    canceled: number
+    completed: number
+  }
+  metrics: {
+    sales: { period: string; completed: number; declined: number }
+    claims: { period: string; rate: number; value: number }
+    delayed_handling_time: { period: string; rate: number; value: number }
+    cancellations: { period: string; rate: number; value: number }
+  }
+}
+
+export async function getSellerReputation(
+  sellerId: string,
+  accessToken: string
+): Promise<MLReputationResponse> {
+  return mlFetch<MLReputationResponse>(
+    `/users/${sellerId}/seller_reputation`,
+    accessToken
+  )
+}
+
+// Mapea a los campos del diagnóstico del bloque 01
+export function mapReputationToDiagnostic(rep: MLReputationResponse) {
+  return {
+    reclamos: rep.metrics.claims.rate * 100,                          // % reclamos
+    mediaciones: rep.transactions.ratings.negative * 100,            // % mediaciones (proxy)
+    cancelaciones_vendedor: rep.metrics.cancellations.rate * 100,    // % cancelaciones
+    envios_a_tiempo: (1 - rep.metrics.delayed_handling_time.rate) * 100, // % a tiempo (inverso del delay)
+  }
+}
+```
+
+## `lib/ml/endpoints/listings.ts` — Bloque 02 Publicaciones
+```typescript
+import { mlFetch } from '../client'
+
+export async function getListingsStats(sellerId: string, accessToken: string) {
+  // Publicaciones activas
+  const active = await mlFetch<{ paging: { total: number } }>(
+    `/users/${sellerId}/items/search?status=active&limit=1`,
+    accessToken
+  )
+
+  // Total de publicaciones
+  const all = await mlFetch<{ paging: { total: number } }>(
+    `/users/${sellerId}/items/search?limit=1`,
+    accessToken
+  )
+
+  // Publicaciones pausadas
+  const paused = await mlFetch<{ paging: { total: number } }>(
+    `/users/${sellerId}/items/search?status=paused&limit=1`,
+    accessToken
+  )
+
+  return {
+    total: all.paging.total,
+    active: active.paging.total,
+    paused: paused.paging.total,
+  }
+}
+
+// Calcula % de publicaciones optimizadas muestreando las top 50 por visitas
+export async function getListingsOptimizationRate(
+  sellerId: string,
+  accessToken: string
+): Promise<number> {
+  const items = await mlFetch<{ results: string[] }>(
+    `/users/${sellerId}/items/search?status=active&limit=50`,
+    accessToken
+  )
+
+  if (!items.results.length) return 0
+
+  // Obtener performance de cada publicación en paralelo (max 10 simultáneas)
+  const batchSize = 10
+  let optimizedCount = 0
+
+  for (let i = 0; i < items.results.length; i += batchSize) {
+    const batch = items.results.slice(i, i + batchSize)
+    const performances = await Promise.allSettled(
+      batch.map(itemId =>
+        mlFetch<{ score: number; level_wording: string }>(
+          `/item/${itemId}/performance`,
+          accessToken
+        )
+      )
+    )
+
+    for (const result of performances) {
+      if (result.status === 'fulfilled' && result.value.score >= 70) {
+        optimizedCount++
+      }
+    }
+  }
+
+  return (optimizedCount / items.results.length) * 100
+}
+
+export function mapListingsToDiagnostic(stats: { total: number; active: number }, optimizationRate: number) {
+  return {
+    pubs_activas_pct: stats.total > 0 ? (stats.active / stats.total) * 100 : 0,
+    pubs_optimizadas_pct: optimizationRate,
+    // CTR → no disponible en API oficial → null (carga manual o scraper)
+    ctr: null,
+  }
+}
+```
+
+## `lib/ml/endpoints/ads.ts` — Bloque 03 Ads
+```typescript
+import { mlFetch } from '../client'
+
+export async function getAdsMetrics(
+  advertiserId: string,
+  accessToken: string,
+  dateFrom: string, // YYYY-MM-DD
+  dateTo: string
+) {
+  try {
+    const metrics = await mlFetch<{
+      results: Array<{
+        spend: number
+        organic_sales: number
+        advertised_sales: number
+        total_amount: number
+      }>
+    }>(
+      `/advertising/advertisers/${advertiserId}/product_ads/reports?date_from=${dateFrom}&date_to=${dateTo}&metrics=spend,advertised_sales,total_amount`,
+      accessToken
+    )
+
+    const totals = metrics.results.reduce(
+      (acc, row) => ({
+        spend: acc.spend + row.spend,
+        ventas_ads: acc.ventas_ads + row.advertised_sales,
+        ventas_totales: acc.ventas_totales + row.total_amount,
+      }),
+      { spend: 0, ventas_ads: 0, ventas_totales: 0 }
+    )
+
+    return totals
+  } catch {
+    // Mercado Ads API puede no estar disponible para todos los sellers
+    return null
+  }
+}
+
+export function mapAdsToDiagnostic(metrics: { spend: number; ventas_ads: number; ventas_totales: number } | null) {
+  if (!metrics) return { gasto_ads: null, ventas_ads: null, ventas_totales: null }
+
+  return {
+    gasto_ads: metrics.spend,
+    ventas_ads: metrics.ventas_ads,
+    ventas_totales: metrics.ventas_totales,
+    // ACOS, ROAS, TACOS se calculan en lib/scoring.ts — no acá
+  }
+}
+```
+
+## `lib/ml/endpoints/logistics.ts` — Bloque 04 Logística
+```typescript
+import { mlFetch } from '../client'
+
+export async function getLogisticsMetrics(sellerId: string, accessToken: string) {
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const dateFrom = thirtyDaysAgo.toISOString().split('T')[0]
+
+  // Órdenes del último mes
+  const orders = await mlFetch<{
+    results: Array<{
+      status: string
+      cancel_detail?: { description: string }
+      shipping: { status: string; substatus: string | null }
+    }>
+    paging: { total: number }
+  }>(
+    `/orders/search?seller=${sellerId}&order.date_created.from=${dateFrom}&limit=50`,
+    accessToken
+  )
+
+  const total = orders.paging.total
+  if (total === 0) return null
+
+  // Calcular métricas
+  let incidencias = 0
+  let cancelaciones_stock = 0
+  let full_flex = 0
+
+  for (const order of orders.results) {
+    if (order.shipping?.substatus === 'bad_user_info' ||
+        order.shipping?.substatus === 'bad_address') {
+      incidencias++
+    }
+    if (order.status === 'cancelled' &&
+        order.cancel_detail?.description?.includes('stock')) {
+      cancelaciones_stock++
+    }
+  }
+
+  // Items en Full/Flex
+  const fullItems = await mlFetch<{ paging: { total: number } }>(
+    `/users/${sellerId}/items/search?logistic_type=fulfillment&limit=1`,
+    accessToken
+  )
+  const allItems = await mlFetch<{ paging: { total: number } }>(
+    `/users/${sellerId}/items/search?status=active&limit=1`,
+    accessToken
+  )
+
+  if (allItems.paging.total > 0) {
+    full_flex = (fullItems.paging.total / allItems.paging.total) * 100
+  }
+
+  return {
+    incidencias_pct: (incidencias / total) * 100,
+    cancelaciones_stock_pct: (cancelaciones_stock / total) * 100,
+    uso_full_flex_pct: full_flex,
+  }
+}
+```
+
+## `lib/ml/endpoints/stock.ts` — Bloque 05 Stock
+```typescript
+import { mlFetch } from '../client'
+
+export async function getStockMetrics(sellerId: string, accessToken: string) {
+  // Items activos y sus quantidades disponibles
+  const items = await mlFetch<{
+    results: string[]
+    paging: { total: number }
+  }>(
+    `/users/${sellerId}/items/search?status=active&limit=50`,
+    accessToken
+  )
+
+  if (!items.results.length) return null
+
+  // Obtener available_quantity de cada item
+  const itemDetails = await Promise.allSettled(
+    items.results.slice(0, 50).map(id =>
+      mlFetch<{ id: string; available_quantity: number }>(
+        `/items/${id}?attributes=id,available_quantity`,
+        accessToken
+      )
+    )
+  )
+
+  const details = itemDetails
+    .filter(r => r.status === 'fulfilled')
+    .map(r => (r as PromiseFulfilledResult<{ id: string; available_quantity: number }>).value)
+
+  const sinStock = details.filter(d => d.available_quantity === 0).length
+  const skus_sin_stock_pct = (sinStock / details.length) * 100
+
+  return {
+    skus_sin_stock_pct,
+    // dias_stock y lead_time_reposicion no disponibles en API → null (carga manual)
+    dias_stock: null,
+    lead_time_reposicion: null,
+  }
+}
+```
+
+---
+
+# Tarea 4 — Pipeline completo [CRÍTICO]
+
+```typescript
+// lib/ml/pipeline.ts
+// Orquesta todos los endpoints y devuelve los datos para pre-llenar el diagnóstico
+
+import { getValidAccessToken } from './auth'
+import { getSellerReputation, mapReputationToDiagnostic } from './endpoints/reputation'
+import { getListingsStats, getListingsOptimizationRate, mapListingsToDiagnostic } from './endpoints/listings'
+import { getAdsMetrics, mapAdsToDiagnostic } from './endpoints/ads'
+import { getLogisticsMetrics } from './endpoints/logistics'
+import { getStockMetrics } from './endpoints/stock'
+import { logServerError } from '@/lib/utils/errors'
+
+export type MLDiagnosticPrefill = {
+  // Bloque 01 Salud
+  reclamos?: number | null
+  mediaciones?: number | null
+  cancelaciones_vendedor?: number | null
+  envios_a_tiempo?: number | null
+  // Bloque 02 Publicaciones
+  pubs_activas_pct?: number | null
+  pubs_optimizadas_pct?: number | null
+  ctr?: number | null
+  // Bloque 03 Ads
+  gasto_ads?: number | null
+  ventas_ads?: number | null
+  ventas_totales?: number | null
+  // Bloque 04 Logística
+  incidencias_pct?: number | null
+  uso_full_flex_pct?: number | null
+  cancelaciones_stock_pct?: number | null
+  // Bloque 05 Stock
+  skus_sin_stock_pct?: number | null
+  dias_stock?: number | null
+  lead_time_reposicion?: number | null
+  // Metadata
+  seller_id: string
+  synced_at: string
+  data_sources: Record<string, 'api' | 'scraper' | 'manual' | 'unavailable'>
+}
+
+export async function fetchMLDiagnosticData(
+  clientId: string,
+  sellerId: string
+): Promise<{ success: true; data: MLDiagnosticPrefill } | { success: false; error: string }> {
+
+  let accessToken: string
+  try {
+    accessToken = await getValidAccessToken(clientId)
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:auth', err, { clientId, sellerId })
+    return { success: false, error: 'No hay sesión válida con Mercado Libre. El seller necesita reautorizar.' }
+  }
+
+  const dataSources: Record<string, 'api' | 'scraper' | 'manual' | 'unavailable'> = {}
+  const prefill: Partial<MLDiagnosticPrefill> = { seller_id: sellerId, synced_at: new Date().toISOString() }
+
+  // Bloque 01 — Salud
+  try {
+    const reputation = await getSellerReputation(sellerId, accessToken)
+    const salud = mapReputationToDiagnostic(reputation)
+    Object.assign(prefill, salud)
+    dataSources.salud = 'api'
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:reputation', err, { sellerId })
+    dataSources.salud = 'unavailable'
+  }
+
+  // Bloque 02 — Publicaciones
+  try {
+    const stats = await getListingsStats(sellerId, accessToken)
+    const optimRate = await getListingsOptimizationRate(sellerId, accessToken)
+    const pubs = mapListingsToDiagnostic(stats, optimRate)
+    Object.assign(prefill, pubs)
+    dataSources.publicaciones = 'api'
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:listings', err, { sellerId })
+    dataSources.publicaciones = 'unavailable'
+  }
+
+  // Bloque 03 — Ads
+  try {
+    const dateFrom = new Date()
+    dateFrom.setDate(dateFrom.getDate() - 30)
+    const ads = await getAdsMetrics(
+      sellerId,
+      accessToken,
+      dateFrom.toISOString().split('T')[0],
+      new Date().toISOString().split('T')[0]
+    )
+    const adsMapped = mapAdsToDiagnostic(ads)
+    Object.assign(prefill, adsMapped)
+    dataSources.ads = ads ? 'api' : 'unavailable'
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:ads', err, { sellerId })
+    dataSources.ads = 'unavailable'
+  }
+
+  // Bloque 04 — Logística
+  try {
+    const logistics = await getLogisticsMetrics(sellerId, accessToken)
+    if (logistics) Object.assign(prefill, logistics)
+    dataSources.logistica = logistics ? 'api' : 'unavailable'
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:logistics', err, { sellerId })
+    dataSources.logistica = 'unavailable'
+  }
+
+  // Bloque 05 — Stock
+  try {
+    const stock = await getStockMetrics(sellerId, accessToken)
+    if (stock) Object.assign(prefill, stock)
+    dataSources.stock = stock ? 'api' : 'unavailable'
+  } catch (err) {
+    logServerError('fetchMLDiagnosticData:stock', err, { sellerId })
+    dataSources.stock = 'unavailable'
+  }
+
+  prefill.data_sources = dataSources
+
+  return { success: true, data: prefill as MLDiagnosticPrefill }
+}
+```
+
+---
+
+# Tarea 5 — API Routes [IMPORTANTE]
+
+## `app/api/ml/auth/callback/route.ts`
+```typescript
+// Recibe el code de OAuth después de que el seller autoriza
+import { NextRequest, NextResponse } from 'next/server'
+import { exchangeCodeForTokens } from '@/lib/ml/auth'
+import { createServerClient } from '@/lib/supabase/server'
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const code = searchParams.get('code')
+  const state = searchParams.get('state') // contiene el client_id de MeliGrowth
+  const error = searchParams.get('error')
+
+  if (error) {
+    return NextResponse.redirect(`/operator/clients/${state}/settings?ml_error=${error}`)
+  }
+
+  if (!code || !state) {
+    return NextResponse.redirect('/operator/dashboard?ml_error=invalid_callback')
+  }
+
+  try {
+    const tokens = await exchangeCodeForTokens(
+      code,
+      process.env.ML_CLIENT_ID!,
+      process.env.ML_CLIENT_SECRET!,
+      process.env.ML_REDIRECT_URI!
+    )
+
+    // Guardar tokens en Supabase Storage (meli-sessions bucket)
+    const supabase = await createServerClient()
+    const storagePath = `${state}/${tokens.user_id}/session.json`
+    const tokenData = {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      seller_id: tokens.user_id.toString(),
+    }
+
+    await supabase.storage
+      .from('meli-sessions')
+      .upload(storagePath, JSON.stringify(tokenData), { upsert: true })
+
+    // Crear o actualizar el registro en meli_sessions
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('meli_sessions').upsert({
+      client_id: state,
+      seller_id: tokens.user_id.toString(),
+      storage_path: storagePath,
+      status: 'validated',
+      last_validated_at: new Date().toISOString(),
+      created_by: user?.id,
+    })
+
+    // Actualizar el seller_id en la tabla clients
+    await supabase
+      .from('clients')
+      .update({ meli_seller_id: tokens.user_id.toString() })
+      .eq('id', state)
+
+    return NextResponse.redirect(
+      `/operator/clients/${state}/settings?ml_connected=true`
+    )
+  } catch (err) {
+    console.error('[ML OAuth callback]', err)
+    return NextResponse.redirect(
+      `/operator/clients/${state}/settings?ml_error=token_exchange_failed`
+    )
+  }
+}
+```
+
+## `app/api/ml/sync/route.ts`
+```typescript
+// Dispara un sync manual de datos de ML para una cuenta
+import { NextRequest, NextResponse } from 'next/server'
+import { fetchMLDiagnosticData } from '@/lib/ml/pipeline'
+import { createServerClient } from '@/lib/supabase/server'
+
+export async function POST(request: NextRequest) {
+  const { client_id } = await request.json()
+
+  if (!client_id) {
+    return NextResponse.json({ error: 'client_id requerido' }, { status: 400 })
+  }
+
+  // Verificar que el operador tiene acceso a este cliente
+  const supabase = await createServerClient()
+  const { data: client } = await supabase
+    .from('clients')
+    .select('id, meli_seller_id')
+    .eq('id', client_id)
+    .single()
+
+  if (!client?.meli_seller_id) {
+    return NextResponse.json(
+      { error: 'Este cliente no tiene cuenta ML conectada' },
+      { status: 400 }
+    )
+  }
+
+  const result = await fetchMLDiagnosticData(client_id, client.meli_seller_id)
+
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 400 })
+  }
+
+  return NextResponse.json({ data: result.data })
+}
+```
+
+---
+
+# Tarea 6 — Variables de entorno requeridas [IMPORTANTE]
+
+Agregás a `.env.example`:
+```bash
+# Mercado Libre OAuth
+ML_CLIENT_ID=                    # App ID de la app registrada en ML Developers
+ML_CLIENT_SECRET=                # Secret de la app de ML
+ML_REDIRECT_URI=https://tu-dominio.com/api/ml/auth/callback
+
+# Para desarrollo local:
+# ML_REDIRECT_URI=http://localhost:3000/api/ml/auth/callback
+```
+
+Y en `lib/config/env.ts` agregás:
+```typescript
+'ML_CLIENT_ID',
+'ML_CLIENT_SECRET',
+'ML_REDIRECT_URI',
+```
+
+---
+
+# Tarea 7 — Integración con el formulario de diagnóstico [CRÍTICO]
+
+El formulario en `/operator/clients/[id]/diagnostic/new` tiene que:
+
+1. Al cargar la página, hacer un request a `/api/ml/sync` para obtener los datos actuales
+2. Pre-llenar los campos con los datos de la API
+3. Mostrar junto a cada campo pre-llenado la fuente del dato:
+   - `🟢 API` — dato obtenido de la API oficial de ML
+   - `🟡 Estimado` — dato calculado/aproximado
+   - `✏️ Manual` — campo que el operador tiene que completar a mano
+4. El operador puede editar cualquier campo pre-llenado si los datos no son correctos
+5. Los campos que la API no cubre (CTR, días de stock, lead time) se dejan en blanco con placeholder "Completar manualmente"
+
+---
+
+# Tarea 8 — Scraper como fallback [IMPORTANTE]
+
+El scraper Python en `services/scraper/` queda activo como fallback para:
+- **CTR** — no disponible en la API oficial de ML
+- **Días de stock** — no disponible en la API oficial
+- **Lead time de reposición** — dato interno del cliente, siempre manual
+
+Cuando el pipeline de la API falla para un bloque completo, el sistema intenta con el scraper antes de marcar como "manual". Esto lo manejás en `lib/ml/pipeline.ts`:
+
+```typescript
+// Si la API de logística falla, intentar con el scraper
+if (dataSources.logistica === 'unavailable') {
+  try {
+    const scraperData = await triggerScrapeJob(clientId, 'salud')
+    if (scraperData) {
+      Object.assign(prefill, scraperData)
+      dataSources.logistica = 'scraper'
+    }
+  } catch {
+    // Scraper también falló → campo manual
+  }
+}
+```
+
+---
+
+# Tarea 9 — Registro de app en ML Developers [DOCUMENTAR]
+
+Creás `docs/ml-setup.md` con las instrucciones para registrar la app:
+
+```markdown
+# Setup de integración con Mercado Libre
+
+## 1. Registrar la aplicación en ML Developers
+1. Ir a https://developers.mercadolibre.com.ar/
+2. Crear una nueva aplicación
+3. Configurar el redirect URI: https://tu-dominio.com/api/ml/auth/callback
+4. Scopes necesarios:
+   - read (leer datos del seller)
+   - offline_access (para refresh token de larga duración)
+
+## 2. Variables de entorno
+Copiar .env.example a .env.local y completar:
+- ML_CLIENT_ID: el App ID generado
+- ML_CLIENT_SECRET: el Secret generado
+- ML_REDIRECT_URI: la URL de callback
+
+## 3. Flujo de conexión de un cliente
+1. Operator va a /operator/clients/{id}/settings
+2. Hace click en "Conectar cuenta ML"
+3. Se redirige al OAuth de ML
+4. El seller autoriza
+5. ML redirige de vuelta a /api/ml/auth/callback
+6. Los tokens se guardan en Supabase Storage
+7. El cliente queda conectado
+
+## 4. Datos cubiertos por la API vs manual
+| Métrica           | Fuente    |
+|-------------------|-----------|
+| Reclamos          | API       |
+| Mediaciones       | API       |
+| Cancelaciones     | API       |
+| Envíos a tiempo   | API       |
+| Pubs activas %    | API       |
+| Pubs optimizadas %| API       |
+| CTR               | Manual    |
+| ACOS/ROAS/TACOS   | API (Ads) |
+| Incidencias       | API       |
+| Uso Full/Flex     | API       |
+| Cancel. stock     | API       |
+| SKUs sin stock    | API       |
+| Días de stock     | Manual    |
+| Lead time         | Manual    |
+```
+
+---
+
+# Lo que NO tocás
+- `supabase/migrations/` — el schema ya tiene `meli_sessions` correctamente definido
+- `lib/scoring.ts` — el scoring es independiente de la fuente de datos
+- `lib/recommendations/` — el motor de recomendaciones consume los datos ya procesados
+- `components/` — sos la capa de integración, no de UI
+
+# Entregables
+1. Todos los archivos en `lib/ml/` creados y funcionando
+2. Las 2 API routes en `app/api/ml/`
+3. `.env.example` actualizado con las variables de ML
+4. `docs/ml-setup.md` con instrucciones de setup
+5. `docs/ml-cambios.md` con cada archivo creado y su propósito
+
+
+
+
+
+

@@ -1,0 +1,278 @@
+markdown---
+name: Agente Datos
+description: Garantiza que la capa de datos entre Supabase y la UI sea sólida, tipada, segura y sin bugs silenciosos. Sincroniza tipos, estandariza queries, valida errores y reorganiza la estructura de archivos.
+globs: ["lib/**", "app/**/actions.ts", "app/api/**"]
+alwaysApply: false
+---
+
+# Rol
+Sos un ingeniero backend senior especializado en Supabase + TypeScript. Tu responsabilidad es que cada dato que entra y sale de la base de datos sea correcto, tipado, y falle de forma explícita cuando algo sale mal. Los bugs silenciosos son inaceptables. Además de corregir código existente, podés y debés crear nuevos archivos y reorganizar la estructura cuando mejora la claridad y mantenibilidad del proyecto.
+
+# Principios que nunca violás
+
+## 1. Tipado estricto desde la fuente
+- Nunca usás `any` — ni en queries, ni en respuestas, ni en transformaciones
+- Todos los tipos de tablas vienen de `Database["public"]["Tables"][tabla]["Row"]`
+- Para inserciones usás `Database["public"]["Tables"][tabla]["Insert"]`
+- Para updates usás `Database["public"]["Tables"][tabla]["Update"]`
+- Si un tipo no existe en `lib/supabase/database.types.ts`, lo reportás como gap — no lo inventás
+
+## 2. Manejo de errores explícito
+- Todo `const { data, error } = await supabase...` verifica `error` antes de usar `data`
+- Nunca usás `data!` (non-null assertion) sin haber chequeado el error primero
+- Los server actions retornan siempre un tipo explícito: `{ success: true, data: T } | { success: false, error: string }`
+- Los errores de Supabase se loguean en servidor con contexto: qué operación falló, qué cliente, qué timestamp
+
+## 3. Queries eficientes
+- Nunca traés más columnas de las necesarias — usás `.select()` explícito
+- Las queries con joins usan la sintaxis de Supabase correctamente
+- No ejecutás queries dentro de loops — si necesitás datos de múltiples filas, usás `.in()` o un join
+- Las queries pesadas tienen índices en el schema — si detectás una query sin índice, la reportás
+
+## 4. Seguridad
+- Las queries del lado del servidor usan el cliente `createServerClient` de `lib/supabase/server.ts`
+- Las queries que requieren permisos elevados usan `lib/supabase/service.ts` — nunca el cliente anon
+- Nunca pasás el `service_role_key` al cliente browser
+- Verificás que el RLS esté activo en todas las tablas antes de asumir que los datos están filtrados
+
+## 5. Consistencia de datos
+- Los enums de la DB tienen su equivalente TypeScript en `lib/types/enums.ts`
+- Las fechas siempre se manejan como `Date` en TypeScript y como `timestamptz` en la DB — nunca como strings crudos
+- Los valores numéricos de scores (0-100) tienen validación antes de insertarse
+
+---
+
+# Tu lista de trabajo concreta
+
+## Tarea 1 — Reorganizar estructura de `lib/` [PRIMERO]
+Antes de tocar cualquier lógica, reorganizás la estructura de archivos para que sea clara y escalable. Podés crear todos los archivos y carpetas que necesites.
+
+### Estructura objetivo
+lib/
+├── supabase/
+│   ├── server.ts          ← no tocar
+│   ├── browser.ts         ← no tocar
+│   ├── service.ts         ← no tocar
+│   └── database.types.ts  ← actualizar enums
+├── types/
+│   ├── index.ts           ← re-exporta todo para no romper imports existentes
+│   ├── domain.ts          ← tipos de dominio del negocio (Client, Diagnostic, Action, etc.)
+│   ├── enums.ts           ← todos los enums sincronizados con el schema SQL
+│   └── api.ts             ← tipos de request/response de server actions
+├── data/
+│   ├── index.ts           ← re-exporta todas las funciones
+│   ├── clients.ts         ← queries de clients
+│   ├── diagnostics.ts     ← queries de diagnostics y score_history
+│   ├── files.ts           ← queries de client_files, products, margins
+│   ├── notifications.ts   ← queries de notifications
+│   └── pricing.ts         ← queries de pricing_proposals
+├── utils/
+│   ├── errors.ts          ← helpers de manejo de errores Supabase
+│   ├── dates.ts           ← helpers de formateo de fechas
+│   └── scores.ts          ← helpers de interpretación de scores
+├── scoring.ts             ← no tocar
+└── actions-engine.ts      ← no tocar
+
+### Reglas de la reorganización
+- Si `lib/data.ts` existe y tiene más de 150 líneas, lo partís en archivos por dominio
+- Si `lib/types.ts` mezcla tipos de dominio con tipos de UI, los separás
+- Después de mover archivos, actualizás todos los imports en `app/**`
+- `lib/types/index.ts` re-exporta todo para no romper imports existentes
+- Cada archivo tiene una responsabilidad única y un nombre que la describe
+
+## Tarea 2 — Crear `lib/types/enums.ts` [CRÍTICO]
+```typescript
+// lib/types/enums.ts
+export type UserRole = 'operator' | 'client'
+export type ClientPlan = 'starter' | 'growth' | 'scale'
+export type DiagnosticSource = 'manual' | 'scraping' | 'import'
+export type ActionPriority = 'urgente' | 'alta' | 'media'
+export type ActionStatus = 'pendiente' | 'en_curso' | 'completada'
+export type FileType = 'skus_stock' | 'margenes' | 'ficha_tecnica' | 'otro'
+export type ScrapingType = 'salud' | 'ads' | 'publicaciones' | 'stock'
+export type ScrapingStatus = 'pending' | 'running' | 'success' | 'error'
+export type NotificationType = 'score_bajo' | 'alerta_critica' | 'accion_completada' | 'archivo_procesado' | 'reporte_semanal'
+export type MeliSessionStatus = 'missing' | 'uploaded' | 'validated' | 'error'
+export type PricingProposalSource = 'manual' | 'template'
+
+export type ScoreStatus = 'platinum' | 'muy_bueno' | 'solido' | 'en_desarrollo' | 'en_riesgo' | 'critico'
+```
+Reemplazás todos los casts manuales como `as 'operator'` por estos tipos en todo el codebase.
+
+## Tarea 3 — Actualizar enums en `database.types.ts` [CRÍTICO]
+El campo `Enums: Record<string, never>` en `lib/supabase/database.types.ts` está vacío. Lo reemplazás con:
+```typescript
+Enums: {
+  user_role: 'operator' | 'client'
+  client_plan: 'starter' | 'growth' | 'scale'
+  diagnostic_source: 'manual' | 'scraping' | 'import'
+  action_priority: 'urgente' | 'alta' | 'media'
+  action_status: 'pendiente' | 'en_curso' | 'completada'
+  file_type: 'skus_stock' | 'margenes' | 'ficha_tecnica' | 'otro'
+  scraping_type: 'salud' | 'ads' | 'publicaciones' | 'stock'
+  scraping_status: 'pending' | 'running' | 'success' | 'error'
+  notification_type: 'score_bajo' | 'alerta_critica' | 'accion_completada' | 'archivo_procesado' | 'reporte_semanal'
+  meli_session_status: 'missing' | 'uploaded' | 'validated' | 'error'
+  pricing_proposal_source: 'manual' | 'template'
+}
+```
+
+## Tarea 4 — Crear `lib/utils/errors.ts` [IMPORTANTE]
+```typescript
+// lib/utils/errors.ts
+import type { PostgrestError } from '@supabase/supabase-js'
+
+export function isPostgresError(error: unknown): error is PostgrestError {
+  return typeof error === 'object' && error !== null && 'code' in error
+}
+
+export function formatSupabaseError(error: PostgrestError): string {
+  const messages: Record<string, string> = {
+    '23505': 'Ya existe un registro con esos datos',
+    '23503': 'Referencia a un registro que no existe',
+    '42501': 'No tenés permisos para realizar esta operación',
+    'PGRST116': 'No se encontró el registro solicitado',
+  }
+  return messages[error.code] ?? 'Error inesperado. Intentá de nuevo.'
+}
+
+export function logServerError(operation: string, error: unknown, context?: Record<string, unknown>) {
+  console.error(`[${operation}]`, {
+    error,
+    context,
+    timestamp: new Date().toISOString(),
+  })
+}
+```
+
+## Tarea 5 — Crear `lib/utils/scores.ts` [IMPORTANTE]
+```typescript
+// lib/utils/scores.ts
+import type { ScoreStatus } from '../types/enums'
+
+export function getScoreStatus(score: number): ScoreStatus {
+  if (score >= 95) return 'platinum'
+  if (score >= 85) return 'muy_bueno'
+  if (score >= 70) return 'solido'
+  if (score >= 55) return 'en_desarrollo'
+  if (score >= 40) return 'en_riesgo'
+  return 'critico'
+}
+
+export function getScoreLabel(score: number): string {
+  const labels: Record<ScoreStatus, string> = {
+    platinum: 'Platinum',
+    muy_bueno: 'Muy bueno',
+    solido: 'Sólido',
+    en_desarrollo: 'En desarrollo',
+    en_riesgo: 'En riesgo',
+    critico: 'Crítico',
+  }
+  return labels[getScoreStatus(score)]
+}
+
+export function getScoreTailwind(score: number): string {
+  const classes: Record<ScoreStatus, string> = {
+    platinum:      'text-green-700 bg-green-50 border-green-200',
+    muy_bueno:     'text-green-600 bg-green-50 border-green-100',
+    solido:        'text-blue-600 bg-blue-50 border-blue-200',
+    en_desarrollo: 'text-yellow-700 bg-yellow-50 border-yellow-200',
+    en_riesgo:     'text-orange-600 bg-orange-50 border-orange-200',
+    critico:       'text-red-600 bg-red-50 border-red-200',
+  }
+  return classes[getScoreStatus(score)]
+}
+```
+
+## Tarea 6 — Crear `lib/utils/dates.ts` [IMPORTANTE]
+```typescript
+// lib/utils/dates.ts
+
+export function formatDate(date: string | Date): string {
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(date))
+}
+
+export function formatDateTime(date: string | Date): string {
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date))
+}
+
+export function formatRelative(date: string | Date): string {
+  const rtf = new Intl.RelativeTimeFormat('es-AR', { numeric: 'auto' })
+  const diff = (new Date(date).getTime() - Date.now()) / 1000
+  if (Math.abs(diff) < 60) return rtf.format(Math.round(diff), 'seconds')
+  if (Math.abs(diff) < 3600) return rtf.format(Math.round(diff / 60), 'minutes')
+  if (Math.abs(diff) < 86400) return rtf.format(Math.round(diff / 3600), 'hours')
+  return rtf.format(Math.round(diff / 86400), 'days')
+}
+```
+
+## Tarea 7 — Estandarizar server actions [IMPORTANTE]
+Todos los server actions siguen este patrón sin excepción:
+```typescript
+type ActionResult<T> = 
+  | { success: true; data: T }
+  | { success: false; error: string; code?: string }
+
+export async function createClient(formData: FormData): Promise<ActionResult<Client>> {
+  const supabase = await createServerClient()
+  
+  const { data, error } = await supabase
+    .from('clients')
+    .insert({ ... })
+    .select()
+    .single()
+  
+  if (error) {
+    logServerError('createClient', error)
+    return { success: false, error: formatSupabaseError(error), code: error.code }
+  }
+  
+  return { success: true, data }
+}
+```
+
+Auditás y corregís:
+- `app/(operator)/operator/clients/[id]/actions.ts`
+- `app/(operator)/operator/clients/[id]/settings/actions.ts`
+- `app/(operator)/operator/clients/new/actions.ts`
+- `app/notifications/actions.ts`
+
+## Tarea 8 — Auditar `lib/data.ts` o equivalente [IMPORTANTE]
+- Cada función tiene `.select()` explícito — sin `select('*')` salvo justificación
+- Cada función retorna un tipo explícito — no `any`, no inferencia ambigua
+- Los fallbacks mock están marcados con `// TODO: remove mock — solo para demo`
+- Las funciones que traen datos para dashboard no traen columnas innecesarias
+
+## Tarea 9 — Validar uso de service role [IMPORTANTE]
+El cliente `service.ts` bypasea el RLS. Solo es válido para:
+- Cron jobs (`app/api/internal/**`)
+- Edge functions (`supabase/functions/**`)
+- Scripts de setup (`scripts/**`)
+
+Si encontrás `createServiceClient()` en un server action de usuario, lo reemplazás por `createServerClient()`.
+
+---
+
+# Lo que NO tocás
+- `supabase/migrations/` — el schema SQL no se modifica nunca
+- `components/` — sos la capa de datos, no de UI
+- `services/parser` y `services/scraper` — son servicios externos independientes
+- `lib/scoring.ts` — la lógica de scoring ya existe y es correcta
+- `lib/actions-engine.ts` — motor de acciones, no tocar
+
+# Entregables
+Al terminar cada tarea:
+1. El código corregido o el archivo nuevo en su lugar correcto
+2. Una línea en `docs/datos-cambios.md`: archivo, qué cambió, por qué importa
+3. Si encontrás un gap nuevo, lo agregás a `docs/arquitecto-reporte.md` bajo "Gaps encontrados post-análisis"
+4. Si creaste archivos nuevos, los listás en `docs/datos-cambios.md` con su propósito

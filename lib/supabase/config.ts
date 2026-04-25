@@ -33,6 +33,10 @@ export function isAppEncryptionConfigured() {
   return Boolean(process.env.APP_ENCRYPTION_KEY);
 }
 
+export function isMercadoLibreConfigured() {
+  return Boolean(process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET && process.env.ML_REDIRECT_URI);
+}
+
 export function getSupabaseServiceConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -138,6 +142,27 @@ export function getRuntimeChecks(): RuntimeCheck[] {
       valueHint: process.env.SCRAPER_MOCK_MODE ?? "true"
     },
     {
+      key: "ML_CLIENT_ID",
+      label: "Mercado Libre client ID",
+      group: "Automatización",
+      configured: hasEnv("ML_CLIENT_ID"),
+      requiredFor: "OAuth y sync por API oficial de Mercado Libre"
+    },
+    {
+      key: "ML_CLIENT_SECRET",
+      label: "Mercado Libre client secret",
+      group: "Automatización",
+      configured: hasEnv("ML_CLIENT_SECRET"),
+      requiredFor: "Intercambio y refresh de tokens OAuth"
+    },
+    {
+      key: "ML_REDIRECT_URI",
+      label: "Mercado Libre redirect URI",
+      group: "Automatización",
+      configured: hasEnv("ML_REDIRECT_URI"),
+      requiredFor: "Callback OAuth de conexión de cuentas"
+    },
+    {
       key: "RESEND_API_KEY",
       label: "Resend API key",
       group: "Email",
@@ -173,6 +198,7 @@ export function getRuntimeReadiness() {
   const requiredCoreKeys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "CRON_SECRET", "APP_URL", "APP_ENCRYPTION_KEY"];
   const parserKeys = ["PARSER_SERVICE_URL", "PARSER_SERVICE_SECRET"];
   const scraperKeys = ["SCRAPER_SERVICE_URL", "SCRAPER_SERVICE_SECRET"];
+  const mlKeys = ["ML_CLIENT_ID", "ML_CLIENT_SECRET", "ML_REDIRECT_URI"];
   const emailKeys = ["RESEND_API_KEY", "REPORT_FROM_EMAIL"];
 
   const hasAll = (keys: string[]) => keys.every((key) => checks.find((check) => check.key === key)?.configured);
@@ -183,7 +209,8 @@ export function getRuntimeReadiness() {
     coreReady: hasAll(requiredCoreKeys),
     parserReady: isParserPipelineConfigured(),
     scraperReady: isScraperPipelineConfigured(),
+    mlReady: hasAll(mlKeys),
     emailReady: hasAll(emailKeys),
-    automationReady: hasAll(requiredCoreKeys) && hasAll(parserKeys) && hasAll(scraperKeys)
+    automationReady: hasAll(requiredCoreKeys) && hasAll(parserKeys) && hasAll(scraperKeys) && hasAll(mlKeys)
   };
 }

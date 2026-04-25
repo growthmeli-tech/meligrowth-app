@@ -74,7 +74,7 @@ export async function persistDiagnostic({
       created_by: createdBy ?? null,
       source
     })
-    .select("id")
+    .select("*")
     .single();
 
   if (error || !inserted) {
@@ -160,6 +160,7 @@ export async function persistDiagnostic({
   return {
     ok: true as const,
     diagnosticId: inserted.id as string,
+    diagnostic: inserted as Database["public"]["Tables"]["diagnostics"]["Row"],
     scoreGlobal: scored.scoreGlobal,
     estadoGlobal: scored.estadoGlobal,
     scores: scored.scores,

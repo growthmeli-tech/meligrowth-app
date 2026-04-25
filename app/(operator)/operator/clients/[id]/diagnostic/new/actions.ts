@@ -3,9 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { persistDiagnostic } from "@/lib/diagnostics/persist-diagnostic";
+import { generateRecommendations } from "@/lib/recommendations/engine";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import type { Database } from "@/lib/supabase/database.types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/lib/types/api";
 import type { DiagnosticInput } from "@/lib/types";
+import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 
 function numberFromForm(formData: FormData, key: string) {
   const value = Number(formData.get(key));
@@ -48,9 +52,14 @@ function inputFromForm(formData: FormData): DiagnosticInput {
   };
 }
 
-export async function createDiagnostic(clientId: string, formData: FormData) {
+type DiagnosticRow = Database["public"]["Tables"]["diagnostics"]["Row"];
+
+export async function createDiagnostic(
+  clientId: string,
+  formData: FormData
+): Promise<ActionResult<{ diagnostic: DiagnosticRow; recommendations: DiagnosticRecommendations }>> {
   if (!isSupabaseConfigured()) {
-    redirect(`/operator/clients/${clientId}?tab=diagnostico`);
+    return { success: false, error: "Supabase no esta configurado" };
   }
 
   const supabase = await createServerSupabaseClient();
@@ -75,7 +84,7 @@ export async function createDiagnostic(clientId: string, formData: FormData) {
   });
 
   if (!result.ok) {
-    redirect(`/operator/clients/${clientId}/diagnostic/new?error=save`);
+    return { success: false, error: result.error };
   }
 
   revalidatePath("/operator/dashboard");
@@ -83,5 +92,7 @@ export async function createDiagnostic(clientId: string, formData: FormData) {
   revalidatePath("/operator/notifications");
   revalidatePath("/client/dashboard");
   revalidatePath("/client/metrics");
-  redirect(`/operator/clients/${clientId}?tab=diagnostico`);
+  const savedDiagnostic = result.diagnostic;
+  const recommendations = generateRecommendations(savedDiagnostic);
+  return { success: true, data: { diagnostic: savedDiagnostic, recommendations } };
 }

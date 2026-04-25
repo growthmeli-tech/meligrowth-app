@@ -1,0 +1,904 @@
+name: Agente Motor de Recomendaciones
+description: Construye el cerebro inteligente de Meli Growth — el sistema que transforma métricas brutas en recomendaciones accionables, priorizadas y personalizadas por cuenta. Es lo que diferencia la app de un simple dashboard de datos.
+globs: ["lib/recommendations/**", "lib/scoring.ts", "lib/actions-engine.ts", "app/**/actions.ts", "app/**/page.tsx"]
+alwaysApply: false
+---
+
+# Rol
+Sos el ingeniero de producto senior responsable del motor de inteligencia de Meli Growth. Entendés que la app no es un repositorio de datos — es un sistema que ayuda al equipo a tomar mejores decisiones operativas en menos tiempo. Tu trabajo es construir la capa que transforma números en acciones concretas.
+
+La diferencia entre una app buena y una app excelente en este negocio es simple: **¿el operador sabe exactamente qué hacer cuando abre la cuenta?** Si la respuesta depende de que alguien interprete los números, la app falló. El motor de recomendaciones tiene que responder esa pregunta automáticamente.
+
+Podés y debés crear todos los archivos y carpetas que necesites en `lib/recommendations/`.
+
+---
+
+# El sistema de diagnóstico que tenés que dominar
+
+## Los 5 bloques con sus pesos exactos
+01 Salud        → peso 35% — es el más crítico — afecta directamente la reputación ML
+02 Publicaciones → peso 20%
+03 Ads          → peso 20%
+04 Logística    → peso 15%
+05 Stock        → peso 10%
+
+## La escala de 6 estados con sus acciones estratégicas
+Platinum  (95-100) → CRECIMIENTO  — Escalar con control. Aumentar inversión en top productos.
+Muy bueno (85-94)  → CRECIMIENTO  — Escalar con monitoreo. Escalar ads en top campañas con margen.
+Sólido    (70-84)  → OPTIMIZACIÓN — Optimizar antes de escalar. No escalar ads hasta cerrar brechas.
+En desarrollo (55-69) → CORRECCIÓN — Corregir brechas clave. Frenar ads. Corregir publicaciones primero.
+En riesgo (40-54)  → URGENTE     — Acción correctiva. Atacar los 2 bloques con menor score.
+Crítico   (0-39)   → RESCATE     — Plan de rescate. Pausar toda inversión en ads.
+
+## Los benchmarks reales por métrica — fuente de verdad para las recomendaciones
+
+### Bloque 01 — Salud
+| Métrica | Perfecto (100) | Platinum (95) | Sólido (85) | En desarrollo (70) | En riesgo (55-40) | Crítico (15) |
+|---------|---------------|---------------|-------------|-------------------|------------------|-------------|
+| Reclamos % | <0.2% | 0.2-0.4% | 0.4-0.8% | 0.8-1.0% | 1.0-1.5% | >1.5% |
+| Mediaciones % | <0.05% | 0.05-0.1% | 0.1-0.2% | 0.2-0.4% | 0.4-0.5% | >0.5% |
+| Cancelaciones vendedor % | <0.05% | 0.05-0.1% | 0.1-0.2% | 0.2-0.4% | 0.4-0.5% | >0.5% |
+| Envíos a tiempo % | >98.5% | 97-98.5% | 95-97% | 92-95% | 88-92% | <88% |
+
+### Bloque 02 — Publicaciones
+| Métrica | Perfecto (100) | Platinum (95) | Sólido (85) | En desarrollo (70) | En riesgo (55-40) | Crítico (15) |
+|---------|---------------|---------------|-------------|-------------------|------------------|-------------|
+| % publicaciones activas | >85% | 75-85% | 65-75% | 40-65% | 25-40% | <25% |
+| % publicaciones optimizadas | >85% | 75-85% | 60-75% | 40-60% | 20-40% | <20% |
+| CTR publicaciones % | >3.5% | 2.5-3.5% | 1.5-2.5% | 1.0-1.5% | 0.7-1.0% | <0.7% |
+
+### Bloque 03 — Ads
+| Métrica | Perfecto (100) | Platinum (95) | Sólido (85) | En desarrollo (70) | En riesgo (55-40) | Crítico (15) |
+|---------|---------------|---------------|-------------|-------------------|------------------|-------------|
+| ACOS % | <6% | 6-8% | 8-12% | 12-15% | 15-20% | >20% |
+| ROAS | >8x | 6-8x | 4-6x | 3-4x | 1.5-3x | <1.5x |
+| % ventas por ads | 20-25% | 15-30% | 10-35% | 5-40% | 1-5% | <1% |
+
+### Bloque 04 — Logística
+| Métrica | Perfecto (100) | Platinum (95) | Sólido (85) | En desarrollo (70) | En riesgo (55-40) | Crítico (15) |
+|---------|---------------|---------------|-------------|-------------------|------------------|-------------|
+| % incidencias | <0.3% | 0.3-0.7% | 0.7-1.5% | 1.5-2.5% | 2.5-4% | >4% |
+| Uso Full/Flex % | >80% | 70-80% | 50-70% | 30-50% | 15-30% | <15% |
+| Cancelaciones stock % | <0.2% | 0.2-0.4% | 0.4-0.8% | 0.8-1.5% | 1.5-3% | >3% |
+
+### Bloque 05 — Stock
+| Métrica | Perfecto (100) | Platinum (95) | Sólido (85) | En desarrollo (70) | En riesgo (55-40) | Crítico (15) |
+|---------|---------------|---------------|-------------|-------------------|------------------|-------------|
+| % SKUs sin stock | <1% | 1-2% | 2-5% | 5-8% | 8-15% | >15% |
+| Días de stock | 20-35d | 15-45d | 10-60d | 7-75d | 5-90d | fuera rango |
+| Lead time reposición | <3d | 3-5d | 5-10d | 10-15d | 15-25d | >25d |
+
+## Módulo de Ads — lógica especial
+El bloque de Ads tiene una lógica propia más rica que los otros. Dado el margen pre-ads, gasto, ventas por ads y ventas totales, calcula:
+- **ACOS** = gasto_ads / ventas_ads × 100
+- **ROAS** = ventas_ads / gasto_ads
+- **TACOS** = gasto_ads / ventas_totales × 100
+- **ROAS mínimo (break-even)** = 1 / margen_pre_ads
+- **Diferencial ROAS** = ROAS real − ROAS mínimo
+- **Margen efectivo ads** = margen_pre_ads − ACOS
+- **Contribución neta ads** = ventas_ads × (margen_pre_ads − ACOS)
+
+El **estado de salud de ads** se determina por TACOS vs margen:
+- TACOS < 13% del margen → ✓ Podés escalar más agresivo
+- TACOS 13-65% del margen → 🟡 Aceptable — optimizar antes de escalar
+- TACOS > 65% del margen → 🔴 CRÍTICO — TACOS supera margen. Perdés plata globalmente.
+
+---
+
+# Estructura de archivos — creá todo lo que necesites
+lib/
+└── recommendations/
+├── index.ts              ← punto de entrada, exporta todo
+├── engine.ts             ← orquestador principal del motor
+├── benchmarks.ts         ← todas las tablas de benchmarks como constantes
+├── actions.ts            ← generador de acciones recomendadas por métrica
+├── priorities.ts         ← lógica de priorización de recomendaciones
+├── ads-analyzer.ts       ← análisis específico del módulo de ads
+├── score-interpreter.ts  ← interpreta scores y genera lectura ejecutiva
+└── types.ts              ← tipos TypeScript del sistema de recomendaciones
+
+---
+
+# Tarea 1 — Tipos del sistema [PRIMERO]
+
+```typescript
+// lib/recommendations/types.ts
+
+export type RecommendationPriority = 'urgente' | 'alta' | 'media' | 'baja'
+export type RecommendationCategory = 'salud' | 'publicaciones' | 'ads' | 'logistica' | 'stock'
+export type RecommendationAudience = 'operator' | 'client' | 'both'
+
+export type Recommendation = {
+  id: string                          // identificador único para tracking
+  categoria: RecommendationCategory
+  prioridad: RecommendationPriority
+  titulo: string                      // acción corta: "Revisar proceso post-venta"
+  descripcion: string                 // por qué importa, qué está pasando
+  accion_concreta: string             // qué hacer exactamente: "Llevar reclamos a <0.5%"
+  metrica_afectada: string            // qué métrica mejora si se ejecuta
+  impacto_estimado: string            // cuánto puede mejorar el score
+  benchmark_objetivo: string          // qué valor objetivo hay que alcanzar
+  audiencia: RecommendationAudience   // quién ve esta recomendación
+  bloque: string                      // '01 Salud', '02 Publicaciones', etc.
+}
+
+export type DiagnosticRecommendations = {
+  client_id: string
+  diagnostic_id: string
+  score_global: number
+  estado_global: string
+  estrategia_general: string          // la acción principal según el estado global
+  recomendacion_ads: string           // recomendación específica del módulo de ads
+  recomendaciones: Recommendation[]  // ordenadas por prioridad
+  bloques_criticos: string[]          // los bloques que necesitan atención urgente
+  bloques_saludables: string[]        // los bloques que están bien
+  generated_at: string
+}
+
+export type MetricaBenchmark = {
+  metrica: string
+  valor: number
+  estado: string
+  benchmark_texto: string
+  accion: string
+  objetivo: string
+  brecha: number | null               // diferencia entre valor actual y objetivo
+}
+
+export type AdsAnalysis = {
+  acos: number
+  roas: number
+  tacos: number
+  roas_minimo: number
+  diferencial_roas: number
+  margen_efectivo: number
+  contribucion_neta: number
+  estado_salud: 'critico' | 'aceptable' | 'saludable' | 'escalable' | 'sin_datos'
+  recomendacion: string
+}
+```
+
+---
+
+# Tarea 2 — Benchmarks como constantes [CRÍTICO]
+
+```typescript
+// lib/recommendations/benchmarks.ts
+// Fuente de verdad: Diagnostico_salud_cuenta_v22_10min y v23
+
+import type { RecommendationCategory } from './types'
+
+type BenchmarkLevel = {
+  score: number
+  label: string
+  maxValue?: number
+  minValue?: number
+}
+
+type MetricaBenchmarkDef = {
+  metrica: string
+  unidad: 'pct' | 'x' | 'dias' | 'nivel'
+  higherIsBetter: boolean   // true = más alto es mejor (ej: envíos a tiempo), false = más bajo es mejor (ej: reclamos)
+  levels: BenchmarkLevel[]
+  lectura_practica: string
+  como_obtenerlo: string
+}
+
+export const BENCHMARKS: Record<RecommendationCategory, MetricaBenchmarkDef[]> = {
+  salud: [
+    {
+      metrica: 'reclamos',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 0.2 },
+        { score: 95,  label: 'Platinum',        maxValue: 0.4,  minValue: 0.2 },
+        { score: 85,  label: 'Sólido',          maxValue: 0.8,  minValue: 0.4 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 1.0,  minValue: 0.8 },
+        { score: 55,  label: 'En riesgo',       maxValue: 1.5,  minValue: 1.0 },
+        { score: 15,  label: 'Crítico',         minValue: 1.5 },
+      ],
+      lectura_practica: 'Referencia: <0.5% es buen estándar operativo.',
+      como_obtenerlo: 'Panel de reputación → resumen operativo',
+    },
+    {
+      metrica: 'mediaciones',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 0.05 },
+        { score: 95,  label: 'Platinum',        maxValue: 0.1,  minValue: 0.05 },
+        { score: 85,  label: 'Sólido',          maxValue: 0.2,  minValue: 0.1 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 0.4,  minValue: 0.2 },
+        { score: 55,  label: 'En riesgo',       maxValue: 0.5,  minValue: 0.4 },
+        { score: 15,  label: 'Crítico',         minValue: 0.5 },
+      ],
+      lectura_practica: 'Métrica más sensible. Cada caso suma riesgo reputacional.',
+      como_obtenerlo: 'Panel de reputación',
+    },
+    {
+      metrica: 'cancelaciones_vendedor',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 0.05 },
+        { score: 95,  label: 'Platinum',        maxValue: 0.1,  minValue: 0.05 },
+        { score: 85,  label: 'Sólido',          maxValue: 0.2,  minValue: 0.1 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 0.4,  minValue: 0.2 },
+        { score: 55,  label: 'En riesgo',       maxValue: 0.5,  minValue: 0.4 },
+        { score: 15,  label: 'Crítico',         minValue: 0.5 },
+      ],
+      lectura_practica: 'Señal directa de desorden de stock o proceso.',
+      como_obtenerlo: 'Panel reputación o reportes operativos',
+    },
+    {
+      metrica: 'envios_a_tiempo',
+      unidad: 'pct',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 98.5 },
+        { score: 95,  label: 'Platinum',        minValue: 97,   maxValue: 98.5 },
+        { score: 85,  label: 'Sólido',          minValue: 95,   maxValue: 97 },
+        { score: 70,  label: 'En desarrollo',   minValue: 92,   maxValue: 95 },
+        { score: 55,  label: 'En riesgo',       minValue: 88,   maxValue: 92 },
+        { score: 15,  label: 'Crítico',         maxValue: 88 },
+      ],
+      lectura_practica: 'Cada décima importa en reputación Meli. Penalización activa si baja de 92%.',
+      como_obtenerlo: 'Reputación o módulo logístico',
+    },
+  ],
+
+  publicaciones: [
+    {
+      metrica: 'pubs_activas_pct',
+      unidad: 'pct',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 85 },
+        { score: 95,  label: 'Platinum',        minValue: 75,  maxValue: 85 },
+        { score: 85,  label: 'Sólido',          minValue: 65,  maxValue: 75 },
+        { score: 70,  label: 'En desarrollo',   minValue: 40,  maxValue: 65 },
+        { score: 55,  label: 'En riesgo',       minValue: 25,  maxValue: 40 },
+        { score: 15,  label: 'Crítico',         maxValue: 25 },
+      ],
+      lectura_practica: 'No confundir >60% con perfecto. Objetivo real: >75%.',
+      como_obtenerlo: 'Activas / total publicado',
+    },
+    {
+      metrica: 'pubs_optimizadas_pct',
+      unidad: 'pct',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 85 },
+        { score: 95,  label: 'Platinum',        minValue: 75,  maxValue: 85 },
+        { score: 85,  label: 'Sólido',          minValue: 60,  maxValue: 75 },
+        { score: 70,  label: 'En desarrollo',   minValue: 40,  maxValue: 60 },
+        { score: 55,  label: 'En riesgo',       minValue: 20,  maxValue: 40 },
+        { score: 15,  label: 'Crítico',         maxValue: 20 },
+      ],
+      lectura_practica: 'Catálogo optimizado convierte. Sin optimizar no rinde.',
+      como_obtenerlo: 'Top pubs auditadas con título+fotos+ficha',
+    },
+    {
+      metrica: 'ctr',
+      unidad: 'pct',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 3.5 },
+        { score: 95,  label: 'Platinum',        minValue: 2.5,  maxValue: 3.5 },
+        { score: 85,  label: 'Sólido',          minValue: 1.5,  maxValue: 2.5 },
+        { score: 70,  label: 'En desarrollo',   minValue: 1.0,  maxValue: 1.5 },
+        { score: 55,  label: 'En riesgo',       minValue: 0.7,  maxValue: 1.0 },
+        { score: 15,  label: 'Crítico',         maxValue: 0.7 },
+      ],
+      lectura_practica: 'Cada 0.5% de CTR representa impacto real en ventas.',
+      como_obtenerlo: 'Mercado Ads o reportes de tráfico',
+    },
+  ],
+
+  ads: [
+    {
+      metrica: 'acos',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 6 },
+        { score: 95,  label: 'Platinum',        maxValue: 8,   minValue: 6 },
+        { score: 85,  label: 'Sólido',          maxValue: 12,  minValue: 8 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 15,  minValue: 12 },
+        { score: 55,  label: 'En riesgo',       maxValue: 20,  minValue: 15 },
+        { score: 15,  label: 'Crítico',         minValue: 20 },
+      ],
+      lectura_practica: 'Bajo es mejor. >15% erosiona margen directamente.',
+      como_obtenerlo: 'Mercado Ads → dashboard campañas',
+    },
+    {
+      metrica: 'roas',
+      unidad: 'x',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 8 },
+        { score: 95,  label: 'Platinum',        minValue: 6,   maxValue: 8 },
+        { score: 85,  label: 'Sólido',          minValue: 4,   maxValue: 6 },
+        { score: 70,  label: 'En desarrollo',   minValue: 3,   maxValue: 4 },
+        { score: 55,  label: 'En riesgo',       minValue: 1.5, maxValue: 3 },
+        { score: 15,  label: 'Crítico',         maxValue: 1.5 },
+      ],
+      lectura_practica: 'Alto es mejor. <4x frena el escalado de inversión.',
+      como_obtenerlo: 'Mercado Ads → dashboard campañas',
+    },
+    {
+      metrica: 'ventas_ads_pct',
+      unidad: 'pct',
+      higherIsBetter: true,  // hasta cierto punto — sweet spot es 20-25%
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 20,  maxValue: 25 },
+        { score: 95,  label: 'Platinum',        minValue: 15,  maxValue: 30 },
+        { score: 85,  label: 'Sólido',          minValue: 10,  maxValue: 35 },
+        { score: 70,  label: 'En desarrollo',   minValue: 5,   maxValue: 40 },
+        { score: 55,  label: 'En riesgo',       minValue: 1,   maxValue: 5 },
+        { score: 15,  label: 'Crítico',         maxValue: 1 },
+      ],
+      lectura_practica: 'Sweet spot 20-25%. Fuera de rango = dependencia o ausencia de ads.',
+      como_obtenerlo: 'Ventas ads / ventas totales',
+    },
+  ],
+
+  logistica: [
+    {
+      metrica: 'incidencias_pct',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 0.3 },
+        { score: 95,  label: 'Platinum',        maxValue: 0.7,  minValue: 0.3 },
+        { score: 85,  label: 'Sólido',          maxValue: 1.5,  minValue: 0.7 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 2.5,  minValue: 1.5 },
+        { score: 55,  label: 'En riesgo',       maxValue: 4,    minValue: 2.5 },
+        { score: 15,  label: 'Crítico',         minValue: 4 },
+      ],
+      lectura_practica: 'Cada incidencia tiene costo oculto además del reputacional.',
+      como_obtenerlo: 'Reporte operativo o reputación',
+    },
+    {
+      metrica: 'uso_full_flex_pct',
+      unidad: 'pct',
+      higherIsBetter: true,
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 80 },
+        { score: 95,  label: 'Platinum',        minValue: 70,  maxValue: 80 },
+        { score: 85,  label: 'Sólido',          minValue: 50,  maxValue: 70 },
+        { score: 70,  label: 'En desarrollo',   minValue: 30,  maxValue: 50 },
+        { score: 55,  label: 'En riesgo',       minValue: 15,  maxValue: 30 },
+        { score: 15,  label: 'Crítico',         maxValue: 15 },
+      ],
+      lectura_practica: 'Objetivo real: >70%. >60% no es perfecto.',
+      como_obtenerlo: 'Pedidos Full/Flex / pedidos totales',
+    },
+    {
+      metrica: 'cancelaciones_stock_pct',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 0.2 },
+        { score: 95,  label: 'Platinum',        maxValue: 0.4,  minValue: 0.2 },
+        { score: 85,  label: 'Sólido',          maxValue: 0.8,  minValue: 0.4 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 1.5,  minValue: 0.8 },
+        { score: 55,  label: 'En riesgo',       maxValue: 3,    minValue: 1.5 },
+        { score: 15,  label: 'Crítico',         minValue: 3 },
+      ],
+      lectura_practica: 'Señal operativa directa. Afecta ranking y confianza.',
+      como_obtenerlo: 'Conciliación de cancelaciones',
+    },
+  ],
+
+  stock: [
+    {
+      metrica: 'skus_sin_stock_pct',
+      unidad: 'pct',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 1 },
+        { score: 95,  label: 'Platinum',        maxValue: 2,   minValue: 1 },
+        { score: 85,  label: 'Sólido',          maxValue: 5,   minValue: 2 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 8,   minValue: 5 },
+        { score: 55,  label: 'En riesgo',       maxValue: 15,  minValue: 8 },
+        { score: 15,  label: 'Crítico',         minValue: 15 },
+      ],
+      lectura_practica: 'Quiebre sostenido destruye ranking. Objetivo: <2%.',
+      como_obtenerlo: 'Exportar catálogo → sin stock / total',
+    },
+    {
+      metrica: 'dias_stock',
+      unidad: 'dias',
+      higherIsBetter: true,  // con sweet spot — extremos son malos
+      levels: [
+        { score: 100, label: 'Perfecto',        minValue: 20,  maxValue: 35 },
+        { score: 95,  label: 'Platinum',        minValue: 15,  maxValue: 45 },
+        { score: 85,  label: 'Sólido',          minValue: 10,  maxValue: 60 },
+        { score: 70,  label: 'En desarrollo',   minValue: 7,   maxValue: 75 },
+        { score: 55,  label: 'En riesgo',       minValue: 5,   maxValue: 90 },
+        { score: 15,  label: 'Crítico',         maxValue: 5 },
+      ],
+      lectura_practica: 'Centro del rango = perfecto. Extremos = riesgo.',
+      como_obtenerlo: 'Stock actual / (ventas 30d / 30)',
+    },
+    {
+      metrica: 'lead_time_reposicion',
+      unidad: 'dias',
+      higherIsBetter: false,
+      levels: [
+        { score: 100, label: 'Perfecto',        maxValue: 3 },
+        { score: 95,  label: 'Platinum',        maxValue: 5,   minValue: 3 },
+        { score: 85,  label: 'Sólido',          maxValue: 10,  minValue: 5 },
+        { score: 70,  label: 'En desarrollo',   maxValue: 15,  minValue: 10 },
+        { score: 55,  label: 'En riesgo',       maxValue: 25,  minValue: 15 },
+        { score: 15,  label: 'Crítico',         minValue: 25 },
+      ],
+      lectura_practica: 'A menor lead time, más control y capacidad de escalar.',
+      como_obtenerlo: 'Circuito de compras/reposición',
+    },
+  ],
+}
+```
+
+---
+
+# Tarea 3 — Generador de acciones recomendadas [CRÍTICO]
+
+```typescript
+// lib/recommendations/actions.ts
+// Para cada métrica en cada estado, genera la recomendación concreta
+
+export const ACCIONES_POR_METRICA: Record<string, Record<string, string>> = {
+  // Bloque 01 — Salud
+  reclamos: {
+    critico:       'URGENTE: reunión inmediata. Plan de contingencia. Revisar todos los pedidos de los últimos 7 días.',
+    en_riesgo:     'Revisar proceso post-venta. Auditar causas de reclamos. Objetivo: bajar a <0.5% esta semana.',
+    en_desarrollo: 'Revisar proceso de atención. Identificar los 3 motivos de reclamo más frecuentes y atacarlos.',
+    solido:        'Mantener proceso. Monitorear semanalmente.',
+    muy_bueno:     'Excelente. Documentar el proceso que lo logra para replicar.',
+    platinum:      'Perfecto. Mantener y monitorear.',
+  },
+  mediaciones: {
+    critico:       'URGENTE: escalar internamente. Cada mediación activa afecta el ranking. Resolver en 24hs.',
+    en_riesgo:     'Auditar causas. Implementar respuesta proactiva antes de que lleguen a mediación.',
+    en_desarrollo: 'Llevar a <0.2%: auditar causas y ajustar flujo de atención al cliente.',
+    solido:        'Mantener proceso de atención. Revisar mensualmente.',
+    muy_bueno:     'Muy bien. Proceso de atención funcionando.',
+    platinum:      'Perfecto. Mantener.',
+  },
+  cancelaciones_vendedor: {
+    critico:       'URGENTE: revisar stock real vs publicado en TODOS los SKUs activos. Pausar publicaciones sin stock.',
+    en_riesgo:     'Revisar stock y proceso de publicación. Sincronizar inventario antes de aceptar pedidos.',
+    en_desarrollo: 'Llevar a <0.2%: revisar proceso de aceptación de pedidos y sincronización de stock.',
+    solido:        'Mantener sincronización de stock. Revisar semanalmente.',
+    muy_bueno:     'Proceso sólido. Mantener.',
+    platinum:      'Perfecto.',
+  },
+  envios_a_tiempo: {
+    critico:       'CRÍTICO: penalización activa posible. Revisar SLA con logística. Escalar operativamente de inmediato.',
+    en_riesgo:     'Urgente: penalización posible. Revisar tiempos de preparación y despacho.',
+    en_desarrollo: 'Mejorar proceso de despacho. Objetivo >95%. Revisar los pedidos demorados de última semana.',
+    solido:        'Buen nivel. Optimizar tiempos de preparación para llegar a >97%.',
+    muy_bueno:     'Muy bien. Mantener y monitorear.',
+    platinum:      'Perfecto. Mantener.',
+  },
+
+  // Bloque 02 — Publicaciones
+  pubs_activas_pct: {
+    critico:       'URGENTE: gran parte del catálogo inactivo. Auditar y reactivar los top 20 SKUs por ventas.',
+    en_riesgo:     'Foco urgente: reactivar publicaciones pausadas. Muchos SKUs sin exposición.',
+    en_desarrollo: 'Auditar catálogo: reactivar top SKUs pausados. Objetivo >65%.',
+    solido:        'Revisar pausadas para llegar a >75%. Foco en SKUs con potencial.',
+    muy_bueno:     'Buen nivel. Revisar las que faltan para llegar a Platinum.',
+    platinum:      'Catálogo activo completo. Mantener.',
+  },
+  pubs_optimizadas_pct: {
+    critico:       'Catálogo sin optimizar: conversión muy baja. Priorizar título, fotos y ficha técnica de top 10 SKUs.',
+    en_riesgo:     'Optimizar urgente: al menos los 20 SKUs de mayor volumen de visitas.',
+    en_desarrollo: 'Optimizar más publicaciones. Objetivo >75%. Foco en título y fotos.',
+    solido:        'Cerrar brecha: llevar a >80%. Revisar publicaciones con título genérico.',
+    muy_bueno:     'Casi perfecto. Revisar las últimas sin optimizar.',
+    platinum:      'Catálogo optimizado. Mantener.',
+  },
+  ctr: {
+    critico:       'CTR muy bajo: el catálogo no atrae clicks. Revisar fotos, título y precio. Comparar con competencia.',
+    en_riesgo:     'Mejorar imagen principal y título de las 10 publicaciones con más impresiones.',
+    en_desarrollo: 'Llevar a >2.5%: mejorar imagen y título de top publicaciones.',
+    solido:        'Buen CTR. Testear variaciones de imagen principal en top SKUs.',
+    muy_bueno:     'Muy bien. Identificar qué elementos generan el CTR alto y replicar.',
+    platinum:      'CTR excelente. Mantener y replicar en nuevas publicaciones.',
+  },
+
+  // Bloque 03 — Ads
+  acos: {
+    critico:       'ACOS destruye margen. Pausar campañas no rentables. Dejar solo las que ROAS > break-even.',
+    en_riesgo:     'ACOS erosiona margen. Revisar pujas en keywords caras. Objetivo ACOS <15%.',
+    en_desarrollo: 'ACOS consumiendo >12% del margen. Optimizar segmentación y pujas.',
+    solido:        'Aceptable. Reducir ACOS a <8% en campañas principales.',
+    muy_bueno:     'Eficiente. Escalar con control en campañas validadas.',
+    platinum:      'ACOS óptimo. Escalar agresivo en top campañas.',
+  },
+  roas: {
+    critico:       'ROAS por debajo del break-even. Cada peso en ads destruye margen. Pausar y rediseñar campañas.',
+    en_riesgo:     'ROAS marginal. Frenar escalado. Optimizar campañas antes de invertir más.',
+    en_desarrollo: 'ROAS aceptable pero por debajo del nivel escalable. Optimizar mix de campañas.',
+    solido:        'ROAS saludable. Escalar con control en top campañas validadas.',
+    muy_bueno:     'Excelente ROAS. Escalar en campañas con mayor margen.',
+    platinum:      'ROAS óptimo. Escalar agresivo. Buscar nuevas campañas.',
+  },
+
+  // Bloque 04 — Logística
+  incidencias_pct: {
+    critico:       'Incidencias críticas. Auditar causas inmediatamente. Revisar proceso de empaque y despacho.',
+    en_riesgo:     'Reducir incidencias urgente. Auditar las causas de los últimos 30 días.',
+    en_desarrollo: 'Llevar a <0.7%. Auditar causas de incidencia. Priorizar los SKUs con más problemas.',
+    solido:        'Buen nivel. Llevar a <0.7% para llegar a Platinum.',
+    muy_bueno:     'Muy bien. Mantener proceso de empaque y despacho.',
+    platinum:      'Perfecto. Mantener.',
+  },
+  uso_full_flex_pct: {
+    critico:       'Casi sin Full/Flex: alto costo logístico y menor exposición en ML. Plan de migración urgente.',
+    en_riesgo:     'Bajo uso de Full/Flex. Identificar los SKUs más vendidos y enviarlos a Full.',
+    en_desarrollo: 'Llevar a >70%. Enviar más SKUs rentables a Full.',
+    solido:        'Llevar a >70%. Identificar próximos SKUs para enviar a Full.',
+    muy_bueno:     'Buen nivel. Llevar a >80% para Platinum.',
+    platinum:      'Excelente cobertura Full/Flex. Mantener.',
+  },
+  cancelaciones_stock_pct: {
+    critico:       'URGENTE: cancelaciones por stock destruyen ranking. Verificar y actualizar stock en tiempo real.',
+    en_riesgo:     'Mejorar reposición urgente. Sincronizar stock antes de publicar.',
+    en_desarrollo: 'Mejorar reposición de top SKUs. Llevar a <0.8%.',
+    solido:        'Buen nivel. Optimizar proceso de reposición para llevar a <0.4%.',
+    muy_bueno:     'Proceso sólido. Mantener.',
+    platinum:      'Perfecto.',
+  },
+
+  // Bloque 05 — Stock
+  skus_sin_stock_pct: {
+    critico:       'URGENTE: muchos SKUs sin stock. Reponer inmediatamente los top 20 por ventas.',
+    en_riesgo:     'Reponer urgente. Identificar y reponer los SKUs sin stock con mayor rotación.',
+    en_desarrollo: 'Llevar a <2%. Reponer SKUs sin stock detectados. Revisar proceso de reposición.',
+    solido:        'Llevar a <2%. Reponer detectados e identificar próximos en agotarse.',
+    muy_bueno:     'Buen control de stock. Llevar a <1% para Platinum.',
+    platinum:      'Stock completo. Mantener.',
+  },
+  dias_stock: {
+    critico:       'Stock crítico: riesgo de quiebre inminente. Reponer de emergencia los SKUs con <7 días.',
+    en_riesgo:     'Stock bajo. Reponer en las próximas 48hs para evitar quiebres.',
+    en_desarrollo: 'Stock ajustado. Llevar al rango 20-35 días para mayor seguridad.',
+    solido:        'Stock aceptable. Mantener en rango 20-35 días.',
+    muy_bueno:     'Buen nivel de stock. Mantener.',
+    platinum:      'Stock óptimo. Mantener en rango.',
+  },
+  lead_time_reposicion: {
+    critico:       'Lead time muy alto. Planificar reposición con anticipación o cambiar proveedor.',
+    en_riesgo:     'Reducir lead time. Negociar tiempos de entrega más cortos con proveedores.',
+    en_desarrollo: 'Llevar a <5 días: optimizar proceso con proveedor.',
+    solido:        'Aceptable. Optimizar para llegar a <5 días.',
+    muy_bueno:     'Buen lead time. Mantener acuerdo con proveedor.',
+    platinum:      'Lead time óptimo.',
+  },
+}
+```
+
+---
+
+# Tarea 4 — Motor principal [CRÍTICO]
+
+```typescript
+// lib/recommendations/engine.ts
+import { BENCHMARKS } from './benchmarks'
+import { ACCIONES_POR_METRICA } from './actions'
+import type { DiagnosticRecommendations, Recommendation, AdsAnalysis } from './types'
+import type { Database } from '@/lib/supabase/database.types'
+import { getScoreStatus } from '@/lib/utils/scores'
+
+type DiagnosticRow = Database['public']['Tables']['diagnostics']['Row']
+
+const ESTRATEGIA_POR_ESTADO: Record<string, { accion: string; operador: string; ads: string; prioridad: string }> = {
+  platinum:      { accion: 'Escalar con control',          operador: 'Mantener optimización. Detectar nuevas oportunidades.', ads: 'Aumentar inversión en top productos.',          prioridad: 'CRECIMIENTO' },
+  muy_bueno:     { accion: 'Escalar con monitoreo',        operador: 'Cerrar las últimas brechas. Sostener lo que funciona.', ads: 'Escalar ads en top campañas con margen.',      prioridad: 'CRECIMIENTO' },
+  solido:        { accion: 'Optimizar antes de escalar',   operador: 'Priorizar 3 publicaciones con mayor impacto.',         ads: 'No escalar ads hasta cerrar brechas.',         prioridad: 'OPTIMIZACIÓN' },
+  en_desarrollo: { accion: 'Corregir brechas clave',       operador: 'Foco en top 20% SKUs con problemas detectados.',       ads: 'Frenar ads. Corregir publicaciones primero.',  prioridad: 'CORRECCIÓN' },
+  en_riesgo:     { accion: 'Acción correctiva urgente',    operador: 'Atacar los 2 bloques con menor score.',                ads: 'Pausar escalado. Mantener solo lo rentable.',  prioridad: 'URGENTE' },
+  critico:       { accion: 'Diagnóstico y plan de rescate',operador: 'No tocar más hasta tener plan validado.',              ads: 'Pausar toda inversión en ads.',                prioridad: 'RESCATE' },
+}
+
+export function generateRecommendations(diagnostic: DiagnosticRow): DiagnosticRecommendations {
+  const scoreStatus = getScoreStatus(diagnostic.score_global)
+  const estrategia = ESTRATEGIA_POR_ESTADO[scoreStatus]
+  const recomendaciones: Recommendation[] = []
+
+  // Analizar cada métrica y generar recomendación
+  const metricas = [
+    // Salud
+    { campo: 'reclamos',               valor: diagnostic.reclamos,               categoria: 'salud',         peso: 0.30 },
+    { campo: 'mediaciones',            valor: diagnostic.mediaciones,            categoria: 'salud',         peso: 0.25 },
+    { campo: 'cancelaciones_vendedor', valor: diagnostic.cancelaciones_vendedor, categoria: 'salud',         peso: 0.25 },
+    { campo: 'envios_a_tiempo',        valor: diagnostic.envios_a_tiempo,        categoria: 'salud',         peso: 0.20 },
+    // Publicaciones
+    { campo: 'pubs_activas_pct',       valor: diagnostic.pubs_activas_pct,       categoria: 'publicaciones', peso: 0.40 },
+    { campo: 'pubs_optimizadas_pct',   valor: diagnostic.pubs_optimizadas_pct,   categoria: 'publicaciones', peso: 0.35 },
+    { campo: 'ctr',                    valor: diagnostic.ctr,                    categoria: 'publicaciones', peso: 0.25 },
+    // Logística
+    { campo: 'incidencias_pct',        valor: diagnostic.incidencias_pct,        categoria: 'logistica',     peso: 0.40 },
+    { campo: 'uso_full_flex_pct',      valor: diagnostic.uso_full_flex_pct,      categoria: 'logistica',     peso: 0.30 },
+    { campo: 'cancelaciones_stock_pct',valor: diagnostic.cancelaciones_stock_pct,categoria: 'logistica',     peso: 0.30 },
+    // Stock
+    { campo: 'skus_sin_stock_pct',     valor: diagnostic.skus_sin_stock_pct,     categoria: 'stock',         peso: 0.40 },
+    { campo: 'dias_stock',             valor: diagnostic.dias_stock,             categoria: 'stock',         peso: 0.35 },
+    { campo: 'lead_time_reposicion',   valor: diagnostic.lead_time_reposicion,   categoria: 'stock',         peso: 0.25 },
+  ] as const
+
+  for (const metrica of metricas) {
+    if (metrica.valor === null || metrica.valor === undefined) continue
+
+    const scoreMetrica = calcularScoreMetrica(metrica.campo, metrica.valor)
+    const estadoMetrica = getScoreStatus(scoreMetrica)
+    const accion = ACCIONES_POR_METRICA[metrica.campo]?.[estadoMetrica]
+    if (!accion) continue
+
+    // Solo generar recomendación si hay brecha mejorable (no Platinum)
+    if (estadoMetrica === 'platinum') continue
+
+    const prioridad = getPrioridadRecomendacion(estadoMetrica, metrica.categoria as string)
+    const benchmark = getBenchmarkTexto(metrica.campo, metrica.valor)
+
+    recomendaciones.push({
+      id: `${diagnostic.id}-${metrica.campo}`,
+      categoria: metrica.categoria as any,
+      prioridad,
+      titulo: getTituloMetrica(metrica.campo),
+      descripcion: getDescripcionMetrica(metrica.campo, metrica.valor, estadoMetrica),
+      accion_concreta: accion,
+      metrica_afectada: metrica.campo,
+      impacto_estimado: calcularImpactoEstimado(metrica.campo, metrica.peso, scoreMetrica),
+      benchmark_objetivo: benchmark.objetivo,
+      audiencia: getAudienciaRecomendacion(metrica.campo),
+      bloque: getBloqueLabel(metrica.categoria as string),
+    })
+  }
+
+  // Análisis de Ads si hay datos
+  const adsAnalysis = diagnostic.gasto_ads && diagnostic.ventas_ads && diagnostic.ventas_totales
+    ? analyzeAds({
+        margen_pre_ads: diagnostic.margen_pre_ads ?? 0,
+        gasto_ads: diagnostic.gasto_ads,
+        ventas_ads: diagnostic.ventas_ads,
+        ventas_totales: diagnostic.ventas_totales,
+      })
+    : null
+
+  if (adsAnalysis) {
+    const adsRecomendacion = generarRecomendacionAds(adsAnalysis, diagnostic.id)
+    if (adsRecomendacion) recomendaciones.push(adsRecomendacion)
+  }
+
+  // Ordenar por prioridad
+  const ordenPrioridad = { urgente: 0, alta: 1, media: 2, baja: 3 }
+  recomendaciones.sort((a, b) => ordenPrioridad[a.prioridad] - ordenPrioridad[b.prioridad])
+
+  const bloquesCriticos = getBloquesCriticos(diagnostic)
+  const bloquesSaludables = getBloquesSaludables(diagnostic)
+
+  return {
+    client_id: diagnostic.client_id,
+    diagnostic_id: diagnostic.id,
+    score_global: diagnostic.score_global,
+    estado_global: diagnostic.estado_global,
+    estrategia_general: estrategia.accion,
+    recomendacion_ads: adsAnalysis?.recomendacion ?? estrategia.ads,
+    recomendaciones,
+    bloques_criticos: bloquesCriticos,
+    bloques_saludables: bloquesSaludables,
+    generated_at: new Date().toISOString(),
+  }
+}
+
+export function analyzeAds(input: {
+  margen_pre_ads: number
+  gasto_ads: number
+  ventas_ads: number
+  ventas_totales: number
+}): AdsAnalysis {
+  const { margen_pre_ads, gasto_ads, ventas_ads, ventas_totales } = input
+
+  if (ventas_ads === 0 || gasto_ads === 0) {
+    return {
+      acos: 0, roas: 0, tacos: 0, roas_minimo: 0,
+      diferencial_roas: 0, margen_efectivo: 0, contribucion_neta: 0,
+      estado_salud: 'sin_datos',
+      recomendacion: 'Sin datos de ads. Activar publicidad para aumentar visibilidad.',
+    }
+  }
+
+  const acos = (gasto_ads / ventas_ads) * 100
+  const roas = ventas_ads / gasto_ads
+  const tacos = (gasto_ads / ventas_totales) * 100
+  const roas_minimo = margen_pre_ads > 0 ? 1 / (margen_pre_ads / 100) : 0
+  const diferencial_roas = roas - roas_minimo
+  const margen_efectivo = margen_pre_ads - acos
+  const contribucion_neta = ventas_ads * (margen_efectivo / 100)
+
+  // Estado de salud basado en TACOS vs margen
+  const tacos_vs_margen = margen_pre_ads > 0 ? tacos / margen_pre_ads : 1
+  let estado_salud: AdsAnalysis['estado_salud']
+  let recomendacion: string
+
+  if (tacos_vs_margen > 0.65) {
+    estado_salud = 'critico'
+    recomendacion = '🔴 CRÍTICO — TACOS supera el margen. Perdés plata globalmente. Reducir inversión en ads de inmediato.'
+  } else if (diferencial_roas < 0) {
+    estado_salud = 'critico'
+    recomendacion = '🔴 CRÍTICO — ROAS por debajo del break-even. Cada peso en ads destruye margen.'
+  } else if (tacos_vs_margen > 0.40) {
+    estado_salud = 'aceptable'
+    recomendacion = '🟡 ACEPTABLE — Margen ajustado. Optimizar campañas antes de escalar.'
+  } else if (roas >= 6 && tacos_vs_margen < 0.13) {
+    estado_salud = 'escalable'
+    recomendacion = '🚀 ESCALAR CON CONTROL — ROAS saludable. Aumentar inversión en top campañas validadas.'
+  } else {
+    estado_salud = 'saludable'
+    recomendacion = '✓ Podés escalar más agresivo — TACOS muy por debajo del margen.'
+  }
+
+  return { acos, roas, tacos, roas_minimo, diferencial_roas, margen_efectivo, contribucion_neta, estado_salud, recomendacion }
+}
+```
+
+---
+
+# Tarea 5 — API de recomendaciones para la UI [IMPORTANTE]
+
+Creás una server action y una query en `lib/data/recommendations.ts` para que la UI pueda consumir las recomendaciones:
+
+```typescript
+// lib/data/recommendations.ts
+import { createServerClient } from '@/lib/supabase/server'
+import { generateRecommendations } from '@/lib/recommendations/engine'
+import { logServerError } from '@/lib/utils/errors'
+import type { ActionResult } from '@/lib/types/api'
+import type { DiagnosticRecommendations } from '@/lib/recommendations/types'
+
+// Genera recomendaciones para el diagnóstico más reciente de un cliente
+export async function getClientRecommendations(
+  clientId: string
+): Promise<ActionResult<DiagnosticRecommendations>> {
+  const supabase = await createServerClient()
+
+  const { data: diagnostic, error } = await supabase
+    .from('diagnostics')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('date', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (error) {
+    logServerError('getClientRecommendations', error, { clientId })
+    return { success: false, error: 'No se encontró diagnóstico para este cliente' }
+  }
+
+  const recommendations = generateRecommendations(diagnostic)
+  return { success: true, data: recommendations }
+}
+
+// Genera recomendaciones para un diagnóstico específico (para mostrar post-guardado)
+export async function getRecommendationsForDiagnostic(
+  diagnosticId: string
+): Promise<ActionResult<DiagnosticRecommendations>> {
+  const supabase = await createServerClient()
+
+  const { data: diagnostic, error } = await supabase
+    .from('diagnostics')
+    .select('*')
+    .eq('id', diagnosticId)
+    .single()
+
+  if (error) {
+    logServerError('getRecommendationsForDiagnostic', error, { diagnosticId })
+    return { success: false, error: 'Diagnóstico no encontrado' }
+  }
+
+  const recommendations = generateRecommendations(diagnostic)
+  return { success: true, data: recommendations }
+}
+
+// Genera recomendaciones urgentes de todas las cuentas del operator
+// Para el panel de alertas de Nacho y el dashboard de Luciano
+export async function getUrgentRecommendationsForOperator(
+  operatorId: string
+): Promise<ActionResult<Array<{ client_name: string; client_id: string; recommendations: DiagnosticRecommendations }>>> {
+  const supabase = await createServerClient()
+
+  // Traer los diagnósticos más recientes de todos los clientes activos
+  const { data: clients, error } = await supabase
+    .from('clients')
+    .select(`
+      id,
+      name,
+      diagnostics (*)
+    `)
+    .eq('operator_id', operatorId)
+    .eq('active', true)
+    .order('date', { foreignTable: 'diagnostics', ascending: false })
+    .limit(1, { foreignTable: 'diagnostics' })
+
+  if (error) {
+    logServerError('getUrgentRecommendationsForOperator', error, { operatorId })
+    return { success: false, error: 'Error al cargar recomendaciones urgentes' }
+  }
+
+  const results = (clients ?? [])
+    .filter(c => c.diagnostics && c.diagnostics.length > 0)
+    .map(c => ({
+      client_name: c.name,
+      client_id: c.id,
+      recommendations: generateRecommendations(c.diagnostics[0] as any),
+    }))
+    .filter(r => r.recommendations.recomendaciones.some(rec => rec.prioridad === 'urgente' || rec.prioridad === 'alta'))
+    .sort((a, b) => a.recommendations.score_global - b.recommendations.score_global) // peores primero
+
+  return { success: true, data: results }
+}
+```
+
+---
+
+# Tarea 6 — Integración con el formulario de diagnóstico [IMPORTANTE]
+
+Después de que Joaquín guarda un diagnóstico nuevo, la app tiene que mostrar inmediatamente las recomendaciones generadas. Modificás `app/(operator)/operator/clients/[id]/diagnostic/new/actions.ts` para que retorne las recomendaciones junto con el diagnóstico guardado:
+
+```typescript
+// Al final del action de guardado, después de persistir:
+const recommendations = generateRecommendations(savedDiagnostic)
+return { success: true, data: { diagnostic: savedDiagnostic, recommendations } }
+```
+
+---
+
+# Tarea 7 — Tests unitarios del motor [IMPORTANTE]
+
+Creás `tests/unit/lib/recommendations/engine.test.ts` con estos casos clave:
+
+```typescript
+describe('Motor de Recomendaciones', () => {
+  describe('generateRecommendations', () => {
+    it('genera recomendación urgente cuando envíos a tiempo < 88%')
+    it('no genera recomendación para métricas en estado Platinum')
+    it('ordena recomendaciones por prioridad — urgentes primero')
+    it('incluye análisis de ads cuando hay datos de ads')
+    it('no incluye análisis de ads cuando gasto_ads es null')
+    it('marca como urgente cualquier métrica de Salud en estado crítico')
+  })
+
+  describe('analyzeAds', () => {
+    it('estado CRÍTICO cuando TACOS > 65% del margen')
+    it('estado ESCALABLE cuando ROAS > 6x y TACOS < 13% del margen')
+    it('estado SIN_DATOS cuando gasto_ads o ventas_ads es 0')
+    it('ROAS mínimo = 1 / margen_pre_ads')
+    it('diferencial ROAS positivo = ganás, negativo = perdés')
+  })
+
+  describe('casos reales de la planilla', () => {
+    it('diagnóstico v23 con TACOS 66.7% → estado CRÍTICO en ads')
+    it('diagnóstico con ROAS 5x y TACOS 4% → estado SALUDABLE')
+    it('cuenta con reclamos 5% → recomendación urgente en Salud')
+  })
+})
+```
+
+---
+
+# Lo que NO tocás
+- `supabase/migrations/` — el schema SQL no se modifica
+- `lib/scoring.ts` — la lógica de scoring ya existe, la complementás, no la reemplazás
+- `components/` — sos la capa de lógica, no de UI
+
+# Entregables
+1. Todos los archivos en `lib/recommendations/` creados y funcionando
+2. `lib/data/recommendations.ts` con las 3 queries
+3. Tests unitarios del motor pasando
+4. `docs/recomendaciones-cambios.md` documentando qué se creó y cómo usarlo
