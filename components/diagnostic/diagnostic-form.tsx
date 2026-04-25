@@ -2,12 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { Save } from "lucide-react";
-import { ScoreBar } from "@/components/score/score-bar";
-import { ScoreCircle } from "@/components/score/score-circle";
+import { BlockScoreRealtime } from "@/components/diagnostic/block-score-realtime";
+import { DiagnosticFieldBenchmark } from "@/components/diagnostic/diagnostic-field-benchmark";
+import { DiagnosticResultScreen } from "@/components/diagnostic/diagnostic-result-screen";
+import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { scoreDiagnostic } from "@/lib/scoring";
-import { blockLabels, estadoLabels } from "@/lib/theme";
+import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
+import type { ActionResult } from "@/lib/types/api";
 import type { BlockKey, Diagnostic, DiagnosticInput } from "@/lib/types";
 
 type MetricField = {
@@ -16,6 +19,15 @@ type MetricField = {
   block: BlockKey;
   zone: "rapida" | "opcional";
   hint: string;
+};
+
+type SaveDiagnosticPayload = {
+  diagnostic: {
+    id: string;
+    score_global: number;
+    estado_global: string;
+  };
+  recommendations: DiagnosticRecommendations;
 };
 
 const tabs: Array<{ key: BlockKey; label: string }> = [
@@ -76,55 +88,55 @@ function inputFromDiagnostic(diagnostic: Diagnostic): Record<string, number> {
   };
 }
 
-function buildInput(values: Record<string, number>): DiagnosticInput {
+function buildInput(values: Record<string, number | null>): DiagnosticInput {
   return {
     salud: {
-      reclamos: values.reclamos,
-      mediaciones: values.mediaciones,
-      cancelaciones_vendedor: values.cancelaciones_vendedor,
-      envios_a_tiempo: values.envios_a_tiempo
+      reclamos: values.reclamos ?? 0,
+      mediaciones: values.mediaciones ?? 0,
+      cancelaciones_vendedor: values.cancelaciones_vendedor ?? 0,
+      envios_a_tiempo: values.envios_a_tiempo ?? 0
     },
     publicaciones: {
-      pubs_activas_pct: values.pubs_activas_pct,
-      pubs_optimizadas_pct: values.pubs_optimizadas_pct,
-      ctr: values.ctr
+      pubs_activas_pct: values.pubs_activas_pct ?? 0,
+      pubs_optimizadas_pct: values.pubs_optimizadas_pct ?? 0,
+      ctr: values.ctr ?? 0
     },
     ads: {
-      margen_pre_ads: values.margen_pre_ads,
-      gasto_ads: values.gasto_ads,
-      ventas_ads: values.ventas_ads,
-      ventas_totales: values.ventas_totales,
-      acos: values.acos,
-      roas: values.roas,
-      tacos: values.tacos
+      margen_pre_ads: values.margen_pre_ads ?? 0,
+      gasto_ads: values.gasto_ads ?? 0,
+      ventas_ads: values.ventas_ads ?? 0,
+      ventas_totales: values.ventas_totales ?? 0,
+      acos: values.acos ?? 0,
+      roas: values.roas ?? 0,
+      tacos: values.tacos ?? 0
     },
     logistica: {
-      incidencias_pct: values.incidencias_pct,
-      uso_full_flex_pct: values.uso_full_flex_pct,
-      cancelaciones_stock_pct: values.cancelaciones_stock_pct
+      incidencias_pct: values.incidencias_pct ?? 0,
+      uso_full_flex_pct: values.uso_full_flex_pct ?? 0,
+      cancelaciones_stock_pct: values.cancelaciones_stock_pct ?? 0
     },
     stock: {
-      skus_sin_stock_pct: values.skus_sin_stock_pct,
-      dias_stock: values.dias_stock,
-      lead_time_reposicion: values.lead_time_reposicion,
-      sistema_reposicion: values.sistema_reposicion
+      skus_sin_stock_pct: values.skus_sin_stock_pct ?? 0,
+      dias_stock: values.dias_stock ?? 0,
+      lead_time_reposicion: values.lead_time_reposicion ?? 0,
+      sistema_reposicion: values.sistema_reposicion ?? 0
     }
   };
 }
 
-function warningsFor(values: Record<string, number>) {
+function warningsFor(values: Record<string, number | null>) {
   const warnings: string[] = [];
   const percentageFields = fields.filter((field) => field.name.includes("_pct") || ["envios_a_tiempo", "pubs_activas_pct", "pubs_optimizadas_pct", "margen_pre_ads", "acos", "tacos", "reclamos", "mediaciones", "cancelaciones_vendedor"].includes(field.name));
 
   percentageFields.forEach((field) => {
-    const value = values[field.name];
+    const value = values[field.name] ?? 0;
     if (value < 0 || value > 100) warnings.push(`${field.label} debería estar entre 0 y 100.`);
   });
 
-  if (values.envios_a_tiempo < 90) warnings.push("Envíos a tiempo está por debajo de 90%. Revisar SLA logístico.");
-  if (values.acos > values.margen_pre_ads * 0.36) warnings.push("ACOS supera el umbral rentable contra margen pre ads.");
-  if (values.uso_full_flex_pct < 50) warnings.push("Uso Full/Flex menor a 50%. Hay oportunidad logística.");
-  if (values.skus_sin_stock_pct > 12) warnings.push("SKUs sin stock por encima de 12%. Riesgo de ventas perdidas.");
+  if ((values.envios_a_tiempo ?? 0) < 90) warnings.push("Envíos a tiempo está por debajo de 90%. Revisar SLA logístico.");
+  if ((values.acos ?? 0) > (values.margen_pre_ads ?? 0) * 0.36) warnings.push("ACOS supera el umbral rentable contra margen pre ads.");
+  if ((values.uso_full_flex_pct ?? 0) < 50) warnings.push("Uso Full/Flex menor a 50%. Hay oportunidad logística.");
+  if ((values.skus_sin_stock_pct ?? 0) > 12) warnings.push("SKUs sin stock por encima de 12%. Riesgo de ventas perdidas.");
 
   return warnings;
 }
@@ -134,25 +146,55 @@ export function DiagnosticForm({
   action
 }: {
   diagnostic: Diagnostic;
-  action: (formData: FormData) => void | Promise<void>;
+  action: (formData: FormData) => Promise<ActionResult<SaveDiagnosticPayload>>;
 }) {
   const [activeTab, setActiveTab] = useState<BlockKey>("salud");
-  const [values, setValues] = useState(() => inputFromDiagnostic(diagnostic));
+  const [values, setValues] = useState<Record<string, number | null>>(() => inputFromDiagnostic(diagnostic));
+  const [expandedOptional, setExpandedOptional] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [savedResult, setSavedResult] = useState<SaveDiagnosticPayload | null>(null);
   const scored = useMemo(() => scoreDiagnostic(buildInput(values)), [values]);
   const warnings = useMemo(() => warningsFor(values), [values]);
   const activeFields = fields.filter((field) => field.block === activeTab);
 
-  function updateValue(name: string, value: string) {
-    const parsed = Number(value);
-    setValues((current) => ({ ...current, [name]: Number.isFinite(parsed) ? parsed : 0 }));
+  function updateValue(name: string, value: number | null) {
+    setValues((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    const formData = new FormData(event.currentTarget);
+    const result = await action(formData);
+
+    if (!result.success) {
+      setSubmitError(result.error);
+      setIsSubmitting(false);
+      return;
+    }
+
+    setSavedResult(result.data);
+    setIsSubmitting(false);
+  }
+
+  if (savedResult) {
+    return (
+      <DiagnosticResultScreen
+        score={savedResult.diagnostic.score_global}
+        estado={savedResult.diagnostic.estado_global}
+        delta={null}
+        recommendations={savedResult.recommendations}
+        clientId={diagnostic.clientId}
+        diagnosticId={savedResult.diagnostic.id}
+      />
+    );
   }
 
   return (
-    <form action={action} className="grid gap-5 xl:grid-cols-[1fr_360px]">
-      {fields.map((field) => (
-        <input key={field.name} type="hidden" name={field.name} value={values[field.name]} />
-      ))}
-
+    <form onSubmit={handleSubmit} className="grid gap-5 xl:grid-cols-[1fr_360px]">
       <Card>
         <div className="mb-5 flex flex-wrap gap-2">
           {tabs.map((tab) => (
@@ -176,30 +218,50 @@ export function DiagnosticForm({
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-zinc-950">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
-              <p className="mt-1 text-sm text-zinc-600">Zona A son datos rápidos; Zona B mejora precisión cuando están disponibles.</p>
+              <p className="mt-1 text-sm text-zinc-600">Completá Zona A primero. Zona B suma precisión opcional.</p>
             </div>
-            <div className="text-sm font-semibold text-brand-dark">Score bloque: {scored.scores[activeTab]}</div>
+            <div className="text-sm font-semibold text-brand-dark">Score bloque (realtime): {scored.scores[activeTab]}</div>
           </div>
 
-          <FieldZone title="Zona A" fields={activeFields.filter((field) => field.zone === "rapida")} values={values} onChange={updateValue} />
-          <FieldZone title="Zona B" fields={activeFields.filter((field) => field.zone === "opcional")} values={values} onChange={updateValue} />
+          <FieldZone
+            title="Zona A"
+            fields={activeFields.filter((field) => field.zone === "rapida")}
+            values={values}
+            onChange={updateValue}
+            source={diagnostic.source === "manual" ? "manual" : "api"}
+          />
+          <button type="button" className="mt-4 text-sm font-semibold text-brand-dark" onClick={() => setExpandedOptional((current) => !current)}>
+            {expandedOptional ? "Ocultar Zona B" : "Ver datos opcionales"}
+          </button>
+          {expandedOptional ? (
+            <FieldZone
+              title="Zona B"
+              fields={activeFields.filter((field) => field.zone === "opcional")}
+              values={values}
+              onChange={updateValue}
+              source={diagnostic.source === "manual" ? "manual" : "api"}
+            />
+          ) : null}
         </section>
 
         <div className="mt-5 rounded-card border border-[#BA7517]/30 bg-[#FAEEDA] p-4 text-sm text-[#633806]">
-          Los porcentajes se cargan como números de 0 a 100. El backend recalcula el score final antes de guardar.
+          El score y los benchmarks se recalculan en cada cambio para que puedas ajustar antes de guardar.
         </div>
+
+        {submitError ? <div className="mt-4 rounded-card border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{submitError}</div> : null}
       </Card>
 
       <Card className="h-fit">
-        <h2 className="text-lg font-bold">Preview final</h2>
-        <div className="mt-4 flex justify-center">
-          <ScoreCircle score={scored.scoreGlobal} size={150} />
+        <h2 className="text-lg font-bold">Preview en tiempo real</h2>
+        <div className="mt-4">
+          <ScoreDisplay score={scored.scoreGlobal} delta={null} size="md" />
         </div>
-        <div className="mt-4 text-center text-sm font-semibold text-brand-dark">{estadoLabels[scored.estadoGlobal]}</div>
         <div className="mt-5 space-y-4">
-          {(Object.entries(scored.scores) as Array<[BlockKey, number]>).map(([key, score]) => (
-            <ScoreBar key={key} score={score} label={blockLabels[key]} />
-          ))}
+          <BlockScoreRealtime bloque="01_salud" metricas={values} peso={35} />
+          <BlockScoreRealtime bloque="02_publicaciones" metricas={values} peso={20} />
+          <BlockScoreRealtime bloque="03_ads" metricas={values} peso={20} />
+          <BlockScoreRealtime bloque="04_logistica" metricas={values} peso={15} />
+          <BlockScoreRealtime bloque="05_stock" metricas={values} peso={10} />
         </div>
 
         {warnings.length > 0 ? (
@@ -213,9 +275,9 @@ export function DiagnosticForm({
           </div>
         ) : null}
 
-        <Button className="mt-6 w-full" type="submit">
+        <Button className="mt-6 w-full" type="submit" disabled={isSubmitting}>
           <Save className="h-4 w-4" />
-          Guardar diagnóstico
+          {isSubmitting ? "Guardando..." : "Guardar diagnóstico"}
         </Button>
       </Card>
     </form>
@@ -226,12 +288,14 @@ function FieldZone({
   title,
   fields: zoneFields,
   values,
-  onChange
+  onChange,
+  source
 }: {
   title: string;
   fields: MetricField[];
-  values: Record<string, number>;
-  onChange: (name: string, value: string) => void;
+  values: Record<string, number | null>;
+  onChange: (name: string, value: number | null) => void;
+  source: "api" | "manual";
 }) {
   if (zoneFields.length === 0) return null;
 
@@ -240,19 +304,17 @@ function FieldZone({
       <h3 className="mb-3 text-sm font-bold text-zinc-950">{title}</h3>
       <div className="grid gap-4 md:grid-cols-2">
         {zoneFields.map((field) => (
-          <label key={field.name} className="space-y-2">
-            <span className="text-sm font-semibold text-zinc-700">{field.label}</span>
-            <input
-              aria-label={field.label}
-              className="focus-ring h-11 w-full rounded-component border border-black/10 px-3"
-              min="0"
-              step="0.01"
-              type="number"
+          <div key={field.name}>
+            <DiagnosticFieldBenchmark
+              name={field.name}
+              label={field.label}
+              metrica={field.name}
               value={values[field.name]}
-              onChange={(event) => onChange(field.name, event.target.value)}
+              onChange={(value) => onChange(field.name, value)}
+              dataSource={source}
             />
-            <span className="block text-xs text-zinc-500">{field.hint}</span>
-          </label>
+            <p className="mt-1 text-xs text-zinc-500">{field.hint}</p>
+          </div>
         ))}
       </div>
     </div>

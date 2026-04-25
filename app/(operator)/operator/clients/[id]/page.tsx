@@ -5,9 +5,12 @@ import { ActionList } from "@/components/actions/action-list";
 import { BlockComparisonChart } from "@/components/charts/block-comparison-chart";
 import { ScoreHistoryChart } from "@/components/charts/score-history-chart";
 import { AppShell } from "@/components/layout/app-shell";
+import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel";
+import { BlockScoresRow } from "@/components/score/block-scores-row";
 import { ScoreBadge } from "@/components/score/score-badge";
 import { ScoreBar } from "@/components/score/score-bar";
 import { ScoreCircle } from "@/components/score/score-circle";
+import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getOperatorClientBundle, isPlaceholderDiagnostic } from "@/lib/data";
@@ -35,6 +38,7 @@ export default async function OperatorClientPage({
   const filteredHistory = filterHistoryByPeriod(history, period);
   const historyWithDeltas = addScoreDeltas(history);
   const { current: currentHistory, previous: previousHistory } = getCurrentAndPreviousHistory(history);
+  const currentDelta = previousHistory ? (currentHistory?.scoreGlobal ?? diagnostic.scoreGlobal) - previousHistory.scoreGlobal : null;
   const decision = getDecision(diagnostic.estadoGlobal, diagnostic.scores);
   const blockRows = (Object.entries(diagnostic.scores) as Array<[BlockKey, number]>).map(([key, score]) => ({ key, score }));
   const comparison = blockRows.map(({ key, score }) => ({
@@ -75,18 +79,6 @@ export default async function OperatorClientPage({
           </div>
         </div>
 
-        <nav className="flex gap-2 border-b border-black/10">
-          {[
-            ["diagnostico", "Diagnóstico actual"],
-            ["evolucion", "Evolución"],
-            ["acciones", "Acciones"]
-          ].map(([key, label]) => (
-            <Link key={key} href={`/operator/clients/${client.id}?tab=${key}`} className={`px-3 py-3 text-sm font-semibold ${tab === key ? "border-b-2 border-brand-purple text-brand-dark" : "text-zinc-500"}`}>
-              {label}
-            </Link>
-          ))}
-        </nav>
-
         {withoutDiagnostic ? (
           <Card className="border-[#BA7517]/30 bg-[#FAEEDA] text-[#633806]">
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
@@ -102,7 +94,41 @@ export default async function OperatorClientPage({
               </Link>
             </div>
           </Card>
-        ) : null}
+        ) : (
+          <>
+            <section className="rounded-xl border border-black/10 bg-white p-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Estado de la cuenta</p>
+              <div className="mt-2">
+                <ScoreDisplay score={diagnostic.scoreGlobal} delta={currentDelta} size="lg" animated />
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">Actualizado el {new Date(diagnostic.date).toLocaleDateString("es-AR")}</p>
+              <div className="mt-4">
+                <BlockScoresRow
+                  scores={{
+                    salud: diagnostic.scores.salud,
+                    publicaciones: diagnostic.scores.publicaciones,
+                    ads: diagnostic.scores.ads,
+                    logistica: diagnostic.scores.logistica,
+                    stock: diagnostic.scores.stock
+                  }}
+                />
+              </div>
+            </section>
+            <RecommendationsPanel clientId={client.id} diagnosticId={diagnostic.id} maxVisible={3} />
+          </>
+        )}
+
+        <nav className="flex gap-2 border-b border-black/10">
+          {[
+            ["diagnostico", "Diagnóstico actual"],
+            ["evolucion", "Evolución"],
+            ["acciones", "Acciones"]
+          ].map(([key, label]) => (
+            <Link key={key} href={`/operator/clients/${client.id}?tab=${key}`} className={`px-3 py-3 text-sm font-semibold ${tab === key ? "border-b-2 border-brand-purple text-brand-dark" : "text-zinc-500"}`}>
+              {label}
+            </Link>
+          ))}
+        </nav>
 
         {tab === "diagnostico" ? (
           <section className="grid gap-5 xl:grid-cols-[360px_1fr]">

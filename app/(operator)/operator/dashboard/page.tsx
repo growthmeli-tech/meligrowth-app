@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { AlertTriangle, Activity, BellRing, Search } from "lucide-react";
+import { AlertBanner } from "@/components/alerts/alert-banner";
 import { AppShell } from "@/components/layout/app-shell";
 import { ClientCard } from "@/components/client-card/client-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getClientOnboardingStatus, getOperatorDashboardData, getUnreadNotificationCount, isPlaceholderDiagnostic } from "@/lib/data";
+import { getClientOnboardingStatus, getOperatorDashboardData, getUnreadNotificationCount, getUrgentRecommendationsForOperator, isPlaceholderDiagnostic } from "@/lib/data";
+import { getCurrentProfile } from "@/lib/data/clients";
 import { getEstado } from "@/lib/scoring";
 import { daysSince } from "@/lib/utils";
 import type { Estado, OnboardingStatus, Plan } from "@/lib/types";
@@ -38,6 +40,7 @@ export default async function OperatorDashboardPage({
   const onboarding = isOnboardingFilter(resolvedSearchParams.onboarding) ? resolvedSearchParams.onboarding : "todos";
   const sort = resolvedSearchParams.sort === "updated" ? "updated" : "score";
   const allBundles = await getOperatorDashboardData();
+  const profile = await getCurrentProfile();
   const operatorOptions = Array.from(
     new Map(
       allBundles
@@ -69,12 +72,31 @@ export default async function OperatorDashboardPage({
       return a.diagnostic.scoreGlobal - b.diagnostic.scoreGlobal;
     });
   const activeAlerts = await getUnreadNotificationCount();
+  const urgentRecommendations = profile.role === "operator" ? await getUrgentRecommendationsForOperator(profile.id) : { success: true as const, data: [] };
 
   const diagnosedBundles = bundles.filter((item) => !isPlaceholderDiagnostic(item.diagnostic));
   const average = diagnosedBundles.length ? Math.round(diagnosedBundles.reduce((sum, item) => sum + item.diagnostic.scoreGlobal, 0) / diagnosedBundles.length) : 0;
   const critical = diagnosedBundles.filter((item) => getEstado(item.diagnostic.scoreGlobal) === "critico").length;
   const stale = bundles.filter((item) => isPlaceholderDiagnostic(item.diagnostic) || daysSince(item.client.lastUpdatedAt) > 7).length;
   const withoutDiagnostic = bundles.length - diagnosedBundles.length;
+  const riskClients = diagnosedBundles
+    .sort((a, b) => a.diagnostic.scoreGlobal - b.diagnostic.scoreGlobal)
+    .slice(0, 3);
+  const bannerAlerts: Array<{ client_name: string; client_id: string; message: string; priority: "urgente" | "alta" }> = urgentRecommendations.success
+    ? urgentRecommendations.data.reduce<Array<{ client_name: string; client_id: string; message: string; priority: "urgente" | "alta" }>>((acc, item) => {
+        const urgent = item.recommendations.recomendaciones.find((recommendation) => recommendation.prioridad === "urgente");
+        if (urgent) {
+          acc.push({ client_name: item.client_name, client_id: item.client_id, message: urgent.titulo, priority: "urgente" });
+          return acc;
+        }
+
+        const high = item.recommendations.recomendaciones.find((recommendation) => recommendation.prioridad === "alta");
+        if (high) {
+          acc.push({ client_name: item.client_name, client_id: item.client_id, message: high.titulo, priority: "alta" });
+        }
+        return acc;
+      }, [])
+    : [];
 
   return (
     <AppShell mode="operator">
@@ -90,6 +112,8 @@ export default async function OperatorDashboardPage({
             </Link>
           </div>
         </div>
+
+        <AlertBanner alerts={bannerAlerts} />
 
         <form className="grid gap-3 rounded-card border border-black/10 bg-white p-4 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1fr_auto]">
           <label className="relative">
@@ -178,6 +202,30 @@ export default async function OperatorDashboardPage({
           </Card>
         </section>
 
+        <section className="space-y-3 rounded-card border border-black/10 bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Clientes en riesgo</h2>
+            <Link href="/operator/dashboard?estado=critico" className="text-xs font-semibold text-brand-dark">
+              Ver todos
+            </Link>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {riskClients.length > 0 ? (
+              riskClients.map((bundle) => (
+                <Link key={bundle.client.id} href={`/operator/clients/${bundle.client.id}`} className="rounded-component border border-black/10 p-3 hover:bg-brand-light">
+                  <p className="font-semibold text-zinc-900">{bundle.client.name}</p>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    Score {bundle.diagnostic.scoreGlobal} · {bundle.diagnostic.scoreGlobal <= 39 ? "Crítico" : "En riesgo"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">Actualizado {new Date(bundle.diagnostic.date).toLocaleDateString("es-AR")}</p>
+                </Link>
+              ))
+            ) : (
+              <div className="rounded-component border border-dashed border-black/20 p-3 text-sm text-zinc-500 md:col-span-3">No hay cuentas en riesgo por ahora.</div>
+            )}
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {bundles.length > 0 ? bundles.map((bundle) => (
             <ClientCard
@@ -191,7 +239,14 @@ export default async function OperatorDashboardPage({
                 files: bundle.filesCount > 0 ? [{ id: "count", clientId: bundle.client.id, tipo: "otro", filename: "", sizeBytes: 0, procesado: false, createdAt: bundle.client.lastUpdatedAt }] : []
               })}
             />
-          )) : <div className="rounded-card border border-black/10 bg-white p-6 text-sm text-zinc-500 md:col-span-2 xl:col-span-3">No hay clientes para esos filtros.</div>}
+          )) : (
+            <div className="rounded-card border border-black/10 bg-white p-6 text-sm text-zinc-500 md:col-span-2 xl:col-span-3">
+              No hay cuentas con estos filtros.{" "}
+              <Link href="/operator/dashboard" className="font-semibold text-brand-dark">
+                Limpiar filtros
+              </Link>
+            </div>
+          )}
         </section>
       </div>
     </AppShell>

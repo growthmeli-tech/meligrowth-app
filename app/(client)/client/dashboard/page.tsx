@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, FileUp, LineChart, PackageCheck, Truck } from "lucide-react";
 import { ActionList } from "@/components/actions/action-list";
 import { BrandLogo } from "@/components/brand/brand-logo";
+import { ClientScoreHero } from "@/components/client/client-score-hero";
 import { AppShell } from "@/components/layout/app-shell";
 import { ScoreBar } from "@/components/score/score-bar";
 import { ScoreBadge } from "@/components/score/score-badge";
@@ -14,9 +15,20 @@ import { formatPct } from "@/lib/utils";
 
 export default async function ClientDashboardPage() {
   const { client, diagnostic, actions } = await getClientDashboardBundle();
-  const simpleState = diagnostic.scoreGlobal >= 85 ? "Tu cuenta está en buen camino" : diagnostic.scoreGlobal >= 70 ? "Tu cuenta está mejorando" : "Estamos enfocando la semana en estabilizar la cuenta";
+  const simpleState =
+    diagnostic.scoreGlobal >= 85
+      ? "Tu cuenta está muy sólida y creciendo."
+      : diagnostic.scoreGlobal >= 70
+        ? "Tu cuenta está mejorando mes a mes."
+        : "Tu cuenta necesita ajustes y ya tenemos un plan para eso.";
   const openActions = actions.filter((action) => action.estado !== "completada");
   const visibleActions = openActions.slice(0, 4);
+  const summaryByBlock = (Object.entries(diagnostic.scores) as Array<[BlockKey, number]>).map(([key, score]) => ({
+    key,
+    label: clientBlockLabels[key],
+    text: score >= 85 ? "muy bien" : score >= 70 ? "bien" : score >= 55 ? "en proceso" : "requiere atención",
+    icon: score >= 70 ? "✅" : score >= 55 ? "⚠️" : "🔴"
+  }));
 
   return (
     <AppShell mode="client">
@@ -43,13 +55,12 @@ export default async function ClientDashboardPage() {
                 </Link>
               </div>
             </div>
-            <div className="rounded-card border border-black/10 p-4 text-center">
-              <div className="text-sm text-zinc-500">Estado general</div>
-              <div className="mt-3">
-                <ScoreBadge estado={diagnostic.estadoGlobal} />
-              </div>
-              <div className="mt-3 text-xs text-zinc-500">Actualizado {new Date(diagnostic.date).toLocaleDateString("es-AR")}</div>
-            </div>
+            <ClientScoreHero
+              score={diagnostic.scoreGlobal}
+              delta={null}
+              estado_simple={simpleState}
+              mes={new Date(diagnostic.date).toLocaleDateString("es-AR", { month: "long", year: "numeric" })}
+            />
           </div>
         </section>
 
@@ -62,15 +73,17 @@ export default async function ClientDashboardPage() {
 
         <section className="grid gap-5 xl:grid-cols-[1fr_1.2fr]">
           <Card>
-            <h2 className="text-lg font-bold">Estado por área</h2>
+            <h2 className="text-lg font-bold">Qué está pasando</h2>
             <div className="mt-5 space-y-5">
-              {(Object.entries(diagnostic.scores) as Array<[BlockKey, number]>).map(([key, score]) => (
-                <div key={key}>
-                  <div className="mb-2 flex justify-between">
-                    <span className="font-semibold">{clientBlockLabels[key]}</span>
-                    <span className="text-sm text-zinc-500">{estadoLabels[diagnostic.estadoGlobal]}</span>
+              {summaryByBlock.map((item) => (
+                <div key={item.key}>
+                  <div className="mb-2 flex justify-between gap-2">
+                    <span className="font-semibold">
+                      {item.icon} {item.label}
+                    </span>
+                    <span className="text-sm text-zinc-500">{item.text}</span>
                   </div>
-                  <ScoreBar score={score} />
+                  <ScoreBar score={diagnostic.scores[item.key]} />
                 </div>
               ))}
             </div>

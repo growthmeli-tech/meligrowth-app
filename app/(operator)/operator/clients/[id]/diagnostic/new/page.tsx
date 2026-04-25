@@ -13,7 +13,7 @@ export default async function NewDiagnosticPage({
   const resolvedParams = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const { client, diagnostic } = await getOperatorDiagnosticFormBundle(resolvedParams.id);
-  const saveAction = createDiagnostic.bind(null, client.id) as unknown as (formData: FormData) => Promise<void>;
+  const saveAction = createDiagnostic.bind(null, client.id);
 
   return (
     <AppShell mode="operator">

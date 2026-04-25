@@ -21,6 +21,14 @@ const typeLabels: Record<Notification["tipo"], string> = {
   reporte_semanal: "Reporte"
 };
 
+const severityOrder: Record<Notification["tipo"], number> = {
+  alerta_critica: 0,
+  score_bajo: 1,
+  archivo_procesado: 2,
+  accion_completada: 2,
+  reporte_semanal: 3
+};
+
 export function NotificationList({
   notifications,
   basePath,
@@ -33,10 +41,15 @@ export function NotificationList({
   typeFilter?: string;
 }) {
   const unread = notifications.filter((notification) => !notification.leida).length;
+  const isClientView = basePath.startsWith("/client");
   const filtered = notifications.filter((notification) => {
     const statusMatches = statusFilter === "sin_leer" ? !notification.leida : statusFilter === "leidas" ? notification.leida : true;
     const typeMatches = typeFilter === "todas" || notification.tipo === typeFilter;
     return statusMatches && typeMatches;
+  }).sort((a, b) => {
+    const severityDiff = severityOrder[a.tipo] - severityOrder[b.tipo];
+    if (severityDiff !== 0) return severityDiff;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
   return (
@@ -79,9 +92,9 @@ export function NotificationList({
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-semibold text-zinc-950">{notification.titulo}</h2>
                       {!notification.leida ? <span className="h-2 w-2 rounded-full bg-[#E24B4A]" aria-label="Sin leer" /> : null}
-                      <Badge className="bg-zinc-100 text-zinc-700">{typeLabels[notification.tipo]}</Badge>
+                      <Badge className="bg-zinc-100 text-zinc-700">{isClientView ? clientFriendlyType(notification.tipo) : typeLabels[notification.tipo]}</Badge>
                     </div>
-                    <p className="mt-1 text-sm text-zinc-600">{notification.mensaje}</p>
+                    <p className="mt-1 text-sm text-zinc-600">{isClientView ? clientFriendlyMessage(notification) : notification.mensaje}</p>
                     <p className="mt-2 text-xs text-zinc-500">{new Date(notification.createdAt).toLocaleString("es-AR")}</p>
                   </div>
                 </div>
@@ -102,6 +115,20 @@ export function NotificationList({
       </div>
     </div>
   );
+}
+
+function clientFriendlyType(type: Notification["tipo"]) {
+  if (type === "alerta_critica") return "Atención";
+  if (type === "score_bajo") return "Seguimiento";
+  if (type === "archivo_procesado") return "Archivo";
+  if (type === "accion_completada") return "Avance";
+  return "Reporte";
+}
+
+function clientFriendlyMessage(notification: Notification) {
+  if (notification.tipo === "alerta_critica") return "Detectamos una situación urgente en tu cuenta y ya la estamos revisando.";
+  if (notification.tipo === "score_bajo") return "Vimos una baja en algunos indicadores y activamos un plan de mejora.";
+  return notification.mensaje;
 }
 
 function FilterLink({ href, active, label }: { href: string; active: boolean; label: string }) {
