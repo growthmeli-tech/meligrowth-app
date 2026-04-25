@@ -1,5 +1,5 @@
 import { decryptJsonString } from "@/lib/security/encryption";
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { MlStoredTokens, MlTokenResponse } from "@/lib/ml/mappers/types";
 
 const ML_AUTH_URL = "https://auth.mercadolibre.com.ar/authorization";
@@ -89,7 +89,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<MlTokenR
 }
 
 async function readSessionTokens(storagePath: string) {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase.storage.from("meli-sessions").download(storagePath);
   if (error || !data) {
     throw new Error(`Could not download meli session (${storagePath})`);
@@ -101,7 +101,7 @@ async function readSessionTokens(storagePath: string) {
 }
 
 async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { error } = await supabase.storage.from("meli-sessions").upload(storagePath, JSON.stringify(tokens), {
     upsert: true,
     contentType: "application/json",
@@ -114,7 +114,7 @@ async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
 }
 
 export async function getValidAccessToken(clientId: string) {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { data: session, error } = await supabase
     .from("meli_sessions")
     .select("id, storage_path")

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCodeForTokens } from "@/lib/ml/auth";
 import { encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 function settingsRedirect(request: NextRequest, clientId: string, search: string) {
   return NextResponse.redirect(new URL(`/operator/clients/${clientId}/settings?${search}`, request.url));
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       throw new Error("Missing user_id in ML token response");
     }
 
-    const supabase = createServiceSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: client } = await supabase.from("clients").select("id").eq("id", state).maybeSingle();
     if (!client) {
       throw new Error("Invalid callback state");

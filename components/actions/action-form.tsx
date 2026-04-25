@@ -8,7 +8,7 @@ const blockOptions = Object.entries(blockLabels) as Array<[BlockKey, string]>;
 const priorityOptions = Object.entries(priorityLabels) as Array<[Priority, string]>;
 
 export function ActionForm({ clientId }: { clientId: string }) {
-  const action = createClientAction.bind(null, clientId);
+  const action = createClientAction.bind(null, clientId) as unknown as (formData: FormData) => Promise<void>;
 
   return (
     <form action={action} className="grid gap-4 rounded-card border border-black/10 bg-white p-5 lg:grid-cols-2">

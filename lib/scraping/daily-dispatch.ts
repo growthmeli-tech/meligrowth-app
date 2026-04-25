@@ -1,4 +1,5 @@
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { consolidateScrapingClient } from "@/lib/diagnostics/consolidate-scraping";
 
 const JOB_TYPES = ["salud", "ads", "publicaciones", "stock"] as const;
@@ -29,8 +30,12 @@ async function dispatchJob(jobId: string) {
   }
 }
 
-export async function runDailyScrapingDispatch(options?: { dispatch?: boolean; clientId?: string | null }) {
-  const supabase = createServiceSupabaseClient();
+export async function runDailyScrapingDispatch(options?: {
+  dispatch?: boolean;
+  clientId?: string | null;
+  useServiceRole?: boolean;
+}) {
+  const supabase = options?.useServiceRole ? createServiceSupabaseClient() : await createServerSupabaseClient();
   const shouldDispatch = options?.dispatch !== false;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -168,7 +173,9 @@ export async function runDailyScrapingDispatch(options?: { dispatch?: boolean; c
     }
 
     if (shouldDispatch) {
-      const consolidatedResult = await consolidateScrapingClient(client.id);
+      const consolidatedResult = await consolidateScrapingClient(client.id, {
+        useServiceRole: options?.useServiceRole
+      });
       if (consolidatedResult.ok && consolidatedResult.consolidated) {
         result.consolidated += 1;
         clientConsolidated = true;

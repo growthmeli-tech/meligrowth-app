@@ -41,7 +41,7 @@ export function ActionList({
               {action.estado === "en_curso" ? "En curso" : action.estado === "completada" ? "Completada" : "Pendiente"}
             </Badge>
             {allowComplete && action.estado !== "completada" ? (
-              <form action={completeClientAction.bind(null, action.clientId, action.id)}>
+              <form action={completeClientAction.bind(null, action.clientId, action.id) as unknown as (formData: FormData) => Promise<void>}>
                 <Button variant="ghost" type="submit">
                   <CheckCircle2 className="h-4 w-4" />
                   Completar

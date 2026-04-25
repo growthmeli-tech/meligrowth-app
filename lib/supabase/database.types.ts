@@ -328,7 +328,19 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
-    Enums: Record<string, never>;
+    Enums: {
+      user_role: "operator" | "client";
+      client_plan: "starter" | "growth" | "scale";
+      diagnostic_source: "manual" | "scraping" | "import";
+      action_priority: "urgente" | "alta" | "media";
+      action_status: "pendiente" | "en_curso" | "completada";
+      file_type: "skus_stock" | "margenes" | "ficha_tecnica" | "otro";
+      scraping_type: "salud" | "ads" | "publicaciones" | "stock";
+      scraping_status: "pending" | "running" | "success" | "error";
+      notification_type: "score_bajo" | "alerta_critica" | "accion_completada" | "archivo_procesado" | "reporte_semanal";
+      meli_session_status: "missing" | "uploaded" | "validated" | "error";
+      pricing_proposal_source: "manual" | "template";
+    };
     CompositeTypes: Record<string, never>;
   };
 };

@@ -45,7 +45,7 @@ export default async function NewClientPage({ searchParams }: { searchParams?: P
         ) : null}
 
         <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
-          <form action={createClientOnboarding} className="space-y-5 rounded-card border border-black/10 bg-white p-5">
+          <form action={createClientOnboarding as unknown as (formData: FormData) => Promise<void>} className="space-y-5 rounded-card border border-black/10 bg-white p-5">
             <div>
               <h2 className="text-lg font-bold text-zinc-950">Datos de la cuenta</h2>
               <p className="mt-1 text-sm text-zinc-600">Estos datos alimentan la cartera operator y el dashboard cliente.</p>

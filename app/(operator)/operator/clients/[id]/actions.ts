@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/lib/types/api";
 import type { BlockKey, Priority } from "@/lib/types";
+import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -42,7 +44,7 @@ async function assertOperatorCanAccessClient(clientId: string) {
   return { profile, supabase };
 }
 
-export async function createClientAction(clientId: string, formData: FormData) {
+export async function createClientAction(clientId: string, formData: FormData): Promise<ActionResult<{ created: boolean }>> {
   const { profile, supabase } = await assertOperatorCanAccessClient(clientId);
 
   const titulo = cleanText(formData.get("titulo"));
@@ -52,11 +54,11 @@ export async function createClientAction(clientId: string, formData: FormData) {
   const dueDate = cleanText(formData.get("due_date")) || fallbackDueDate();
 
   if (!titulo) {
-    redirect(`/operator/clients/${clientId}?tab=acciones&error=missing_action`);
+    return { success: false, error: "El titulo de la accion es obligatorio", code: "VALIDATION_ERROR" };
   }
 
   if (supabase) {
-    await supabase.from("actions").insert({
+    const { error } = await supabase.from("actions").insert({
       client_id: clientId,
       created_by: profile.id,
       bloque,
@@ -66,18 +68,29 @@ export async function createClientAction(clientId: string, formData: FormData) {
       estado: "pendiente",
       due_date: dueDate
     });
+    if (error) {
+      logServerError("createClientAction", error, { clientId, operatorId: profile.id });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo crear la accion",
+        code: error.code
+      };
+    }
   }
 
   revalidatePath(`/operator/clients/${clientId}`);
   revalidatePath("/operator/dashboard");
-  redirect(`/operator/clients/${clientId}?tab=acciones&created=1`);
+  return { success: true, data: { created: true } };
 }
 
-export async function completeClientAction(clientId: string, actionId: string) {
+export async function completeClientAction(
+  clientId: string,
+  actionId: string
+): Promise<ActionResult<{ completed: boolean }>> {
   const { supabase } = await assertOperatorCanAccessClient(clientId);
 
   if (supabase) {
-    await supabase
+    const { error } = await supabase
       .from("actions")
       .update({
         estado: "completada",
@@ -85,9 +98,17 @@ export async function completeClientAction(clientId: string, actionId: string) {
       })
       .eq("id", actionId)
       .eq("client_id", clientId);
+    if (error) {
+      logServerError("completeClientAction", error, { clientId, actionId });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo completar la accion",
+        code: error.code
+      };
+    }
   }
 
   revalidatePath(`/operator/clients/${clientId}`);
   revalidatePath("/operator/dashboard");
-  redirect(`/operator/clients/${clientId}?tab=acciones&completed=1`);
+  return { success: true, data: { completed: true } };
 }

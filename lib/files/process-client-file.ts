@@ -1,4 +1,4 @@
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database, Json } from "@/lib/supabase/database.types";
 
 type FileType = Database["public"]["Tables"]["client_files"]["Row"]["tipo"];
@@ -79,7 +79,7 @@ async function persistParsedRows({
   tipo: FileType;
   rows: Array<Record<string, unknown>>;
 }) {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
 
   if (tipo === "skus_stock") {
     const payload = rows
@@ -156,7 +156,7 @@ async function notifyOperator({
 }) {
   if (!operatorId) return;
 
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   await supabase.from("notifications").insert({
     client_id: clientId,
     user_id: operatorId,
@@ -168,7 +168,7 @@ async function notifyOperator({
 }
 
 export async function processClientFile(fileId: string): Promise<ProcessResult> {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { parserUrl, parserSecret } = getParserConfig();
 
   const { data: fileRow, error: fileError } = await supabase.from("client_files").select("*").eq("id", fileId).single();

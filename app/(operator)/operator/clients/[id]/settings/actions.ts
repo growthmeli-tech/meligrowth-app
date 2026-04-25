@@ -7,7 +7,9 @@ import { getCurrentProfile } from "@/lib/data";
 import { encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
 import { isScraperPipelineConfigured, isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/lib/types/api";
 import type { Plan } from "@/lib/types";
+import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -84,7 +86,10 @@ async function callScraper<T>(pathname: string, payload: object): Promise<T> {
   return body as T;
 }
 
-export async function updateClientSettings(clientId: string, formData: FormData) {
+export async function updateClientSettings(
+  clientId: string,
+  formData: FormData
+): Promise<ActionResult<{ updated: boolean }>> {
   const { supabase, profile } = await assertOperator(clientId);
 
   const name = cleanText(formData.get("name"));
@@ -96,7 +101,7 @@ export async function updateClientSettings(clientId: string, formData: FormData)
   const active = formData.get("active") === "on";
 
   if (!name) {
-    redirect(`/operator/clients/${clientId}/settings?error=missing`);
+    return { success: false, error: "El nombre del cliente es obligatorio", code: "VALIDATION_ERROR" };
   }
 
   if (supabase) {
@@ -106,7 +111,7 @@ export async function updateClientSettings(clientId: string, formData: FormData)
         ? (await supabase.from("users").select("id").eq("email", clientEmail).eq("role", "client").maybeSingle()).data
         : null;
 
-    await supabase
+    const { error } = await supabase
       .from("clients")
       .update({
         name,
@@ -119,33 +124,44 @@ export async function updateClientSettings(clientId: string, formData: FormData)
         active
       })
       .eq("id", clientId);
+    if (error) {
+      logServerError("updateClientSettings", error, { clientId });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron guardar los cambios",
+        code: error.code
+      };
+    }
   }
 
   revalidatePath(`/operator/clients/${clientId}`);
   revalidatePath(`/operator/clients/${clientId}/settings`);
   revalidatePath("/operator/dashboard");
-  redirect(`/operator/clients/${clientId}/settings?saved=1`);
+  return { success: true, data: { updated: true } };
 }
 
-export async function uploadMeliSessionFile(clientId: string, formData: FormData) {
+export async function uploadMeliSessionFile(
+  clientId: string,
+  formData: FormData
+): Promise<ActionResult<{ uploaded: boolean }>> {
   const { supabase, profile } = await assertOperator(clientId);
   const file = formData.get("file");
   const sellerId = cleanText(formData.get("seller_id"));
 
   if (!(file instanceof File) || file.size === 0) {
-    redirect(`/operator/clients/${clientId}/settings?error=missing_session`);
+    return { success: false, error: "Debe adjuntar un archivo de sesion", code: "VALIDATION_ERROR" };
   }
 
   if (!file.name.toLowerCase().endsWith(".json")) {
-    redirect(`/operator/clients/${clientId}/settings?error=session_format`);
+    return { success: false, error: "El archivo debe ser JSON", code: "VALIDATION_ERROR" };
   }
 
   if (!supabase) {
-    redirect(`/operator/clients/${clientId}/settings?session_saved=1`);
+    return { success: true, data: { uploaded: true } };
   }
 
   if (!isAppEncryptionConfigured()) {
-    redirect(`/operator/clients/${clientId}/settings?error=session_encryption`);
+    return { success: false, error: "Falta configurar cifrado de sesion", code: "ENCRYPTION_NOT_CONFIGURED" };
   }
 
   const plainText = await file.text();
@@ -160,10 +176,15 @@ export async function uploadMeliSessionFile(clientId: string, formData: FormData
   });
 
   if (uploadError) {
-    redirect(`/operator/clients/${clientId}/settings?error=session_upload`);
+    logServerError("uploadMeliSessionFile.upload", uploadError, { clientId, storagePath });
+    return {
+      success: false,
+      error: isPostgresError(uploadError) ? formatSupabaseError(uploadError) : "No se pudo subir la sesion",
+      code: "SESSION_UPLOAD_FAILED"
+    };
   }
 
-  await supabase.from("meli_sessions").insert({
+  const { error: insertError } = await supabase.from("meli_sessions").insert({
     client_id: clientId,
     created_by: profile.id,
     seller_id: sellerId || null,
@@ -172,16 +193,24 @@ export async function uploadMeliSessionFile(clientId: string, formData: FormData
     source: "upload",
     warnings: []
   });
+  if (insertError) {
+    logServerError("uploadMeliSessionFile.insert", insertError, { clientId, storagePath });
+    return {
+      success: false,
+      error: isPostgresError(insertError) ? formatSupabaseError(insertError) : "No se pudo registrar la sesion",
+      code: insertError.code
+    };
+  }
 
   revalidatePath(`/operator/clients/${clientId}/settings`);
-  redirect(`/operator/clients/${clientId}/settings?session_saved=1`);
+  return { success: true, data: { uploaded: true } };
 }
 
-export async function validateMeliSession(clientId: string) {
+export async function validateMeliSession(clientId: string): Promise<ActionResult<{ validated: boolean }>> {
   const { supabase } = await assertOperator(clientId);
 
   if (!supabase) {
-    redirect(`/operator/clients/${clientId}/settings?session_validated=1`);
+    return { success: true, data: { validated: true } };
   }
 
   const { data: session } = await supabase
@@ -193,11 +222,11 @@ export async function validateMeliSession(clientId: string) {
     .maybeSingle();
 
   if (!session) {
-    redirect(`/operator/clients/${clientId}/settings?error=missing_session`);
+    return { success: false, error: "No hay sesion para validar", code: "MISSING_SESSION" };
   }
 
   if (!isScraperPipelineConfigured()) {
-    redirect(`/operator/clients/${clientId}/settings?error=scraper_config`);
+    return { success: false, error: "Pipeline de scraping no configurado", code: "SCRAPER_CONFIG" };
   }
 
   try {
@@ -208,7 +237,7 @@ export async function validateMeliSession(clientId: string) {
       error?: string | null;
     }>("/session/validate", { client_id: clientId, target_tipo: "salud" });
 
-    await supabase
+    const { error } = await supabase
       .from("meli_sessions")
       .update({
         status: result.authenticated ? "validated" : "error",
@@ -217,6 +246,14 @@ export async function validateMeliSession(clientId: string) {
         warnings: result.warnings ?? []
       })
       .eq("id", session.id);
+    if (error) {
+      logServerError("validateMeliSession.update", error, { clientId, sessionId: session.id });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo actualizar la sesion",
+        code: error.code
+      };
+    }
   } catch (error) {
     await supabase
       .from("meli_sessions")
@@ -229,27 +266,31 @@ export async function validateMeliSession(clientId: string) {
       .eq("id", session.id);
 
     revalidatePath(`/operator/clients/${clientId}/settings`);
-    redirect(`/operator/clients/${clientId}/settings?error=session_validation_failed`);
+    logServerError("validateMeliSession", error, { clientId, sessionId: session.id });
+    return { success: false, error: "No pudimos validar la sesion", code: "SESSION_VALIDATION_FAILED" };
   }
 
   revalidatePath(`/operator/clients/${clientId}/settings`);
-  redirect(`/operator/clients/${clientId}/settings?session_validated=1`);
+  return { success: true, data: { validated: true } };
 }
 
-export async function runScrapingJob(clientId: string, formData: FormData) {
+export async function runScrapingJob(
+  clientId: string,
+  formData: FormData
+): Promise<ActionResult<{ started: boolean; consolidated: boolean }>> {
   const { supabase } = await assertOperator(clientId);
 
   const tipo = parseScrapingType(cleanText(formData.get("tipo")));
   if (!tipo) {
-    redirect(`/operator/clients/${clientId}/settings?error=invalid_job_type`);
+    return { success: false, error: "Tipo de scraping invalido", code: "INVALID_JOB_TYPE" };
   }
 
   if (!supabase) {
-    redirect(`/operator/clients/${clientId}/settings?job_started=1&job_tipo=${tipo}`);
+    return { success: true, data: { started: true, consolidated: false } };
   }
 
   if (!isScraperPipelineConfigured()) {
-    redirect(`/operator/clients/${clientId}/settings?error=scraper_config`);
+    return { success: false, error: "Pipeline de scraping no configurado", code: "SCRAPER_CONFIG" };
   }
 
   const { data: latestSession } = await supabase
@@ -261,7 +302,7 @@ export async function runScrapingJob(clientId: string, formData: FormData) {
     .maybeSingle();
 
   if (!latestSession) {
-    redirect(`/operator/clients/${clientId}/settings?error=missing_session`);
+    return { success: false, error: "No hay sesion valida para ejecutar scraping", code: "MISSING_SESSION" };
   }
 
   const { data: job, error: insertError } = await supabase
@@ -271,7 +312,12 @@ export async function runScrapingJob(clientId: string, formData: FormData) {
     .single();
 
   if (insertError || !job) {
-    redirect(`/operator/clients/${clientId}/settings?error=job_insert`);
+    logServerError("runScrapingJob.insert", insertError ?? "job_not_created", { clientId, tipo });
+    return {
+      success: false,
+      error: insertError && isPostgresError(insertError) ? formatSupabaseError(insertError) : "No se pudo crear el job",
+      code: insertError?.code
+    };
   }
 
   let consolidated = false;
@@ -292,11 +338,12 @@ export async function runScrapingJob(clientId: string, formData: FormData) {
     revalidatePath(`/operator/clients/${clientId}`);
     revalidatePath(`/operator/clients/${clientId}/settings`);
     revalidatePath("/operator/settings");
-    redirect(`/operator/clients/${clientId}/settings?error=job_run&job_tipo=${tipo}`);
+    logServerError("runScrapingJob.run", error, { clientId, tipo, jobId: job.id });
+    return { success: false, error: "No se pudo ejecutar el scraping", code: "SCRAPING_RUN_FAILED" };
   }
 
   revalidatePath(`/operator/clients/${clientId}`);
   revalidatePath(`/operator/clients/${clientId}/settings`);
   revalidatePath("/operator/settings");
-  redirect(`/operator/clients/${clientId}/settings?job_started=1&job_tipo=${tipo}${consolidated ? "&consolidated=1" : ""}`);
+  return { success: true, data: { started: true, consolidated } };
 }

@@ -22,10 +22,10 @@ export default async function ClientSettingsPage({
   const scrapingJobs = await getClientScrapingJobs(client.id);
   const onboardingStatus = getClientOnboardingStatus({ client, diagnostic, files });
   const readiness = getRuntimeReadiness();
-  const action = updateClientSettings.bind(null, client.id);
-  const uploadSessionAction = uploadMeliSessionFile.bind(null, client.id);
-  const validateSessionAction = validateMeliSession.bind(null, client.id);
-  const runScrapingAction = runScrapingJob.bind(null, client.id);
+  const action = updateClientSettings.bind(null, client.id) as unknown as (formData: FormData) => Promise<void>;
+  const uploadSessionAction = uploadMeliSessionFile.bind(null, client.id) as unknown as (formData: FormData) => Promise<void>;
+  const validateSessionAction = validateMeliSession.bind(null, client.id) as unknown as (formData: FormData) => Promise<void>;
+  const runScrapingAction = runScrapingJob.bind(null, client.id) as unknown as (formData: FormData) => Promise<void>;
 
   return (
     <AppShell mode="operator">

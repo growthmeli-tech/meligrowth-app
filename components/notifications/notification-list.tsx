@@ -46,7 +46,7 @@ export function NotificationList({
           <h1 className="text-3xl font-bold text-zinc-950">Notificaciones</h1>
           <p className="mt-2 text-zinc-600">{unread} sin leer de {notifications.length} recientes.</p>
         </div>
-        <form action={markAllNotificationsRead}>
+        <form action={markAllNotificationsRead as unknown as (formData: FormData) => Promise<void>}>
           <Button variant="secondary" type="submit">
             <Check className="h-4 w-4" />
             Marcar todas como leídas
@@ -86,7 +86,7 @@ export function NotificationList({
                   </div>
                 </div>
                 {!notification.leida ? (
-                  <form action={markNotificationRead.bind(null, notification.id)}>
+                  <form action={markNotificationRead.bind(null, notification.id) as unknown as (formData: FormData) => Promise<void>}>
                     <Button variant="ghost" type="submit">
                       <Check className="h-4 w-4" />
                       Leída

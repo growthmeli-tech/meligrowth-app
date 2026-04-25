@@ -134,7 +134,7 @@ export function DiagnosticForm({
   action
 }: {
   diagnostic: Diagnostic;
-  action: (formData: FormData) => void | Promise<unknown>;
+  action: (formData: FormData) => void | Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<BlockKey>("salud");
   const [values, setValues] = useState(() => inputFromDiagnostic(diagnostic));

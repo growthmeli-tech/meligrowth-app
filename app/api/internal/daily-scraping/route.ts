@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const dispatch = body.dispatch !== false;
   const clientId = typeof body.client_id === "string" ? body.client_id : null;
-  const result = await runDailyScrapingDispatch({ dispatch, clientId });
+  const result = await runDailyScrapingDispatch({ dispatch, clientId, useServiceRole: true });
 
   return NextResponse.json(result, { status: result.ok ? 200 : 500 });
 }

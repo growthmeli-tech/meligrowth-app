@@ -1,41 +1,62 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/lib/types/api";
+import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
-function redirectPath(role: "operator" | "client") {
-  return role === "client" ? "/client/notifications" : "/operator/notifications";
-}
-
-export async function markNotificationRead(notificationId: string) {
+export async function markNotificationRead(notificationId: string): Promise<ActionResult<{ read: boolean }>> {
   const profile = await getCurrentProfile();
 
   if (isSupabaseConfigured()) {
     const supabase = await createServerSupabaseClient();
-    await supabase.from("notifications").update({ leida: true }).eq("id", notificationId).eq("user_id", profile.id);
+    const { error } = await supabase
+      .from("notifications")
+      .update({ leida: true })
+      .eq("id", notificationId)
+      .eq("user_id", profile.id);
+    if (error) {
+      logServerError("markNotificationRead", error, { notificationId, userId: profile.id });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo actualizar la notificacion",
+        code: error.code
+      };
+    }
   }
 
   revalidatePath("/operator/notifications");
   revalidatePath("/client/notifications");
   revalidatePath("/operator/dashboard");
   revalidatePath("/client/dashboard");
-  redirect(redirectPath(profile.role));
+  return { success: true, data: { read: true } };
 }
 
-export async function markAllNotificationsRead() {
+export async function markAllNotificationsRead(): Promise<ActionResult<{ readAll: boolean }>> {
   const profile = await getCurrentProfile();
 
   if (isSupabaseConfigured()) {
     const supabase = await createServerSupabaseClient();
-    await supabase.from("notifications").update({ leida: true }).eq("user_id", profile.id).eq("leida", false);
+    const { error } = await supabase
+      .from("notifications")
+      .update({ leida: true })
+      .eq("user_id", profile.id)
+      .eq("leida", false);
+    if (error) {
+      logServerError("markAllNotificationsRead", error, { userId: profile.id });
+      return {
+        success: false,
+        error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron actualizar las notificaciones",
+        code: error.code
+      };
+    }
   }
 
   revalidatePath("/operator/notifications");
   revalidatePath("/client/notifications");
   revalidatePath("/operator/dashboard");
   revalidatePath("/client/dashboard");
-  redirect(redirectPath(profile.role));
+  return { success: true, data: { readAll: true } };
 }

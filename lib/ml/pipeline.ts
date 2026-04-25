@@ -6,7 +6,7 @@ import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoin
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
 import type { MlDataSource, MlDiagnosticPrefill } from "@/lib/ml/mappers/types";
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type PipelineResult = { success: true; data: MlDiagnosticPrefill } | { success: false; error: string };
 type ScraperTipo = "salud" | "publicaciones" | "ads" | "stock";
@@ -38,7 +38,7 @@ async function callScraperJob(jobId: string) {
 }
 
 async function triggerScrapeJob(clientId: string, tipo: ScraperTipo) {
-  const supabase = createServiceSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { data: job, error: insertError } = await supabase
     .from("scraping_jobs")
     .insert({

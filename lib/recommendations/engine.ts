@@ -104,14 +104,14 @@ export function generateRecommendations(diagnostic: DiagnosticRow): DiagnosticRe
     }
   }
 
-  const adsAnalysis =
-    hasAdsData(diagnostic) &&
-    analyzeAds({
-      margen_pre_ads: diagnostic.margen_pre_ads ?? 0,
-      gasto_ads: diagnostic.gasto_ads ?? 0,
-      ventas_ads: diagnostic.ventas_ads ?? 0,
-      ventas_totales: diagnostic.ventas_totales ?? 0
-    });
+  const adsAnalysis = hasAdsData(diagnostic)
+    ? analyzeAds({
+        margen_pre_ads: diagnostic.margen_pre_ads ?? 0,
+        gasto_ads: diagnostic.gasto_ads ?? 0,
+        ventas_ads: diagnostic.ventas_ads ?? 0,
+        ventas_totales: diagnostic.ventas_totales ?? 0
+      })
+    : null;
 
   if (adsAnalysis && adsAnalysis.estado_salud !== "sin_datos") {
     const prioridad = adsAnalysis.estado_salud === "critico" ? "urgente" : adsAnalysis.estado_salud === "aceptable" ? "alta" : "media";

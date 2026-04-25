@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/data";
-import { isScraperPipelineConfigured, isSupabaseServiceConfigured } from "@/lib/supabase/config";
+import { isScraperPipelineConfigured, isSupabaseConfigured } from "@/lib/supabase/config";
 import { runDailyScrapingDispatch } from "@/lib/scraping/daily-dispatch";
 
 export async function runDailyScraping(formData: FormData) {
   const profile = await getCurrentProfile();
   if (profile.role !== "operator") redirect("/client/dashboard");
 
-  if (!isSupabaseServiceConfigured()) {
+  if (!isSupabaseConfigured()) {
     redirect("/operator/settings?daily_error=supabase");
   }
 

@@ -1,5 +1,6 @@
 import { buildDiagnosticInputFromScraping, hasRequiredScrapingBlocks } from "@/lib/diagnostics/scraping-input";
 import { persistDiagnostic } from "@/lib/diagnostics/persist-diagnostic";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 
 type JobResult = {
@@ -12,7 +13,9 @@ export async function consolidateAllScrapingClients() {
   const { data: clients, error } = await supabase.from("clients").select("id").eq("active", true);
   if (error) return { ok: false, error: error.message };
 
-  const results = await Promise.all((clients ?? []).map((client) => consolidateScrapingClient(client.id)));
+  const results = await Promise.all(
+    (clients ?? []).map((client) => consolidateScrapingClient(client.id, { useServiceRole: true }))
+  );
   return {
     ok: true,
     consolidated: results.filter((item) => item.ok && item.consolidated).length,
@@ -22,8 +25,8 @@ export async function consolidateAllScrapingClients() {
   };
 }
 
-export async function consolidateScrapingClient(clientId: string) {
-  const supabase = createServiceSupabaseClient();
+export async function consolidateScrapingClient(clientId: string, options?: { useServiceRole?: boolean }) {
+  const supabase = options?.useServiceRole ? createServiceSupabaseClient() : await createServerSupabaseClient();
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: existing } = await supabase

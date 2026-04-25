@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { ActionResult } from "@/lib/types/api";
 import type { Plan } from "@/lib/types";
+import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -31,9 +33,9 @@ function dueDate(days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-export async function createClientOnboarding(formData: FormData) {
+export async function createClientOnboarding(formData: FormData): Promise<ActionResult<{ clientId: string }>> {
   if (!isSupabaseConfigured()) {
-    redirect("/operator/clients/c-1/diagnostic/new?onboarding=demo");
+    return { success: true, data: { clientId: "c-1" } };
   }
 
   const profile = await getCurrentProfile();
@@ -49,7 +51,7 @@ export async function createClientOnboarding(formData: FormData) {
   const selectedClientUserId = cleanText(formData.get("client_user_id"));
 
   if (!name) {
-    redirect("/operator/clients/new?error=missing");
+    return { success: false, error: "El nombre del cliente es obligatorio", code: "VALIDATION_ERROR" };
   }
 
   const supabase = await createServerSupabaseClient();
@@ -75,10 +77,15 @@ export async function createClientOnboarding(formData: FormData) {
     .single();
 
   if (error || !client) {
-    redirect("/operator/clients/new?error=create");
+    logServerError("createClientOnboarding.client", error ?? "client_not_created");
+    return {
+      success: false,
+      error: error && isPostgresError(error) ? formatSupabaseError(error) : "No se pudo crear el cliente",
+      code: error?.code
+    };
   }
 
-  await supabase.from("actions").insert([
+  const { error: actionsError } = await supabase.from("actions").insert([
     {
       client_id: client.id,
       created_by: profile.id,
@@ -111,5 +118,14 @@ export async function createClientOnboarding(formData: FormData) {
     }
   ]);
 
-  redirect(`/operator/clients/${client.id}/diagnostic/new?onboarding=created`);
+  if (actionsError) {
+    logServerError("createClientOnboarding.actions", actionsError, { clientId: client.id });
+    return {
+      success: false,
+      error: isPostgresError(actionsError) ? formatSupabaseError(actionsError) : "No se pudieron crear acciones iniciales",
+      code: actionsError.code
+    };
+  }
+
+  return { success: true, data: { clientId: client.id } };
 }
