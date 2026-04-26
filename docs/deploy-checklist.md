@@ -1,152 +1,66 @@
-# Deploy Checklist
+## Estado de deploy
 
-Checklist operativo para dejar MeliGrowth listo en deploy antes de probar una cuenta real de Mercado Libre.
+**Resultado actual: DEPLOY BLOQUEADO**
 
-## 1. App web
+Bloqueantes principales:
+- ❌ `state` OAuth sin proteccion CSRF robusta.
+- ❌ Tokens ML pueden quedar en texto plano tras refresh.
+- ❌ Scraper fallback devuelve mocks (riesgo de dato no real).
+- ❌ Falta trazabilidad persistida de `data_sources` ML.
 
-Deploy sugerido: Vercel.
+## SEGURIDAD
+- ✅ RLS habilitado en tablas de dominio principales.
+- ✅ Bucket `meli-sessions` privado con politicas operator.
+- ❌ CSRF OAuth robusto (`state` firmado + nonce + TTL) no implementado.
+- ✅ Endpoints internos validan `x-cron-secret`.
+- ✅ No se detectaron secrets hardcodeados en app/lib/components.
+- ⚠️ `service_role` no se expone en cliente, pero el flujo ML sensible no esta totalmente encapsulado para jobs internos.
+- ❌ No hay garantia de cifrado consistente de tokens en storage.
 
-Variables mínimas:
+## INTEGRIDAD DE DATOS
+- ✅ Pesos de scoring suman 100.
+- ❌ Cap inteligente de Salud no coincide con regla esperada.
+- ✅ ACOS/ROAS/TACOS matematicamente correctos.
+- ❌ Benchmarks no estan alineados entre scoring y recomendaciones.
+- ✅ Enums SQL <-> TypeScript estan mayormente sincronizados.
+- ⚠️ Hay server actions con `ActionResult<T>`, pero otras acciones usan `redirect` y no contrato uniforme.
+- ⚠️ Persistencia de errores es razonable, pero hay writes criticos sin chequeo de error en callback OAuth.
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-CRON_SECRET=
-APP_URL=https://tu-app.vercel.app
-APP_ENCRYPTION_KEY=
-PARSER_SERVICE_URL=
-PARSER_SERVICE_SECRET=
-SCRAPER_SERVICE_URL=
-SCRAPER_SERVICE_SECRET=
-SCRAPER_MOCK_MODE=false
-RESEND_API_KEY=
-REPORT_FROM_EMAIL=
-SCORE_ALERT_FROM_EMAIL=
-SCORE_ALERT_CC_EMAILS=
-```
+## INTEGRACION ML
+- ⚠️ Flujo authorize->callback existe parcialmente; falta hardening de seguridad.
+- ✅ Refresh de token con margen (5 min) implementado.
+- ✅ Pipeline cubre 5 bloques con fallback.
+- ⚠️ Fallback logistica usa bloque scraper `stock` (desalineado).
+- ❌ `data_sources` no persiste en diagnostico.
+- ❌ Scraper real aun no implementa extraccion real (mock en runtime).
+- ❌ `SCRAPER_MOCK_MODE=false` no esta garantizado por defecto.
 
-Checks:
+## PERFORMANCE
+- ✅ Dashboard evita `select('*')` en consultas criticas.
+- ✅ No N+1 evidente en lectura de diagnosticos del dashboard.
+- ✅ Trigger `score_history` existe.
+- ✅ Indices principales alineados con queries frecuentes.
+- ⚠️ Dispatch scraping secuencial (riesgo en 32/100 cuentas).
+- ⚠️ Sin gobernanza observable de rate-limit ML (budget + metricas).
 
-1. `APP_URL` debe apuntar al deploy real.
-2. `SCRAPER_MOCK_MODE=false` si querés navegación real.
-3. `CRON_SECRET` debe coincidir entre app y Edge Functions.
-4. `APP_ENCRYPTION_KEY` debe existir para cifrar sesiones sensibles.
+## EXPERIENCIA
+- ✅ Redirect de `/` por rol implementado.
+- ✅ Mensajes de error en espanol en pantallas principales.
+- ✅ Submit loading/deshabilitado en formulario de diagnostico.
+- ⚠️ Mapeo de estados/colores no coincide 1:1 con semaforo de 6 estados esperado.
+- ⚠️ Delta de score no siempre visible (varios componentes usan `delta=null`).
 
-## 2. Scraper
+## INFRAESTRUCTURA
+- ⚠️ No existe `lib/config/env.ts` dedicado; validaciones de runtime viven en `lib/supabase/config.ts`.
+- ✅ Healthcheck `/api/internal/health` responde con checks y readiness.
+- ❌ Falta `docs/testing-cambios.md` y `docs/bugs-encontrados.md` (gap de proceso).
+- ❌ No existe `docs/mocks-pendientes.md`.
 
-Deploy sugerido: Fly.io o Railway.
+## Decision final
 
-Variables mínimas:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-SCRAPER_SERVICE_SECRET=
-SCRAPER_MOCK_MODE=false
-APP_ENCRYPTION_KEY=
-SCRAPER_USER_AGENT=
-```
-
-Checks:
-
-1. Exponer `/health`.
-2. Exponer `/jobs/run`.
-3. Exponer `/session/validate`.
-4. Verificar que el servicio tenga Playwright Chromium instalado.
-5. Confirmar que puede descifrar sesiones con `APP_ENCRYPTION_KEY`.
-
-## 3. Parser
-
-Deploy sugerido: Railway o Fly.io.
-
-Variables mínimas:
-
-```env
-PARSER_SERVICE_SECRET=
-```
-
-Checks:
-
-1. Exponer `/parse`.
-2. Aceptar `.csv`, `.xlsx` y `.ods`.
-
-## 4. Supabase
-
-### Base y auth
-
-1. Correr migraciones:
-   - `0001_initial_schema.sql`
-   - `0002_pricing_proposals.sql`
-   - `0003_meli_sessions.sql`
-2. Confirmar usuarios `operator` y `client` en `auth.users`.
-3. Confirmar filas en `public.users`.
-
-### Storage
-
-Buckets esperados:
-
-1. `client-files`
-2. `meli-sessions`
-
-### Edge Functions
-
-Deployar:
-
-1. `process-file`
-2. `daily-scraping`
-3. `consolidate-scraping`
-4. `score-alert`
-5. `weekly-report`
-6. `cleanup-ops`
-
-Variables compartidas en Supabase Functions:
-
-```env
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-CRON_SECRET=
-APP_URL=
-APP_ENCRYPTION_KEY=
-PARSER_SERVICE_URL=
-PARSER_SERVICE_SECRET=
-SCRAPER_SERVICE_URL=
-SCRAPER_SERVICE_SECRET=
-RESEND_API_KEY=
-REPORT_FROM_EMAIL=
-SCORE_ALERT_FROM_EMAIL=
-SCORE_ALERT_CC_EMAILS=
-```
-
-## 5. Verificación técnica mínima
-
-1. `GET /api/internal/health` con `x-cron-secret`
-2. `/operator/settings` debe mostrar:
-   - Core Supabase listo
-   - Scraper listo
-   - `APP_URL` presente
-   - `APP_ENCRYPTION_KEY` presente
-   - `SCRAPER_MOCK_MODE=false`
-3. `SCRAPER_SERVICE_URL/health` debe responder `{ ok: true }`
-
-## 6. Prueba operativa mínima
-
-1. Crear o editar cliente real.
-2. Cargar `seller_id` y `meli_account_url`.
-3. Subir sesión JSON.
-4. Validar sesión.
-5. Correr scraping manual de `Salud`.
-6. Revisar `scraping_jobs`.
-7. Correr dispatch diario.
-8. Confirmar consolidación en `diagnostics`.
-
-## 7. Qué mirar si algo falla
-
-1. `meli_sessions.last_error`
-2. `scraping_jobs.error_msg`
-3. logs del scraper
-4. `APP_URL` mal configurada
-5. `SCRAPER_MOCK_MODE=true`
-6. `APP_ENCRYPTION_KEY` faltante o distinta entre app y scraper
-7. bucket `meli-sessions` sin acceso o vacío
-8. captcha o auth wall de Mercado Libre
+- **Deploy**: ❌ NO APROBADO
+- **Condicion para habilitar deploy**:
+  1) Corregir CSRF + cifrado tokens ML.
+  2) Eliminar mocks del scraper en entorno productivo.
+  3) Persistir trazabilidad de origen de datos ML.
+  4) Cerrar gaps de testing/documentacion obligatoria.

@@ -5,7 +5,9 @@ const child = spawn(npmCommand, ["run", "dev", "--", "--hostname", "127.0.0.1", 
   stdio: "inherit",
   env: {
     ...process.env,
-    MELIGROWTH_FORCE_DEMO: "1"
+    MELIGROWTH_FORCE_DEMO: "1",
+    WATCHPACK_POLLING: "true",
+    CHOKIDAR_USEPOLLING: "1"
   }
 });
 
