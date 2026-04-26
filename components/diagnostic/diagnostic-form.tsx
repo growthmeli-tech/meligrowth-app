@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { BlockScoreRealtime } from "@/components/diagnostic/block-score-realtime";
 import { DiagnosticFieldBenchmark } from "@/components/diagnostic/diagnostic-field-benchmark";
@@ -9,6 +9,7 @@ import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { scoreDiagnostic } from "@/lib/scoring";
+import type { MlDataSource } from "@/lib/ml/mappers/types";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import type { ActionResult } from "@/lib/types/api";
 import type { BlockKey, Diagnostic, DiagnosticInput } from "@/lib/types";
@@ -142,9 +143,11 @@ function warningsFor(values: Record<string, number | null>) {
 }
 
 export function DiagnosticForm({
+  clientId,
   diagnostic,
   action
 }: {
+  clientId: string;
   diagnostic: Diagnostic;
   action: (formData: FormData) => Promise<ActionResult<SaveDiagnosticPayload>>;
 }) {
@@ -152,11 +155,88 @@ export function DiagnosticForm({
   const [values, setValues] = useState<Record<string, number | null>>(() => inputFromDiagnostic(diagnostic));
   const [expandedOptional, setExpandedOptional] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMlLoading, setIsMlLoading] = useState(false);
+  const [mlMessage, setMlMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savedResult, setSavedResult] = useState<SaveDiagnosticPayload | null>(null);
+  const [sourceByBlock, setSourceByBlock] = useState<Record<BlockKey, MlDataSource>>(() => {
+    const fallback: MlDataSource = diagnostic.source === "manual" ? "manual" : "scraper";
+    return {
+      salud: fallback,
+      publicaciones: fallback,
+      ads: fallback,
+      logistica: fallback,
+      stock: fallback
+    };
+  });
   const scored = useMemo(() => scoreDiagnostic(buildInput(values)), [values]);
   const warnings = useMemo(() => warningsFor(values), [values]);
   const activeFields = fields.filter((field) => field.block === activeTab);
+  const submissionSource = useMemo(() => {
+    const hasAutomatedData = Object.values(sourceByBlock).some((source) => source === "api" || source === "scraper");
+    return hasAutomatedData ? "scraping" : "manual";
+  }, [sourceByBlock]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    setIsMlLoading(true);
+
+    async function loadMlPrefill() {
+      try {
+        const response = await fetch("/api/ml/sync", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ client_id: clientId }),
+          signal: controller.signal
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { success: true; data: Record<string, unknown> & { data_sources?: Record<string, MlDataSource> } }
+          | { success: false; error?: string }
+          | null;
+        if (!response.ok || !payload || !payload.success) {
+          setMlMessage(payload && "error" in payload && payload.error ? payload.error : "No pudimos sincronizar Mercado Libre. Podés completar manualmente.");
+          return;
+        }
+
+        setValues((current) => {
+          const next = { ...current };
+          for (const field of fields) {
+            const raw = payload.data[field.name];
+            if (raw === null) {
+              next[field.name] = null;
+            } else if (typeof raw === "number" && Number.isFinite(raw)) {
+              next[field.name] = raw;
+            }
+          }
+          return next;
+        });
+
+        const dataSources = payload.data.data_sources ?? {};
+        const normalizeSource = (source: MlDataSource | undefined): MlDataSource => source ?? "unavailable";
+        setSourceByBlock({
+          salud: normalizeSource(dataSources.salud),
+          publicaciones: normalizeSource(dataSources.publicaciones),
+          ads: normalizeSource(dataSources.ads),
+          logistica: normalizeSource(dataSources.logistica),
+          stock: normalizeSource(dataSources.stock)
+        });
+        setMlMessage("Datos pre-cargados desde Mercado Libre. Revisá los campos marcados por fuente.");
+      } catch {
+        setMlMessage("No pudimos sincronizar Mercado Libre en este momento. Podés continuar manualmente.");
+      } finally {
+        clearTimeout(timeout);
+        setIsMlLoading(false);
+      }
+    }
+
+    void loadMlPrefill();
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [clientId]);
 
   function updateValue(name: string, value: number | null) {
     setValues((current) => ({ ...current, [name]: value }));
@@ -168,6 +248,7 @@ export function DiagnosticForm({
     setSubmitError(null);
 
     const formData = new FormData(event.currentTarget);
+    formData.set("source", submissionSource);
     const result = await action(formData);
 
     if (!result.success) {
@@ -215,6 +296,8 @@ export function DiagnosticForm({
         </label>
 
         <section>
+          {isMlLoading ? <p className="mb-3 text-sm font-semibold text-zinc-600">Sincronizando datos desde Mercado Libre...</p> : null}
+          {mlMessage ? <p className="mb-3 text-sm text-zinc-600">{mlMessage}</p> : null}
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-zinc-950">{tabs.find((tab) => tab.key === activeTab)?.label}</h2>
@@ -228,7 +311,7 @@ export function DiagnosticForm({
             fields={activeFields.filter((field) => field.zone === "rapida")}
             values={values}
             onChange={updateValue}
-            source={diagnostic.source === "manual" ? "manual" : "api"}
+            sourceByBlock={sourceByBlock}
           />
           <button type="button" className="mt-4 text-sm font-semibold text-brand-dark" onClick={() => setExpandedOptional((current) => !current)}>
             {expandedOptional ? "Ocultar Zona B" : "Ver datos opcionales"}
@@ -239,7 +322,7 @@ export function DiagnosticForm({
               fields={activeFields.filter((field) => field.zone === "opcional")}
               values={values}
               onChange={updateValue}
-              source={diagnostic.source === "manual" ? "manual" : "api"}
+              sourceByBlock={sourceByBlock}
             />
           ) : null}
         </section>
@@ -289,13 +372,13 @@ function FieldZone({
   fields: zoneFields,
   values,
   onChange,
-  source
+  sourceByBlock
 }: {
   title: string;
   fields: MetricField[];
   values: Record<string, number | null>;
   onChange: (name: string, value: number | null) => void;
-  source: "api" | "manual";
+  sourceByBlock: Record<BlockKey, MlDataSource>;
 }) {
   if (zoneFields.length === 0) return null;
 
@@ -311,7 +394,7 @@ function FieldZone({
               metrica={field.name}
               value={values[field.name]}
               onChange={(value) => onChange(field.name, value)}
-              dataSource={source}
+              dataSource={sourceByBlock[field.block]}
             />
             <p className="mt-1 text-xs text-zinc-500">{field.hint}</p>
           </div>

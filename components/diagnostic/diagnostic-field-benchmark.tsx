@@ -12,7 +12,7 @@ type DiagnosticFieldBenchmarkProps = {
   value: number | null;
   onChange: (value: number | null) => void;
   metrica: string;
-  dataSource?: "api" | "manual" | null;
+  dataSource?: "api" | "scraper" | "manual" | "unavailable" | null;
   disabled?: boolean;
 };
 
@@ -80,8 +80,10 @@ export function DiagnosticFieldBenchmark({ name, label, value, onChange, metrica
   );
 }
 
-function DataSourceTag({ source }: { source: "api" | "manual" | null }) {
+function DataSourceTag({ source }: { source: "api" | "scraper" | "manual" | "unavailable" | null }) {
   if (source === "api") return <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">API</span>;
+  if (source === "scraper") return <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">Scraper</span>;
+  if (source === "unavailable") return <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Sin dato</span>;
   return <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">Manual</span>;
 }
 

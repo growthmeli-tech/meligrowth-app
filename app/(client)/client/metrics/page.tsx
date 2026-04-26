@@ -4,17 +4,20 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ScoreBadge } from "@/components/score/score-badge";
 import { Card } from "@/components/ui/card";
 import { getClientDashboardBundle } from "@/lib/data";
+import { getDiagnosticHistory } from "@/lib/data/diagnostics";
 import { addScoreDeltas, filterHistoryByPeriod, getCurrentAndPreviousHistory, normalizeHistoryPeriod } from "@/lib/history";
 import { clientBlockLabels } from "@/lib/theme";
 import type { BlockKey } from "@/lib/types";
 
 export default async function ClientMetricsPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const resolvedSearchParams = await searchParams;
-  const { diagnostic, history } = await getClientDashboardBundle();
+  const { client, diagnostic, history } = await getClientDashboardBundle();
+  const historyResult = await getDiagnosticHistory(client.id, 18);
+  const sourceHistory = historyResult.success ? historyResult.data : history;
   const period = normalizeHistoryPeriod(resolvedSearchParams.period);
-  const filteredHistory = filterHistoryByPeriod(history, period);
-  const { current, previous } = getCurrentAndPreviousHistory(history);
-  const latestDelta = addScoreDeltas(history).at(-1)?.delta ?? null;
+  const filteredHistory = filterHistoryByPeriod(sourceHistory, period);
+  const { current, previous } = getCurrentAndPreviousHistory(sourceHistory);
+  const latestDelta = addScoreDeltas(sourceHistory).at(-1)?.delta ?? null;
   const rows = Object.entries(diagnostic.scores) as Array<[BlockKey, number]>;
   return (
     <AppShell mode="client">

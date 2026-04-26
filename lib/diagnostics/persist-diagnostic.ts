@@ -27,7 +27,7 @@ export async function persistDiagnostic({
   const scored = scoreDiagnostic(input);
 
   const [{ data: clientRow }, { data: previousDiagnostic }] = await Promise.all([
-    supabase.from("clients").select("name, operator_id").eq("id", clientId).single(),
+    supabase.from("clients").select("name, operator_id, client_user_id").eq("id", clientId).single(),
     supabase
       .from("diagnostics")
       .select("score_global, score_salud, score_publicaciones, score_ads, score_logistica, score_stock")
@@ -155,6 +155,17 @@ export async function persistDiagnostic({
     if (!emailResult.ok) {
       console.error("score_alert_email_failed", emailResult.error);
     }
+  }
+
+  if (clientRow?.client_user_id) {
+    await supabase.from("notifications").insert({
+      client_id: clientId,
+      user_id: clientRow.client_user_id,
+      tipo: "accion_completada",
+      titulo: "Nuevo diagnóstico disponible",
+      mensaje: "Actualizamos tu diagnóstico y ya podés ver el nuevo estado de tu cuenta en el dashboard.",
+      leida: false
+    });
   }
 
   return {

@@ -73,13 +73,15 @@ export async function createDiagnostic(
 
   const input = inputFromForm(formData);
   const date = String(formData.get("date") || new Date().toISOString().slice(0, 10));
+  const sourceInput = String(formData.get("source") || "manual");
+  const source: "manual" | "scraping" | "import" = sourceInput === "scraping" || sourceInput === "import" ? sourceInput : "manual";
 
   const result = await persistDiagnostic({
     supabase,
     clientId,
     input,
     date,
-    source: "manual",
+    source,
     createdBy: user.id
   });
 

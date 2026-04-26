@@ -9,18 +9,16 @@ import { ScoreBadge } from "@/components/score/score-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getClientDashboardBundle } from "@/lib/data";
+import { getDiagnosticWithDelta, getEstadoSimpleParaCliente } from "@/lib/data/diagnostics";
 import { clientBlockLabels, estadoLabels } from "@/lib/theme";
 import type { BlockKey } from "@/lib/types";
 import { formatPct } from "@/lib/utils";
 
 export default async function ClientDashboardPage() {
   const { client, diagnostic, actions } = await getClientDashboardBundle();
-  const simpleState =
-    diagnostic.scoreGlobal >= 85
-      ? "Tu cuenta está muy sólida y creciendo."
-      : diagnostic.scoreGlobal >= 70
-        ? "Tu cuenta está mejorando mes a mes."
-        : "Tu cuenta necesita ajustes y ya tenemos un plan para eso.";
+  const withDelta = await getDiagnosticWithDelta(client.id);
+  const delta = withDelta.success ? withDelta.data.delta : null;
+  const simpleState = getEstadoSimpleParaCliente(diagnostic.estadoGlobal);
   const openActions = actions.filter((action) => action.estado !== "completada");
   const visibleActions = openActions.slice(0, 4);
   const summaryByBlock = (Object.entries(diagnostic.scores) as Array<[BlockKey, number]>).map(([key, score]) => ({
@@ -57,7 +55,7 @@ export default async function ClientDashboardPage() {
             </div>
             <ClientScoreHero
               score={diagnostic.scoreGlobal}
-              delta={null}
+              delta={delta}
               estado_simple={simpleState}
               mes={new Date(diagnostic.date).toLocaleDateString("es-AR", { month: "long", year: "numeric" })}
             />

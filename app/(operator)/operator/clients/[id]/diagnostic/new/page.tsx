@@ -30,7 +30,7 @@ export default async function NewDiagnosticPage({
               : "No se pudo guardar el diagnóstico. Revisá permisos RLS y que el cliente pertenezca al operador."}
           </div>
         ) : null}
-        <DiagnosticForm diagnostic={diagnostic} action={saveAction} />
+        <DiagnosticForm clientId={client.id} diagnostic={diagnostic} action={saveAction} />
       </div>
     </AppShell>
   );
