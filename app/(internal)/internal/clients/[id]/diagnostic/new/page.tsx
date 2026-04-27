@@ -25,10 +25,10 @@ export default async function NewDiagnosticPage({
   }
 
   const accountsResult = await listMlAccountsByCompany(resolvedParams.id, { activeOnly: true });
-  let mlAccount = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
+  let mlAccount = accountsResult.success ? pickPreferredMlAccount(accountsResult.data) : null;
   if (!mlAccount) {
     const fallbackAccountsResult = await listMlAccountsByCompany(resolvedParams.id);
-    mlAccount = fallbackAccountsResult.success ? (fallbackAccountsResult.data[0] ?? null) : null;
+    mlAccount = fallbackAccountsResult.success ? pickPreferredMlAccount(fallbackAccountsResult.data) : null;
   }
 
   if (!mlAccount) {
@@ -49,6 +49,11 @@ export default async function NewDiagnosticPage({
   }
 
   const latestSnapshotResult = await getLatestMetricSnapshotByAccount(mlAccount.id);
+  console.info("[ml-diagnostic-new] selected_ml_account", {
+    companyId: resolvedParams.id,
+    mlAccountId: mlAccount.id,
+    hasSellerId: Boolean(mlAccount.seller_id)
+  });
   const diagnostic = buildInitialDiagnostic(mlAccount.company_id, latestSnapshotResult.success ? latestSnapshotResult.data : null);
   const saveAction = createDiagnostic.bind(null, mlAccount.company_id, mlAccount.id);
 
@@ -69,6 +74,14 @@ export default async function NewDiagnosticPage({
       <DiagnosticForm mlAccountId={mlAccount.id} companyId={mlAccount.company_id} diagnostic={diagnostic} action={saveAction} />
     </main>
   );
+}
+
+function pickPreferredMlAccount<T extends { id: string; seller_id: string | null; active: boolean | null }>(accounts: T[]): T | null {
+  if (accounts.length === 0) return null;
+  const connected = accounts.find((account) => Boolean(account.seller_id));
+  if (connected) return connected;
+  const active = accounts.find((account) => account.active === true);
+  return active ?? accounts[0];
 }
 
 function buildInitialDiagnostic(companyId: string, snapshot: Record<string, unknown> | null): Diagnostic {

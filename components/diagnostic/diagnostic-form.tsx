@@ -189,7 +189,7 @@ export function DiagnosticForm({
         const response = await fetch("/api/ml/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ client_id: companyId, ml_account_id: mlAccountId }),
+          body: JSON.stringify({ ml_account_id: mlAccountId }),
           signal: controller.signal
         });
         const payload = (await response.json().catch(() => null)) as
