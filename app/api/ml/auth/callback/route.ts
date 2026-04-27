@@ -64,6 +64,7 @@ export async function GET(request: Request) {
       mlAccountId: mlAccount.id,
       companyId: mlAccount.company_id
     });
+    const mlAccountId = mlAccount.id;
 
     const storagePath = `${state}/session.json`;
     const tokenPayload = {
@@ -76,12 +77,22 @@ export async function GET(request: Request) {
     await saveSessionTokens(storagePath, tokenPayload);
     console.info(`${callbackTag} tokens_saved`, { storagePath, mlAccountId: state });
 
-    const { error: updateError } = await supabase.from("ml_accounts").update({ seller_id: String(tokens.user_id) }).eq("id", state);
-    if (updateError) {
-      console.error(`${callbackTag} seller_update_failed`, { state, error: updateError.message });
-      throw new Error("Could not update ml_accounts.seller_id");
+    console.log("[ml-auth-callback] attempting_update", { mlAccountId, sellerId: tokens.user_id });
+    try {
+      const { error: updateError } = await supabase
+        .from("ml_accounts")
+        .update({ seller_id: tokens.user_id.toString() })
+        .eq("id", mlAccountId);
+
+      if (updateError) {
+        console.error("[ml-auth-callback] update_error_detail:", JSON.stringify(updateError));
+        throw new Error(`update_failed: ${updateError.message} code:${updateError.code}`);
+      }
+    } catch (err) {
+      console.error("[ml-auth-callback] update_exception:", err);
+      throw err;
     }
-    console.info(`${callbackTag} seller_updated`, { mlAccountId: state, sellerId: String(tokens.user_id) });
+    console.info(`${callbackTag} seller_updated`, { mlAccountId, sellerId: String(tokens.user_id) });
 
     const finalRedirectUrl = new URL(`/internal/clients/${mlAccount.company_id}?ml_connected=true`, request.url);
     console.info(`${callbackTag} redirect_success`, {
