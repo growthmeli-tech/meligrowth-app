@@ -2,5 +2,20 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default function BrandLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return (
+    <div className="min-h-screen bg-[#F5F5F0]">
+      <header className="border-b border-[#E8E8E2] bg-white">
+        <nav className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-3 md:px-6">
+          <span className="text-sm font-black text-[#1A1A1A]">MELIGROWTH</span>
+          <a href="/brand/dashboard" className="text-sm font-semibold text-[#1A1A1A]">
+            Dashboard
+          </a>
+          <a href="/brand/metrics" className="text-sm font-semibold text-[#6B6B6B] hover:text-[#1A1A1A]">
+            Metricas
+          </a>
+        </nav>
+      </header>
+      <main className="mx-auto w-full max-w-6xl p-4 md:p-6">{children}</main>
+    </div>
+  );
 }

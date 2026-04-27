@@ -204,11 +204,11 @@ export function generateRecommendations(diagnostic: RecommendationsDiagnosticInp
   };
 }
 
-function hasAdsData(diagnostic: DiagnosticRow) {
+function hasAdsData(diagnostic: RecommendationsDiagnosticInput) {
   return diagnostic.gasto_ads !== null && diagnostic.ventas_ads !== null && diagnostic.ventas_totales !== null;
 }
 
-function getCriticalBlocks(diagnostic: DiagnosticRow): string[] {
+function getCriticalBlocks(diagnostic: RecommendationsDiagnosticInput): string[] {
   return [
     { label: BLOQUE_LABEL.salud, score: diagnostic.score_salud },
     { label: BLOQUE_LABEL.publicaciones, score: diagnostic.score_publicaciones },
@@ -220,7 +220,7 @@ function getCriticalBlocks(diagnostic: DiagnosticRow): string[] {
     .map((block) => block.label);
 }
 
-function getHealthyBlocks(diagnostic: DiagnosticRow): string[] {
+function getHealthyBlocks(diagnostic: RecommendationsDiagnosticInput): string[] {
   return [
     { label: BLOQUE_LABEL.salud, score: diagnostic.score_salud },
     { label: BLOQUE_LABEL.publicaciones, score: diagnostic.score_publicaciones },

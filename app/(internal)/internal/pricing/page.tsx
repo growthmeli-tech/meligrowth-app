@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Calculator, CheckCircle2, CircleAlert, ClipboardCheck, Download, FileSpreadsheet, TrendingUp, UploadCloud } from "lucide-react";
-import { importPricingTemplate, importPricingTemplateFromClientFile } from "@/app/(operator)/operator/pricing/actions";
-import { savePricingProposal } from "@/app/(operator)/operator/pricing/save-actions";
+import { importPricingTemplate, importPricingTemplateFromClientFile } from "@/app/(internal)/internal/pricing/actions";
+import { savePricingProposal } from "@/app/(internal)/internal/pricing/save-actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

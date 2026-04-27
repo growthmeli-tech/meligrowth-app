@@ -36,8 +36,5 @@ export default async function HomePage() {
     redirect(getDefaultRouteForRole(role));
   }
 
-  const { data: legacyProfile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
-
-  if (legacyProfile?.role === "client") redirect("/brand/dashboard");
-  redirect("/internal/dashboard");
+  redirect("/login");
 }

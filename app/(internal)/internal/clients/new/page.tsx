@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, FileSpreadsheet, ShieldCheck, Store } from "lucide-react";
-import { createClientOnboarding } from "@/app/(operator)/operator/clients/new/actions";
+import { createClientOnboarding } from "@/app/(internal)/internal/clients/new/actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";

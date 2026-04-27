@@ -16,7 +16,7 @@ export const DESIGN_TOKENS = {
       accentBg: "#EFF6FF",
       accentBorder: "#BFDBFE",
       badgeClassName: "bg-blue-50 text-blue-700 border-blue-200",
-      leftBorderClassName: "border-l-4 border-l-blue-600"
+      leftBorderClassName: "border-l-4 border-l-blue-500"
     },
     copilot360: {
       key: "360_copilot",
@@ -24,7 +24,7 @@ export const DESIGN_TOKENS = {
       accent: "#FFD600",
       accentBg: "#FFFBE6",
       accentBorder: "#FCD34D",
-      badgeClassName: "bg-yellow-300 text-[#1A1A1A] border-yellow-400",
+      badgeClassName: "bg-[#FFD600]/20 text-[#1A1A1A] border-[#FFD600]",
       leftBorderClassName: "border-l-4 border-l-yellow-400"
     }
   },
@@ -36,8 +36,8 @@ export const DESIGN_TOKENS = {
       bg: "#F0FDF4",
       border: "#BBF7D0",
       label: "Platinum",
-      chipClassName: "bg-emerald-100 text-emerald-800 border-emerald-200",
-      progressClassName: "bg-emerald-600"
+      chipClassName: "text-green-700 bg-green-50 border-green-200",
+      progressClassName: "bg-green-700"
     },
     muy_bueno: {
       min: 85,
@@ -46,7 +46,7 @@ export const DESIGN_TOKENS = {
       bg: "#DCFCE7",
       border: "#BBF7D0",
       label: "Muy bueno",
-      chipClassName: "bg-green-100 text-green-700 border-green-200",
+      chipClassName: "text-green-600 bg-green-50 border-green-200",
       progressClassName: "bg-green-500"
     },
     solido: {
@@ -56,7 +56,7 @@ export const DESIGN_TOKENS = {
       bg: "#EFF6FF",
       border: "#BFDBFE",
       label: "Sólido",
-      chipClassName: "bg-blue-100 text-blue-700 border-blue-200",
+      chipClassName: "text-blue-600 bg-blue-50 border-blue-200",
       progressClassName: "bg-blue-600"
     },
     en_desarrollo: {
@@ -66,7 +66,7 @@ export const DESIGN_TOKENS = {
       bg: "#FFFBEB",
       border: "#FDE68A",
       label: "En desarrollo",
-      chipClassName: "bg-amber-100 text-amber-700 border-amber-200",
+      chipClassName: "text-amber-700 bg-amber-50 border-amber-200",
       progressClassName: "bg-amber-600"
     },
     en_riesgo: {
@@ -76,7 +76,7 @@ export const DESIGN_TOKENS = {
       bg: "#FFF7ED",
       border: "#FED7AA",
       label: "En riesgo",
-      chipClassName: "bg-orange-100 text-orange-700 border-orange-200",
+      chipClassName: "text-orange-600 bg-orange-50 border-orange-200",
       progressClassName: "bg-orange-600"
     },
     critico: {
@@ -86,7 +86,7 @@ export const DESIGN_TOKENS = {
       bg: "#FEF2F2",
       border: "#FECACA",
       label: "Crítico",
-      chipClassName: "bg-red-100 text-red-700 border-red-200",
+      chipClassName: "text-red-600 bg-red-50 border-red-200",
       progressClassName: "bg-red-600"
     }
   },

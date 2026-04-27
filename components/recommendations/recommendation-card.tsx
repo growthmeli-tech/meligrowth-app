@@ -1,15 +1,18 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { DESIGN_TOKENS } from "@/lib/config/design-tokens";
 import type { Recommendation } from "@/lib/recommendations/types";
 import { cn } from "@/lib/utils";
 
-type RecommendationCardProps = {
+export type RecommendationCardProps = {
   recommendation: Recommendation;
+  variant?: "operator" | "manager";
   onCreateAction?: (rec: Recommendation) => void;
   onMarkViewed?: (id: string) => void;
   compact?: boolean;
+  loading?: boolean;
+  error?: string | null;
+  empty?: boolean;
 };
 
 const PRIORITY_STYLES: Record<Recommendation["prioridad"], string> = {
@@ -19,51 +22,82 @@ const PRIORITY_STYLES: Record<Recommendation["prioridad"], string> = {
   baja: "border-l-blue-500"
 };
 
-const PRIORITY_BADGE: Record<Recommendation["prioridad"], string> = {
-  urgente: "bg-red-600 text-white",
-  alta: "bg-orange-500 text-white",
-  media: "bg-amber-400 text-[#1A1A1A]",
-  baja: "bg-blue-500 text-white"
-};
+export function RecommendationCard({
+  recommendation,
+  variant = "operator",
+  onCreateAction,
+  onMarkViewed,
+  compact = false,
+  loading = false,
+  error = null,
+  empty = false
+}: RecommendationCardProps) {
+  if (loading) {
+    return <div className="h-32 rounded-xl bg-gray-200 animate-pulse" />;
+  }
 
-export function RecommendationCard({ recommendation, onCreateAction, onMarkViewed, compact = false }: RecommendationCardProps) {
+  if (error) {
+    return (
+      <article className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
+        <p className="text-sm text-red-600">No se pudieron cargar recomendaciones</p>
+        <button type="button" className="mt-2 bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">
+          Reintentar
+        </button>
+      </article>
+    );
+  }
+
+  if (empty) {
+    return (
+      <article className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
+        <p className="text-sm text-[#6B6B6B]">No hay recomendaciones activas</p>
+        <button type="button" className="mt-2 bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">
+          Crear accion preventiva
+        </button>
+      </article>
+    );
+  }
+
+  const priorityTone = DESIGN_TOKENS.alerts[recommendation.prioridad];
+
   return (
-    <article className={cn("rounded-xl border border-black/10 border-l-4 bg-white p-4", PRIORITY_STYLES[recommendation.prioridad])}>
-      <header className="flex flex-wrap items-center gap-2">
-        <Badge className={PRIORITY_BADGE[recommendation.prioridad]}>{recommendation.prioridad.toUpperCase()}</Badge>
-        <Badge className="bg-zinc-100 text-zinc-700">{recommendation.bloque}</Badge>
+    <article className={cn("bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4 hover:shadow-md transition-shadow duration-200", "border-l-4", PRIORITY_STYLES[recommendation.prioridad])}>
+      <header className="flex items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]" style={{ color: priorityTone.text }}>
+          {`${recommendation.prioridad} · ${recommendation.bloque}`}
+        </p>
+        {recommendation.prioridad === "urgente" ? <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" /> : null}
       </header>
 
-      <h3 className="mt-3 text-base font-bold text-zinc-950">{recommendation.titulo}</h3>
-      {!compact ? <p className="mt-1 text-sm text-zinc-600">{recommendation.descripcion}</p> : null}
+      <h3 className="mt-2 text-sm font-semibold text-[#1A1A1A] line-clamp-2">{recommendation.titulo}</h3>
+      {!compact ? <p className="mt-1 text-sm text-[#6B6B6B]">{recommendation.descripcion}</p> : null}
 
-      <section className="mt-3 rounded-lg border border-black/10 bg-zinc-50 p-3">
-        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">Qué hacer</p>
-        <p className="mt-1 text-sm font-medium text-zinc-800">{recommendation.accion_concreta}</p>
-      </section>
+      {variant === "operator" ? (
+        <div className="mt-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">QUE HACER</p>
+          <p className="mt-1 text-sm text-[#6B6B6B]">{recommendation.accion_concreta}</p>
+          <p className="mt-2 text-sm text-[#6B6B6B]">{`Objetivo: ${recommendation.benchmark_objetivo} · Impacto: ${recommendation.impacto_estimado}`}</p>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <p className="text-sm text-[#6B6B6B]">{recommendation.descripcion}</p>
+          <p className="mt-2 text-sm text-[#6B6B6B]">{`Impacto estimado si se resuelve: ${recommendation.impacto_estimado}`}</p>
+        </div>
+      )}
 
-      <footer className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <p>
-          <span className="text-zinc-500">Métrica: </span>
-          <span className="font-semibold">{recommendation.metrica_afectada}</span>
-        </p>
-        <p>
-          <span className="text-zinc-500">Objetivo: </span>
-          <span className="font-semibold">{recommendation.benchmark_objetivo}</span>
-        </p>
-        <p>
-          <span className="text-zinc-500">Impacto: </span>
-          <span className="font-semibold">{recommendation.impacto_estimado}</span>
-        </p>
-      </footer>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button type="button" onClick={() => onCreateAction?.(recommendation)}>
-          Crear acción
-        </Button>
-        <Button type="button" variant="secondary" onClick={() => onMarkViewed?.(recommendation.id)}>
-          Marcar vista
-        </Button>
+      <div className={cn("mt-4 flex gap-2", variant === "operator" ? "flex-col sm:flex-row sm:justify-between" : "justify-start")}>
+        <button
+          type="button"
+          className="bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2"
+          onClick={() => onCreateAction?.(recommendation)}
+        >
+          {variant === "manager" ? "Solicitar accion al equipo operativo →" : "Crear tarea"}
+        </button>
+        {variant === "operator" ? (
+          <button type="button" className="text-gray-500 hover:text-[#1A1A1A] text-sm font-medium" onClick={() => onMarkViewed?.(recommendation.id)}>
+            Marcar vista ✓
+          </button>
+        ) : null}
       </div>
     </article>
   );

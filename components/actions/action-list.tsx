@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleDashed } from "lucide-react";
-import { completeClientAction } from "@/app/(operator)/operator/clients/[id]/actions";
+import { completeClientAction } from "@/app/(internal)/internal/clients/[id]/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { blockLabels, priorityLabels } from "@/lib/theme";

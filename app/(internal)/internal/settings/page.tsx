@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleAlert, CircleDashed } from "lucide-react";
-import { runDailyScraping } from "@/app/(operator)/operator/settings/actions";
+import { runDailyScraping } from "@/app/(internal)/internal/settings/actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

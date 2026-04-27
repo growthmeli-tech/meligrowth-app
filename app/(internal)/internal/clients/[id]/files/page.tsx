@@ -1,5 +1,5 @@
 import { RefreshCw, UploadCloud } from "lucide-react";
-import { reprocessClientFile, uploadOperatorClientFile } from "@/app/(operator)/operator/clients/[id]/files/actions";
+import { reprocessClientFile, uploadOperatorClientFile } from "@/app/(internal)/internal/clients/[id]/files/actions";
 import { FileUploader } from "@/components/files/file-uploader";
 import { FileStatusBadge } from "@/components/files/file-status-badge";
 import { TemplateCard } from "@/components/files/template-card";

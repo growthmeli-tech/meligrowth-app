@@ -6,3 +6,4 @@ export * from "@/lib/data-v2/ingestion-runs";
 export * from "@/lib/data-v2/metric-snapshots";
 export * from "@/lib/data-v2/ml-accounts";
 export * from "@/lib/data-v2/tasks";
+export * from "@/lib/data-v2/viewer";

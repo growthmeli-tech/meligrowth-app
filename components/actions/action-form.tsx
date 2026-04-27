@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { createClientAction } from "@/app/(operator)/operator/clients/[id]/actions";
+import { createClientAction } from "@/app/(internal)/internal/clients/[id]/actions";
 import { Button } from "@/components/ui/button";
 import { blockLabels, priorityLabels } from "@/lib/theme";
 import type { BlockKey, Priority } from "@/lib/types";

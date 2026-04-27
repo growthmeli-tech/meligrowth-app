@@ -1,26 +1,15 @@
-import { cn } from "@/lib/utils";
-
-type LoadingSkeletonProps = {
-  variant: "score-card" | "client-table" | "recommendation-list" | "chart" | "diagnostic-form";
+export type LoadingSkeletonProps = {
+  variant: "score-hero" | "score-card" | "recommendation-list" | "company-table" | "client-table" | "chart" | "diagnostic-form";
   rows?: number;
 };
 
 export function LoadingSkeleton({ variant, rows = 3 }: LoadingSkeletonProps) {
-  if (variant === "score-card") {
+  if (variant === "score-hero" || variant === "score-card") {
     return (
-      <div className="animate-pulse rounded-xl border border-black/10 bg-white p-5">
-        <div className="h-4 w-24 rounded bg-zinc-200" />
-        <div className="mt-4 h-14 w-20 rounded bg-zinc-200" />
-        <div className="mt-3 h-4 w-28 rounded bg-zinc-200" />
-      </div>
-    );
-  }
-
-  if (variant === "chart") {
-    return (
-      <div className="animate-pulse rounded-xl border border-black/10 bg-white p-5">
-        <div className="h-4 w-40 rounded bg-zinc-200" />
-        <div className="mt-4 h-56 w-full rounded bg-zinc-100" />
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-24 h-24 rounded-full bg-gray-200 animate-pulse" />
+        <div className="h-4 w-40 bg-gray-200 rounded animate-pulse" />
+        <div className="h-4 w-32 bg-gray-200 rounded animate-pulse" />
       </div>
     );
   }
@@ -29,12 +18,17 @@ export function LoadingSkeleton({ variant, rows = 3 }: LoadingSkeletonProps) {
     return (
       <div className="space-y-3">
         {Array.from({ length: rows }).map((_, index) => (
-          <div key={index} className="animate-pulse rounded-xl border border-black/10 bg-white p-4">
-            <div className="h-4 w-28 rounded bg-zinc-200" />
-            <div className="mt-3 h-5 w-2/3 rounded bg-zinc-200" />
-            <div className="mt-2 h-4 w-full rounded bg-zinc-100" />
-            <div className="mt-1 h-4 w-5/6 rounded bg-zinc-100" />
-          </div>
+          <div key={index} className="h-32 rounded-xl bg-gray-200 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === "company-table" || variant === "client-table") {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: rows }).map((_, index) => (
+          <div key={index} className="h-16 rounded-lg bg-gray-200 animate-pulse" />
         ))}
       </div>
     );
@@ -42,28 +36,20 @@ export function LoadingSkeleton({ variant, rows = 3 }: LoadingSkeletonProps) {
 
   if (variant === "diagnostic-form") {
     return (
-      <div className="grid animate-pulse gap-4 md:grid-cols-2">
-        {Array.from({ length: rows * 2 }).map((_, index) => (
-          <div key={index} className="rounded-xl border border-black/10 bg-white p-4">
-            <div className="h-4 w-1/3 rounded bg-zinc-200" />
-            <div className="mt-3 h-10 w-full rounded bg-zinc-100" />
-            <div className="mt-2 h-3 w-2/3 rounded bg-zinc-100" />
+      <div className="space-y-3">
+        {Array.from({ length: rows }).map((_, index) => (
+          <div key={index} className="space-y-2">
+            <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+            <div className="h-12 w-full bg-gray-200 rounded-lg animate-pulse" />
           </div>
         ))}
       </div>
     );
   }
 
-  return (
-    <div className="animate-pulse rounded-xl border border-black/10 bg-white">
-      {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className={cn("grid grid-cols-4 gap-4 p-4", index > 0 && "border-t border-black/10")}>
-          <div className="h-4 rounded bg-zinc-100" />
-          <div className="h-4 rounded bg-zinc-100" />
-          <div className="h-4 rounded bg-zinc-100" />
-          <div className="h-4 rounded bg-zinc-100" />
-        </div>
-      ))}
-    </div>
-  );
+  if (variant === "chart") {
+    return <div className="h-40 md:h-48 rounded-xl bg-gray-200 animate-pulse" />;
+  }
+
+  return <p className="text-sm text-red-600">No pudimos renderizar loading state</p>;
 }

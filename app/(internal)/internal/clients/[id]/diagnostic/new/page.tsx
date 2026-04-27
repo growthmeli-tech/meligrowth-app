@@ -1,4 +1,4 @@
-import { createDiagnostic } from "@/app/(operator)/operator/clients/[id]/diagnostic/new/actions";
+import { createDiagnostic } from "@/app/(internal)/internal/clients/[id]/diagnostic/new/actions";
 import { DiagnosticForm } from "@/components/diagnostic/diagnostic-form";
 import { AppShell } from "@/components/layout/app-shell";
 import { getOperatorDiagnosticFormBundle } from "@/lib/data";

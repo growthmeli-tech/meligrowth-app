@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, Play, Save, ShieldCheck, UserRoundCheck } from "lucide-react";
-import { runScrapingJob, updateClientSettings, uploadMeliSessionFile, validateMeliSession } from "@/app/(operator)/operator/clients/[id]/settings/actions";
+import { runScrapingJob, updateClientSettings, uploadMeliSessionFile, validateMeliSession } from "@/app/(internal)/internal/clients/[id]/settings/actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";

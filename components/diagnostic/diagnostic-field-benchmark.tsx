@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
-import { getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
+import { useEffect, useMemo, useState } from "react";
+import { benchmarkToObjective, getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
 import type { RecommendationCategory } from "@/lib/recommendations/types";
 import { calcScore } from "@/lib/scoring";
-import { getScoreLabel, getScoreTailwind } from "@/lib/utils/scores";
+import { getScoreLabel } from "@/lib/utils/scores";
+import { DESIGN_TOKENS, type ScoreStatusKey } from "@/lib/config/design-tokens";
 
-type DiagnosticFieldBenchmarkProps = {
+export type DiagnosticFieldBenchmarkProps = {
   name: string;
   label: string;
   value: number | null;
@@ -14,6 +15,8 @@ type DiagnosticFieldBenchmarkProps = {
   metrica: string;
   dataSource?: "api" | "scraper" | "manual" | "unavailable" | null;
   disabled?: boolean;
+  loading?: boolean;
+  error?: string | null;
 };
 
 const METRIC_CATEGORY: Record<string, RecommendationCategory> = {
@@ -36,55 +39,108 @@ const METRIC_CATEGORY: Record<string, RecommendationCategory> = {
   sistema_reposicion: "stock"
 };
 
-export function DiagnosticFieldBenchmark({ name, label, value, onChange, metrica, dataSource = "manual", disabled = false }: DiagnosticFieldBenchmarkProps) {
-  const normalizedValue = value ?? 0;
-  const score = useMemo(() => calcScore(metrica, normalizedValue), [metrica, normalizedValue]);
+export function DiagnosticFieldBenchmark({
+  name,
+  label,
+  value,
+  onChange,
+  metrica,
+  dataSource = "manual",
+  disabled = false,
+  loading = false,
+  error = null
+}: DiagnosticFieldBenchmarkProps) {
+  const [draftValue, setDraftValue] = useState(value === null ? "" : String(value));
+  const [score, setScore] = useState(() => calcScore(metrica, value ?? 0));
+  const [showAction, setShowAction] = useState(false);
+
+  useEffect(() => {
+    setDraftValue(value === null ? "" : String(value));
+  }, [value]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const parsed = Number(draftValue);
+      const nextValue = draftValue.trim() === "" || Number.isNaN(parsed) ? 0 : parsed;
+      setScore(calcScore(metrica, nextValue));
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [draftValue, metrica]);
+
   const status = getStatusFromScore(score);
+  const scoreTone = DESIGN_TOKENS.score[status as ScoreStatusKey];
   const category = METRIC_CATEGORY[metrica];
   const benchmark = category ? getBenchmarkDefinition(category, metrica) : null;
   const benchmarkLine = benchmark ? buildBenchmarkText(benchmark.levels) : "Sin benchmark definido";
-  const isCritical = score < 40;
+  const objective = benchmark ? benchmarkToObjective(benchmark) : "Sin objetivo";
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <div className="h-4 w-28 rounded bg-gray-200 animate-pulse" />
+        <div className="h-11 rounded-lg bg-gray-200 animate-pulse" />
+      </div>
+    );
+  }
 
   return (
-    <label className="space-y-2 rounded-xl border border-black/10 bg-white p-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-semibold text-zinc-700">{label}</span>
+    <label className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-[#1A1A1A]">{label}</span>
         <DataSourceTag source={dataSource} />
       </div>
+
       <input
         name={name}
         aria-label={label}
-        className="focus-ring h-11 w-full rounded-component border border-black/10 px-3 font-mono"
+        className={`w-full h-11 rounded-lg border border-[#E8E8E2] bg-white px-3 text-sm font-mono tabular-nums text-[#1A1A1A] focus:border-2 focus:border-[#FFD600] focus:outline-none hover:border-gray-300 ${error ? "border-red-500 text-red-700" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
         min="0"
         step="0.01"
         type="number"
-        value={value ?? ""}
+        value={draftValue}
         disabled={disabled}
         onChange={(event) => {
           const raw = event.target.value;
-          if (raw.trim() === "") {
-            onChange(null);
-            return;
-          }
+          setDraftValue(raw);
+          if (raw.trim() === "") return onChange(null);
           const parsed = Number(raw);
           onChange(Number.isFinite(parsed) ? parsed : null);
         }}
+        onBlur={() => setShowAction(true)}
       />
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${getScoreTailwind(score)}`}>{getScoreLabel(score)}</span>
-        <span className="text-xs text-zinc-600">Benchmark: {benchmarkLine}</span>
-      </div>
-      {benchmark?.lectura_practica ? <p className="text-xs text-zinc-500">{benchmark.lectura_practica}</p> : null}
-      {isCritical ? <p className="text-xs font-semibold text-red-600">Valor fuera de umbral crítico para {status.replaceAll("_", " ")}.</p> : null}
+
+      {draftValue.trim() === "" ? (
+        <p className="text-xs text-[#6B6B6B]">Ingresa un valor para comparar con benchmark</p>
+      ) : (
+        <>
+          <p className="text-sm font-medium" style={{ color: scoreTone.color }}>
+            {getScoreLabel(score)}
+          </p>
+          <p className="text-xs text-[#6B6B6B]">{`Benchmark: ${benchmarkLine}`}</p>
+          <p className="text-xs font-medium text-[#6B6B6B]">{`Objetivo: llevar a ${objective}`}</p>
+          {showAction && benchmark?.lectura_practica ? <p className="text-xs text-[#6B6B6B]">{benchmark.lectura_practica}</p> : null}
+        </>
+      )}
+      {error ? <p className="text-xs text-red-700">{error}</p> : null}
     </label>
   );
 }
 
 function DataSourceTag({ source }: { source: "api" | "scraper" | "manual" | "unavailable" | null }) {
-  if (source === "api") return <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">API</span>;
-  if (source === "scraper") return <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">Scraper</span>;
-  if (source === "unavailable") return <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Sin dato</span>;
-  return <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">Manual</span>;
+  if (source === "api") {
+    return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">🟢 API</span>;
+  }
+
+  if (source === "scraper") {
+    return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">✏️ Manual</span>;
+  }
+
+  if (source === "unavailable") {
+    return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">✏️ Manual</span>;
+  }
+
+  return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">✏️ Manual</span>;
 }
 
 function buildBenchmarkText(levels: Array<{ maxValue?: number; minValue?: number; label: string }>) {
