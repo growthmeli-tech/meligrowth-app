@@ -1,14 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { persistDiagnostic } from "@/lib/diagnostics/persist-diagnostic";
-import { generateRecommendations } from "@/lib/recommendations/engine";
+import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
+import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
-import type { Database } from "@/lib/supabase/database.types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/lib/types/api";
-import type { DiagnosticInput } from "@/lib/types";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 
 function numberFromForm(formData: FormData, key: string) {
@@ -16,48 +13,11 @@ function numberFromForm(formData: FormData, key: string) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function inputFromForm(formData: FormData): DiagnosticInput {
-  return {
-    salud: {
-      reclamos: numberFromForm(formData, "reclamos"),
-      mediaciones: numberFromForm(formData, "mediaciones"),
-      cancelaciones_vendedor: numberFromForm(formData, "cancelaciones_vendedor"),
-      envios_a_tiempo: numberFromForm(formData, "envios_a_tiempo")
-    },
-    publicaciones: {
-      pubs_activas_pct: numberFromForm(formData, "pubs_activas_pct"),
-      pubs_optimizadas_pct: numberFromForm(formData, "pubs_optimizadas_pct"),
-      ctr: numberFromForm(formData, "ctr")
-    },
-    ads: {
-      margen_pre_ads: numberFromForm(formData, "margen_pre_ads"),
-      gasto_ads: numberFromForm(formData, "gasto_ads"),
-      ventas_ads: numberFromForm(formData, "ventas_ads"),
-      ventas_totales: numberFromForm(formData, "ventas_totales"),
-      acos: numberFromForm(formData, "acos"),
-      roas: numberFromForm(formData, "roas"),
-      tacos: numberFromForm(formData, "tacos")
-    },
-    logistica: {
-      incidencias_pct: numberFromForm(formData, "incidencias_pct"),
-      uso_full_flex_pct: numberFromForm(formData, "uso_full_flex_pct"),
-      cancelaciones_stock_pct: numberFromForm(formData, "cancelaciones_stock_pct")
-    },
-    stock: {
-      skus_sin_stock_pct: numberFromForm(formData, "skus_sin_stock_pct"),
-      dias_stock: numberFromForm(formData, "dias_stock"),
-      lead_time_reposicion: numberFromForm(formData, "lead_time_reposicion"),
-      sistema_reposicion: numberFromForm(formData, "sistema_reposicion")
-    }
-  };
-}
-
-type DiagnosticRow = Database["public"]["Tables"]["diagnostics"]["Row"];
-
 export async function createDiagnostic(
-  clientId: string,
+  companyId: string,
+  mlAccountId: string,
   formData: FormData
-): Promise<ActionResult<{ diagnostic: DiagnosticRow; recommendations: DiagnosticRecommendations }>> {
+): Promise<ActionResult<{ diagnostic: { id: string; score_global: number; estado_global: string }; recommendations: DiagnosticRecommendations }>> {
   if (!isSupabaseConfigured()) {
     return { success: false, error: "Supabase no esta configurado" };
   }
@@ -68,33 +28,75 @@ export async function createDiagnostic(
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    return { success: false, error: "No autorizado" };
   }
 
-  const input = inputFromForm(formData);
   const date = String(formData.get("date") || new Date().toISOString().slice(0, 10));
   const sourceInput = String(formData.get("source") || "manual");
-  const source: "manual" | "scraping" | "import" = sourceInput === "scraping" || sourceInput === "import" ? sourceInput : "manual";
+  const source: "api" | "scraper" | "manual" | "csv" =
+    sourceInput === "scraping" ? "scraper" : sourceInput === "import" ? "csv" : "manual";
+  const hasAutomatedSource = source === "scraper";
+  const dataSources = {
+    salud: hasAutomatedSource ? source : "manual",
+    publicaciones: hasAutomatedSource ? source : "manual",
+    ads: hasAutomatedSource ? source : "manual",
+    logistica: hasAutomatedSource ? source : "manual",
+    stock: hasAutomatedSource ? source : "manual"
+  } as const;
 
-  const result = await persistDiagnostic({
-    supabase,
-    clientId,
-    input,
-    date,
+  const snapshotResult = await createMetricSnapshot({
+    ml_account_id: mlAccountId,
+    snapshot_date: date,
     source,
-    createdBy: user.id
+    reclamos: numberFromForm(formData, "reclamos"),
+    mediaciones: numberFromForm(formData, "mediaciones"),
+    cancelaciones_vendedor: numberFromForm(formData, "cancelaciones_vendedor"),
+    envios_a_tiempo: numberFromForm(formData, "envios_a_tiempo"),
+    pubs_activas_pct: numberFromForm(formData, "pubs_activas_pct"),
+    pubs_optimizadas_pct: numberFromForm(formData, "pubs_optimizadas_pct"),
+    ctr: numberFromForm(formData, "ctr"),
+    margen_pre_ads: numberFromForm(formData, "margen_pre_ads"),
+    gasto_ads: numberFromForm(formData, "gasto_ads"),
+    ventas_ads: numberFromForm(formData, "ventas_ads"),
+    ventas_totales: numberFromForm(formData, "ventas_totales"),
+    acos: numberFromForm(formData, "acos"),
+    roas: numberFromForm(formData, "roas"),
+    tacos: numberFromForm(formData, "tacos"),
+    incidencias_pct: numberFromForm(formData, "incidencias_pct"),
+    uso_full_flex_pct: numberFromForm(formData, "uso_full_flex_pct"),
+    cancelaciones_stock_pct: numberFromForm(formData, "cancelaciones_stock_pct"),
+    skus_sin_stock_pct: numberFromForm(formData, "skus_sin_stock_pct"),
+    dias_stock: numberFromForm(formData, "dias_stock"),
+    lead_time_reposicion: numberFromForm(formData, "lead_time_reposicion"),
+    sistema_reposicion: numberFromForm(formData, "sistema_reposicion"),
+    data_sources: dataSources
   });
 
-  if (!result.ok) {
-    return { success: false, error: result.error };
+  if (!snapshotResult.success) {
+    return { success: false, error: snapshotResult.error };
   }
 
-  revalidatePath("/operator/dashboard");
-  revalidatePath(`/operator/clients/${clientId}`);
-  revalidatePath("/operator/notifications");
-  revalidatePath("/client/dashboard");
-  revalidatePath("/client/metrics");
-  const savedDiagnostic = result.diagnostic;
-  const recommendations = generateRecommendations(savedDiagnostic);
-  return { success: true, data: { diagnostic: savedDiagnostic, recommendations } };
+  const pipelineResult = await runRecommendationsPipelineV2({
+    ml_account_id: mlAccountId,
+    metric_snapshot_id: snapshotResult.data.id
+  });
+
+  if (!pipelineResult.success) {
+    return { success: false, error: pipelineResult.error };
+  }
+
+  revalidatePath(`/internal/clients/${companyId}`);
+  revalidatePath(`/internal/clients/${companyId}/diagnostic/new`);
+
+  return {
+    success: true,
+    data: {
+      diagnostic: {
+        id: pipelineResult.data.account_health.id,
+        score_global: Number(pipelineResult.data.account_health.score_global ?? 0),
+        estado_global: String(pipelineResult.data.account_health.estado_global ?? "critico")
+      },
+      recommendations: pipelineResult.data.recommendations
+    }
+  };
 }

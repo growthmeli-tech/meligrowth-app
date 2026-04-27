@@ -36,10 +36,10 @@ export function DiagnosticResultScreen({ score, estado, delta, recommendations, 
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link href={`/operator/clients/${clientId}`}>
+        <Link href={`/internal/clients/${clientId}`}>
           <Button>Ver cuenta completa</Button>
         </Link>
-        <Link href={`/operator/clients/${clientId}?tab=evolucion&diagnosticId=${recommendations.diagnostic_id}`}>
+        <Link href={`/internal/clients/${clientId}`}>
           <Button variant="secondary">Generar reporte quincenal</Button>
         </Link>
       </div>

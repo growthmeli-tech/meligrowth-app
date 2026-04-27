@@ -143,11 +143,13 @@ function warningsFor(values: Record<string, number | null>) {
 }
 
 export function DiagnosticForm({
-  clientId,
+  mlAccountId,
+  companyId,
   diagnostic,
   action
 }: {
-  clientId: string;
+  mlAccountId: string;
+  companyId: string;
   diagnostic: Diagnostic;
   action: (formData: FormData) => Promise<ActionResult<SaveDiagnosticPayload>>;
 }) {
@@ -187,7 +189,7 @@ export function DiagnosticForm({
         const response = await fetch("/api/ml/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ client_id: clientId }),
+          body: JSON.stringify({ client_id: companyId, ml_account_id: mlAccountId }),
           signal: controller.signal
         });
         const payload = (await response.json().catch(() => null)) as
@@ -236,7 +238,7 @@ export function DiagnosticForm({
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [clientId]);
+  }, [companyId, mlAccountId]);
 
   function updateValue(name: string, value: number | null) {
     setValues((current) => ({ ...current, [name]: value }));
@@ -268,7 +270,7 @@ export function DiagnosticForm({
         estado={savedResult.diagnostic.estado_global}
         delta={null}
         recommendations={savedResult.recommendations}
-        clientId={diagnostic.clientId}
+        clientId={companyId}
         diagnosticId={savedResult.diagnostic.id}
       />
     );
