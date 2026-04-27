@@ -1,4 +1,9 @@
 export type UserRole = "operator" | "client";
+export type UserRoleV2 =
+  | "super_admin_meli_growth"
+  | "internal_operator_meli_growth"
+  | "client_manager"
+  | "client_operator";
 export type ClientPlan = "starter" | "growth" | "scale";
 export type DiagnosticSource = "manual" | "scraping" | "import";
 export type ActionPriority = "urgente" | "alta" | "media";

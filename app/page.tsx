@@ -1,10 +1,25 @@
 import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import type { UserRoleV2 } from "@/lib/types/enums";
+
+function getDefaultRouteForRole(role: UserRoleV2) {
+  switch (role) {
+    case "super_admin_meli_growth":
+    case "internal_operator_meli_growth":
+      return "/internal/dashboard";
+    case "client_manager":
+      return "/brand/dashboard";
+    case "client_operator":
+      return "/ops/dashboard";
+    default:
+      return "/login";
+  }
+}
 
 export default async function HomePage() {
   if (!isSupabaseConfigured()) {
-    redirect("/operator/dashboard");
+    redirect("/internal/dashboard");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -14,8 +29,15 @@ export default async function HomePage() {
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
+  const { data: profileV2 } = await supabase.from("users_v2").select("role").eq("id", user.id).maybeSingle();
+  const role = profileV2?.role as UserRoleV2 | undefined;
 
-  if (profile?.role === "client") redirect("/client/dashboard");
-  redirect("/operator/dashboard");
+  if (role) {
+    redirect(getDefaultRouteForRole(role));
+  }
+
+  const { data: legacyProfile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
+
+  if (legacyProfile?.role === "client") redirect("/brand/dashboard");
+  redirect("/internal/dashboard");
 }
