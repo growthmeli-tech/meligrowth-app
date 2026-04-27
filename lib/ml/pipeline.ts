@@ -6,6 +6,8 @@ import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoin
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
 import type { MlDataSource, MlDiagnosticPrefill } from "@/lib/ml/mappers/types";
+import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
+import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type PipelineResult = { success: true; data: MlDiagnosticPrefill } | { success: false; error: string };
@@ -57,7 +59,11 @@ async function triggerScrapeJob(clientId: string, tipo: ScraperTipo) {
   return runResult?.result?.metrics ?? null;
 }
 
-export async function fetchMLDiagnosticData(clientId: string, sellerId: string): Promise<PipelineResult> {
+export async function fetchMLDiagnosticData(
+  clientId: string,
+  sellerId: string,
+  options?: { mlAccountId?: string }
+): Promise<PipelineResult> {
   let accessToken: string;
   try {
     accessToken = await getValidAccessToken(clientId);
@@ -188,8 +194,73 @@ export async function fetchMLDiagnosticData(clientId: string, sellerId: string):
   prefill.lead_time_reposicion ??= null;
   prefill.data_sources = dataSources;
 
+  if (options?.mlAccountId) {
+    try {
+      const snapshotPayload = {
+        ml_account_id: options.mlAccountId,
+        snapshot_date: new Date().toISOString().slice(0, 10),
+        source: inferSnapshotSource(dataSources),
+        reclamos: prefill.reclamos ?? null,
+        mediaciones: prefill.mediaciones ?? null,
+        cancelaciones_vendedor: prefill.cancelaciones_vendedor ?? null,
+        envios_a_tiempo: prefill.envios_a_tiempo ?? null,
+        pubs_activas_pct: prefill.pubs_activas_pct ?? null,
+        pubs_optimizadas_pct: prefill.pubs_optimizadas_pct ?? null,
+        ctr: prefill.ctr ?? null,
+        margen_pre_ads: null,
+        gasto_ads: prefill.gasto_ads ?? null,
+        ventas_ads: prefill.ventas_ads ?? null,
+        ventas_totales: prefill.ventas_totales ?? null,
+        acos: prefill.acos ?? null,
+        roas: prefill.roas ?? null,
+        tacos: prefill.tacos ?? null,
+        incidencias_pct: prefill.incidencias_pct ?? null,
+        uso_full_flex_pct: prefill.uso_full_flex_pct ?? null,
+        cancelaciones_stock_pct: prefill.cancelaciones_stock_pct ?? null,
+        skus_sin_stock_pct: prefill.skus_sin_stock_pct ?? null,
+        dias_stock: prefill.dias_stock ?? null,
+        lead_time_reposicion: prefill.lead_time_reposicion ?? null,
+        sistema_reposicion: null,
+        data_sources: dataSources
+      };
+
+      const snapshotResult = await createMetricSnapshot(snapshotPayload);
+      if (!snapshotResult.success) {
+        logPipelineError("v2_snapshot", snapshotResult.error, {
+          clientId,
+          sellerId,
+          mlAccountId: options.mlAccountId
+        });
+      } else {
+        const recommendationsResult = await runRecommendationsPipelineV2({
+          ml_account_id: options.mlAccountId,
+          metric_snapshot_id: snapshotResult.data.id
+        });
+        if (!recommendationsResult.success) {
+          logPipelineError("v2_recommendations", recommendationsResult.error, {
+            clientId,
+            sellerId,
+            mlAccountId: options.mlAccountId,
+            metricSnapshotId: snapshotResult.data.id
+          });
+        }
+      }
+    } catch (error) {
+      // Keep legacy pipeline alive while v2 is being rolled out.
+      logPipelineError("v2_pipeline", error, { clientId, sellerId, mlAccountId: options.mlAccountId });
+    }
+  }
+
   return {
     success: true,
     data: prefill as MlDiagnosticPrefill
   };
+}
+
+function inferSnapshotSource(dataSources: Record<string, MlDataSource>): "api" | "scraper" | "manual" | "csv" {
+  const values = Object.values(dataSources);
+  if (values.some((source) => source === "api")) return "api";
+  if (values.some((source) => source === "scraper")) return "scraper";
+  if (values.some((source) => source === "manual")) return "manual";
+  return "manual";
 }

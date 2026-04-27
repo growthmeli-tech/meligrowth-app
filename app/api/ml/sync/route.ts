@@ -6,8 +6,9 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const clientId = typeof body.client_id === "string" ? body.client_id : null;
-  if (!clientId) {
-    return NextResponse.json({ success: false, error: "client_id requerido" }, { status: 400 });
+  const mlAccountId = typeof body.ml_account_id === "string" ? body.ml_account_id : null;
+  if (!clientId && !mlAccountId) {
+    return NextResponse.json({ success: false, error: "client_id o ml_account_id requerido" }, { status: 400 });
   }
 
   if (!isSupabaseConfigured()) {
@@ -23,24 +24,51 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: client, error: clientError } = await supabase
-    .from("clients")
-    .select("id, meli_seller_id")
-    .eq("id", clientId)
-    .single();
+  let result:
+    | Awaited<ReturnType<typeof fetchMLDiagnosticData>>
+    | { success: false; error: string };
 
-  if (clientError || !client) {
-    return NextResponse.json({ success: false, error: "Cliente no encontrado" }, { status: 404 });
+  if (mlAccountId) {
+    const { data: mlAccount, error: mlAccountError } = await supabase
+      .from("ml_accounts")
+      .select("id, seller_id, company_id")
+      .eq("id", mlAccountId)
+      .maybeSingle();
+
+    if (mlAccountError || !mlAccount) {
+      return NextResponse.json({ success: false, error: "Cuenta ML no encontrada" }, { status: 404 });
+    }
+
+    if (!mlAccount.seller_id) {
+      return NextResponse.json(
+        { success: false, error: "La cuenta ML no tiene seller_id configurado" },
+        { status: 400 }
+      );
+    }
+
+    const sessionClientId = clientId ?? mlAccount.company_id;
+    result = await fetchMLDiagnosticData(sessionClientId, mlAccount.seller_id, { mlAccountId: mlAccount.id });
+  } else {
+    const { data: client, error: clientError } = await supabase
+      .from("clients")
+      .select("id, meli_seller_id")
+      .eq("id", clientId as string)
+      .single();
+
+    if (clientError || !client) {
+      return NextResponse.json({ success: false, error: "Cliente no encontrado" }, { status: 404 });
+    }
+
+    if (!client.meli_seller_id) {
+      return NextResponse.json(
+        { success: false, error: "Este cliente no tiene cuenta de Mercado Libre conectada" },
+        { status: 400 }
+      );
+    }
+
+    result = await fetchMLDiagnosticData(client.id, client.meli_seller_id);
   }
 
-  if (!client.meli_seller_id) {
-    return NextResponse.json(
-      { success: false, error: "Este cliente no tiene cuenta de Mercado Libre conectada" },
-      { status: 400 }
-    );
-  }
-
-  const result = await fetchMLDiagnosticData(clientId, client.meli_seller_id);
   if (!result.success) {
     return NextResponse.json(result, { status: 400 });
   }

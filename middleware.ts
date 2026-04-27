@@ -66,9 +66,10 @@ export async function middleware(request: NextRequest) {
       .select("ops_access_enabled")
       .eq("user_id", user.id)
       .eq("access_type", "operator")
+      .eq("ops_access_enabled", true)
       .maybeSingle();
 
-    operatorHasOpsAccess = (operatorAccess as OperatorAccessRow | null)?.ops_access_enabled === true;
+    operatorHasOpsAccess = Boolean((operatorAccess as OperatorAccessRow | null)?.ops_access_enabled === true);
   }
 
   if (pathname.startsWith("/operator")) {

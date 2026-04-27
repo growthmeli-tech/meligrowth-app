@@ -392,6 +392,7 @@ export type Database = {
           user_id: string;
           ml_account_id: string;
           access_type: "manager" | "operator" | "internal";
+          ops_access_enabled: boolean;
           created_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["user_account_access"]["Row"]> & {

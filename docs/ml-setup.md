@@ -21,6 +21,7 @@ Tambien deben estar configuradas las variables del scraper para fallback:
 
 - `SCRAPER_SERVICE_URL`
 - `SCRAPER_SERVICE_SECRET`
+- `SCRAPER_MOCK_MODE=false` (obligatorio en go-live para evitar datos mock en runtime)
 
 ## 3) Flujo de conexion OAuth
 

@@ -38,7 +38,6 @@ export type MlStoredTokens = {
   access_token: string;
   refresh_token: string;
   expires_at: number;
-  seller_id?: string;
 };
 
 export type MlSellerReputationResponse = {

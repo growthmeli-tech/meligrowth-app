@@ -4,8 +4,10 @@ import type { ActionResult } from "@/lib/types/api";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 type MlAccountRow = Database["public"]["Tables"]["ml_accounts"]["Row"];
+type UserAccountAccessRow = Database["public"]["Tables"]["user_account_access"]["Row"];
 
 const ML_ACCOUNT_SELECT = "id, company_id, seller_id, account_name, active, meli_account_url, created_at, updated_at";
+const USER_ACCOUNT_ACCESS_SELECT = "id, user_id, ml_account_id, access_type, ops_access_enabled, created_at";
 
 export async function listMlAccountsByCompany(
   companyId: string,
@@ -73,4 +75,24 @@ export async function getMlAccountById(mlAccountId: string): Promise<ActionResul
   }
 
   return { success: true, data: (data as MlAccountRow | null) ?? null };
+}
+
+export async function listUserAccountAccessByUser(userId: string): Promise<ActionResult<UserAccountAccessRow[]>> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("user_account_access")
+    .select(USER_ACCOUNT_ACCESS_SELECT)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logServerError("data-v2.listUserAccountAccessByUser", error, { userId });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron cargar accesos de cuenta",
+      code: error.code
+    };
+  }
+
+  return { success: true, data: (data ?? []) as UserAccountAccessRow[] };
 }

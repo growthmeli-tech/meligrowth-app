@@ -23,6 +23,9 @@ export type PricingProposalSource = "manual" | "template";
 
 export type PlanType = "360" | "360_copilot";
 export type UserAccountAccessType = "manager" | "operator" | "internal";
+export type UserAccountAccessFlags = {
+  ops_access_enabled: boolean;
+};
 export type MetricSnapshotSource = "api" | "scraper" | "manual" | "csv";
 export type AlertPriority = "urgente" | "alta" | "media" | "baja";
 export type AlertAudience = "internal" | "manager" | "operator" | "all";

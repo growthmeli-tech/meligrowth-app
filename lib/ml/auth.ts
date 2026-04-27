@@ -1,10 +1,22 @@
-import { decryptJsonString } from "@/lib/security/encryption";
+import { decryptJsonString, encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { MlStoredTokens, MlTokenResponse } from "@/lib/ml/mappers/types";
 
 const ML_AUTH_URL = "https://auth.mercadolibre.com.ar/authorization";
 const ML_TOKEN_URL = "https://api.mercadolibre.com/oauth/token";
 const REFRESH_MARGIN_SECONDS = 300;
+
+function normalizeStoredTokens(tokens: Partial<MlStoredTokens>): MlStoredTokens {
+  if (!tokens.access_token || !tokens.refresh_token || typeof tokens.expires_at !== "number") {
+    throw new Error("Invalid ML session payload in storage");
+  }
+
+  return {
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    expires_at: tokens.expires_at
+  };
+}
 
 function assertMlCredentials() {
   const clientId = process.env.ML_CLIENT_ID;
@@ -97,12 +109,15 @@ async function readSessionTokens(storagePath: string) {
 
   const raw = await data.text();
   const decrypted = decryptJsonString(raw);
-  return JSON.parse(decrypted) as MlStoredTokens;
+  return normalizeStoredTokens(JSON.parse(decrypted) as Partial<MlStoredTokens>);
 }
 
-async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
+export async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
   const supabase = await createServerSupabaseClient();
-  const { error } = await supabase.storage.from("meli-sessions").upload(storagePath, JSON.stringify(tokens), {
+  const canonicalTokens = normalizeStoredTokens(tokens);
+  const rawPayload = JSON.stringify(canonicalTokens);
+  const storedPayload = isAppEncryptionConfigured() ? encryptJsonString(rawPayload) : rawPayload;
+  const { error } = await supabase.storage.from("meli-sessions").upload(storagePath, storedPayload, {
     upsert: true,
     contentType: "application/json",
     cacheControl: "3600"
@@ -140,8 +155,7 @@ export async function getValidAccessToken(clientId: string) {
   const mergedTokens: MlStoredTokens = {
     access_token: refreshed.access_token,
     refresh_token: refreshed.refresh_token ?? currentTokens.refresh_token,
-    expires_at: now + refreshed.expires_in,
-    seller_id: currentTokens.seller_id
+    expires_at: now + refreshed.expires_in
   };
 
   await saveSessionTokens(session.storage_path, mergedTokens);

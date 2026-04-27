@@ -54,6 +54,23 @@ export default async function InternalClientDetailPage({ params }: { params: Pro
         </Link>
       </header>
 
+      <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[#6B6B6B]">Configuracion ML</h2>
+            <p className="mt-1 text-sm text-[#1A1A1A]">
+              {account.seller_id ? `Conectada como seller ${account.seller_id}` : "Sin conexion OAuth activa"}
+            </p>
+          </div>
+          <Link
+            href={`/internal/clients/${id}/settings`}
+            className="inline-flex items-center justify-center rounded-lg border border-[#E8E8E2] px-4 py-2 text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F5F0]"
+          >
+            Ir a settings de ML
+          </Link>
+        </div>
+      </section>
+
       <section className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <div className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
           <ScoreDisplay score={health.score_global} delta={delta} size="lg" animated />
