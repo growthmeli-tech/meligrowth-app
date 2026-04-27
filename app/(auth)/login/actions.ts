@@ -5,56 +5,91 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { UserRoleV2 } from "@/lib/types/enums";
 
-function getDefaultRouteForRole(role: UserRoleV2) {
+export type LoginState = {
+  error: string | null;
+};
+
+function getDefaultRouteForRole(role: UserRoleV2 | "operator" | "client") {
   switch (role) {
     case "super_admin_meli_growth":
     case "internal_operator_meli_growth":
+    case "operator":
       return "/internal/dashboard";
     case "client_manager":
+    case "client":
       return "/brand/dashboard";
     case "client_operator":
       return "/ops/dashboard";
     default:
-      return "/login";
+      return null;
   }
 }
 
-export async function login(formData: FormData) {
+export async function login(_previousState: LoginState, formData: FormData): Promise<LoginState> {
   if (!isSupabaseConfigured()) {
     redirect("/internal/dashboard");
   }
 
-  const email = String(formData.get("email") ?? "");
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
-    redirect("/login?error=missing");
+    console.error("[login-action] missing_credentials", { hasEmail: Boolean(email), hasPassword: Boolean(password) });
+    return { error: "Ingresá email y password." };
   }
 
   const supabase = await createServerSupabaseClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
-  if (error) {
-    redirect("/login?error=invalid");
+  if (authError) {
+    console.error("[login-action] sign_in_failed", {
+      email,
+      code: authError.code,
+      message: authError.message
+    });
+    return { error: "No pudimos validar esas credenciales." };
   }
 
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const user = authData.user;
 
   if (!user) {
-    redirect("/login?error=invalid");
+    console.error("[login-action] missing_user_after_sign_in", { email });
+    return { error: "No pudimos validar esas credenciales." };
   }
 
-  const { data: profileV2 } = await supabase.from("users_v2").select("role").eq("id", user.id).maybeSingle();
+  const { data: profileV2, error: profileV2Error } = await supabase.from("users_v2").select("role").eq("id", user.id).maybeSingle();
+  if (profileV2Error) {
+    console.error("[login-action] users_v2_lookup_failed", {
+      userId: user.id,
+      code: profileV2Error.code,
+      message: profileV2Error.message
+    });
+  }
+
   const role = profileV2?.role as UserRoleV2 | undefined;
 
   if (role) {
-    redirect(getDefaultRouteForRole(role));
+    const route = getDefaultRouteForRole(role);
+    if (route) redirect(route);
   }
 
-  const { data: legacyProfile } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
-  redirect(legacyProfile?.role === "client" ? "/brand/dashboard" : "/internal/dashboard");
+  const { data: legacyProfile, error: legacyProfileError } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
+  if (legacyProfileError) {
+    console.error("[login-action] users_legacy_lookup_failed", {
+      userId: user.id,
+      code: legacyProfileError.code,
+      message: legacyProfileError.message
+    });
+  }
+
+  const legacyRole = legacyProfile?.role as "operator" | "client" | undefined;
+  if (legacyRole) {
+    const route = getDefaultRouteForRole(legacyRole);
+    if (route) redirect(route);
+  }
+
+  console.error("[login-action] role_not_found", { userId: user.id, email });
+  return { error: "Tu usuario no tiene rol asignado para esta app." };
 }
 
 export async function logout() {
