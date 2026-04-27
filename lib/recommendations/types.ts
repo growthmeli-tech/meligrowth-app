@@ -1,6 +1,6 @@
 export type RecommendationPriority = "urgente" | "alta" | "media" | "baja";
 export type RecommendationCategory = "salud" | "publicaciones" | "ads" | "logistica" | "stock";
-export type RecommendationAudience = "operator" | "client" | "both";
+export type RecommendationAudience = "internal" | "manager" | "operator" | "all";
 export type ScoreStatus = "platinum" | "muy_bueno" | "solido" | "en_desarrollo" | "en_riesgo" | "critico";
 
 export type Recommendation = {

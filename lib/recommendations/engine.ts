@@ -8,8 +8,38 @@ import { getScoreStatus, getStrategyForScore } from "@/lib/recommendations/score
 import type { DiagnosticRecommendations, MetricInput, Recommendation, RecommendationAudience, RecommendationCategory } from "@/lib/recommendations/types";
 
 type DiagnosticRow = Database["public"]["Tables"]["diagnostics"]["Row"];
+export type RecommendationsDiagnosticInput = Pick<
+  DiagnosticRow,
+  | "id"
+  | "client_id"
+  | "score_global"
+  | "reclamos"
+  | "mediaciones"
+  | "cancelaciones_vendedor"
+  | "envios_a_tiempo"
+  | "pubs_activas_pct"
+  | "pubs_optimizadas_pct"
+  | "ctr"
+  | "acos"
+  | "roas"
+  | "incidencias_pct"
+  | "uso_full_flex_pct"
+  | "cancelaciones_stock_pct"
+  | "skus_sin_stock_pct"
+  | "dias_stock"
+  | "lead_time_reposicion"
+  | "margen_pre_ads"
+  | "gasto_ads"
+  | "ventas_ads"
+  | "ventas_totales"
+  | "score_salud"
+  | "score_publicaciones"
+  | "score_ads"
+  | "score_logistica"
+  | "score_stock"
+>;
 
-const METRIC_INPUTS: Array<Omit<MetricInput, "valor"> & { source: keyof DiagnosticRow }> = [
+const METRIC_INPUTS: Array<Omit<MetricInput, "valor"> & { source: keyof RecommendationsDiagnosticInput }> = [
   { campo: "reclamos", categoria: "salud", peso: 0.3, source: "reclamos" },
   { campo: "mediaciones", categoria: "salud", peso: 0.25, source: "mediaciones" },
   { campo: "cancelaciones_vendedor", categoria: "salud", peso: 0.25, source: "cancelaciones_vendedor" },
@@ -53,15 +83,37 @@ const METRIC_TITLES: Record<string, string> = {
   lead_time_reposicion: "Reducir lead time de reposicion"
 };
 
-const AUDIENCE_BY_CATEGORY: Record<RecommendationCategory, RecommendationAudience> = {
-  salud: "both",
-  publicaciones: "operator",
-  ads: "operator",
-  logistica: "both",
-  stock: "operator"
-};
+function getAudienciaRecomendacion(input: {
+  categoria: RecommendationCategory;
+  campo: string;
+  prioridad: Recommendation["prioridad"];
+}): RecommendationAudience {
+  const { categoria, campo, prioridad } = input;
 
-export function generateRecommendations(diagnostic: DiagnosticRow): DiagnosticRecommendations {
+  if (campo === "ads_profitability") {
+    return prioridad === "urgente" ? "all" : "manager";
+  }
+
+  if (campo === "envios_a_tiempo" && prioridad === "urgente") {
+    return "all";
+  }
+
+  if (categoria === "salud" && (prioridad === "urgente" || prioridad === "alta")) {
+    return "internal";
+  }
+
+  if (campo === "roas") {
+    return "manager";
+  }
+
+  if (categoria === "publicaciones" || categoria === "logistica" || categoria === "stock" || campo === "acos") {
+    return "operator";
+  }
+
+  return "all";
+}
+
+export function generateRecommendations(diagnostic: RecommendationsDiagnosticInput): DiagnosticRecommendations {
   const recomendaciones: Recommendation[] = [];
   const globalStatus = getScoreStatus(diagnostic.score_global);
   const estrategia = getStrategyForScore(diagnostic.score_global);
@@ -95,7 +147,11 @@ export function generateRecommendations(diagnostic: DiagnosticRow): DiagnosticRe
       metrica_afectada: metric.campo,
       impacto_estimado: getImpactLabel(metric.peso, scoreMetrica),
       benchmark_objetivo: objective,
-      audiencia: AUDIENCE_BY_CATEGORY[metric.categoria],
+      audiencia: getAudienciaRecomendacion({
+        categoria: metric.categoria,
+        campo: metric.campo,
+        prioridad
+      }),
       bloque: BLOQUE_LABEL[metric.categoria]
     });
 
@@ -125,7 +181,11 @@ export function generateRecommendations(diagnostic: DiagnosticRow): DiagnosticRe
       metrica_afectada: "ads_profitability",
       impacto_estimado: "Impacto alto en margen total",
       benchmark_objetivo: "ROAS > break-even y TACOS < 13% del margen",
-      audiencia: "operator",
+      audiencia: getAudienciaRecomendacion({
+        categoria: "ads",
+        campo: "ads_profitability",
+        prioridad
+      }),
       bloque: BLOQUE_LABEL.ads
     });
   }

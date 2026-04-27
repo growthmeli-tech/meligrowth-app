@@ -5,4 +5,6 @@ export * from "@/lib/recommendations/priorities";
 export * from "@/lib/recommendations/ads-analyzer";
 export * from "@/lib/recommendations/score-interpreter";
 export * from "@/lib/recommendations/engine";
+export * from "@/lib/recommendations/persist";
 export * from "@/lib/recommendations/pipeline";
+export * from "@/lib/recommendations/pipeline-v2";

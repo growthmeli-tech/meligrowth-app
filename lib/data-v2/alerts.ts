@@ -5,6 +5,7 @@ import type { AlertAudience } from "@/lib/types/enums";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 type AlertRow = Database["public"]["Tables"]["alerts"]["Row"];
+type AlertInsert = Database["public"]["Tables"]["alerts"]["Insert"];
 
 const ALERT_SELECT =
   "id, ml_account_id, health_id, categoria, prioridad, titulo, descripcion, accion_concreta, benchmark_objetivo, audiencia, resuelta, resuelta_at, created_at";
@@ -60,6 +61,26 @@ export async function listUrgentPendingAlertsByAccounts(accountIds: string[]): P
     return {
       success: false,
       error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron cargar alertas urgentes",
+      code: error.code
+    };
+  }
+
+  return { success: true, data: (data ?? []) as AlertRow[] };
+}
+
+export async function createAlertsBulk(payload: AlertInsert[]): Promise<ActionResult<AlertRow[]>> {
+  if (payload.length === 0) {
+    return { success: true, data: [] };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("alerts").insert(payload).select(ALERT_SELECT);
+
+  if (error) {
+    logServerError("data-v2.createAlertsBulk", error, { count: payload.length });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron crear alertas",
       code: error.code
     };
   }

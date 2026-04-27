@@ -38,7 +38,25 @@ describe("Motor de recomendaciones", () => {
       expect(item.titulo).toBeTruthy();
       expect(item.accion_concreta).toBeTruthy();
       expect(item.benchmark_objetivo).toBeTruthy();
-      expect(["operator", "client", "both"]).toContain(item.audiencia);
+      expect(["internal", "manager", "operator", "all"]).toContain(item.audiencia);
     }
+  });
+
+  it("asigna audiencia internal para alertas de salud de alta urgencia", () => {
+    const result = generateRecommendations(createMockDiagnostic({ reclamos: 5 }));
+    const rec = result.recomendaciones.find((item) => item.metrica_afectada === "reclamos");
+    expect(rec?.audiencia).toBe("internal");
+  });
+
+  it("asigna audiencia all cuando envios a tiempo esta en nivel urgente", () => {
+    const result = generateRecommendations(createMockDiagnostic({ envios_a_tiempo: 80 }));
+    const rec = result.recomendaciones.find((item) => item.metrica_afectada === "envios_a_tiempo");
+    expect(rec?.audiencia).toBe("all");
+  });
+
+  it("asigna audiencia manager para recomendaciones de rentabilidad ROAS", () => {
+    const result = generateRecommendations(createMockDiagnostic({ roas: 1 }));
+    const rec = result.recomendaciones.find((item) => item.metrica_afectada === "roas");
+    expect(rec?.audiencia).toBe("manager");
   });
 });
