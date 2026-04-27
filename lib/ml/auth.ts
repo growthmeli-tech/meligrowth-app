@@ -133,8 +133,30 @@ export async function saveSessionTokens(storagePath: string, tokens: MlStoredTok
   }
 }
 
-export async function getValidAccessToken(clientId: string) {
+export async function getValidAccessToken(clientId: string, mlAccountId?: string) {
   const supabase = createServiceClient();
+
+  if (mlAccountId) {
+    const storagePath = `${mlAccountId}/session.json`;
+    const currentTokens = await readSessionTokens(storagePath);
+    const now = Math.floor(Date.now() / 1000);
+    const shouldRefresh = now >= currentTokens.expires_at - REFRESH_MARGIN_SECONDS;
+
+    if (!shouldRefresh) {
+      return currentTokens.access_token;
+    }
+
+    const refreshed = await refreshAccessToken(currentTokens.refresh_token);
+    const mergedTokens: MlStoredTokens = {
+      access_token: refreshed.access_token,
+      refresh_token: refreshed.refresh_token ?? currentTokens.refresh_token,
+      expires_at: now + refreshed.expires_in
+    };
+
+    await saveSessionTokens(storagePath, mergedTokens);
+    return mergedTokens.access_token;
+  }
+
   const { data: session, error } = await supabase
     .from("meli_sessions")
     .select("id, storage_path")

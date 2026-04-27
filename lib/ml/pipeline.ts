@@ -66,7 +66,7 @@ export async function fetchMLDiagnosticData(
 ): Promise<PipelineResult> {
   let accessToken: string;
   try {
-    accessToken = await getValidAccessToken(clientId);
+    accessToken = await getValidAccessToken(clientId, options?.mlAccountId);
   } catch (error) {
     logPipelineError("auth", error, { clientId, sellerId });
     return {
