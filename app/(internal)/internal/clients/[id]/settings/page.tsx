@@ -46,9 +46,27 @@ export default async function ClientSettingsPage({
   if (ml.isConfigured) {
     try {
       oauthUrl = getMLAuthorizationUrl(account.id);
+      const parsedOAuthUrl = new URL(oauthUrl);
+      console.info("[ml-settings] oauth_url_generated", {
+        companyId: id,
+        mlAccountId: account.id,
+        redirectUri: parsedOAuthUrl.searchParams.get("redirect_uri"),
+        state: parsedOAuthUrl.searchParams.get("state"),
+        clientId: parsedOAuthUrl.searchParams.get("client_id")
+      });
     } catch {
+      console.error("[ml-settings] oauth_url_generation_failed", {
+        companyId: id,
+        mlAccountId: account.id
+      });
       oauthUrl = null;
     }
+  } else {
+    console.error("[ml-settings] ml_env_not_configured", {
+      companyId: id,
+      hasClientId: Boolean(ml.clientId),
+      hasRedirectUri: Boolean(ml.redirectUri)
+    });
   }
 
   return (
