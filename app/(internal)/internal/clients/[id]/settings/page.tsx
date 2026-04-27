@@ -1,9 +1,9 @@
 import Link from "next/link";
+import { MLConnectionCard } from "@/components/ml/ml-connection-card";
+import { getServerEnv } from "@/lib/config/env";
 import { getCompanyById } from "@/lib/data-v2/companies";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
-import { getAuthorizationUrl } from "@/lib/ml/auth";
-
-const GROWTH_ML_ACCOUNT_ID = "9a766789-288e-4bfb-9ca9-365389ba5f98";
+import { getMLAuthorizationUrl } from "@/lib/ml/get-auth-url";
 
 export default async function ClientSettingsPage({
   params
@@ -22,7 +22,11 @@ export default async function ClientSettingsPage({
   }
 
   const accountsResult = await listMlAccountsByCompany(id, { activeOnly: true });
-  const account = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
+  let account = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
+  if (!account) {
+    const fallbackAccountsResult = await listMlAccountsByCompany(id);
+    account = fallbackAccountsResult.success ? (fallbackAccountsResult.data[0] ?? null) : null;
+  }
 
   if (!account) {
     return (
@@ -37,17 +41,15 @@ export default async function ClientSettingsPage({
     );
   }
 
+  const { ml } = getServerEnv();
   let oauthUrl: string | null = null;
-  let oauthError: string | null = null;
-  try {
-    oauthUrl = getAuthorizationUrl(account.id);
-  } catch (error) {
-    oauthError = error instanceof Error ? error.message : "No se pudo generar la URL de OAuth";
+  if (ml.isConfigured) {
+    try {
+      oauthUrl = getMLAuthorizationUrl(account.id);
+    } catch {
+      oauthUrl = null;
+    }
   }
-
-  const isConnected = Boolean(account.seller_id);
-  const buttonLabel = isConnected ? "Reconectar" : "Conectar cuenta ML";
-  const isGrowthAccount = account.id === GROWTH_ML_ACCOUNT_ID;
 
   return (
     <main className="p-4 md:p-6 space-y-4">
@@ -59,40 +61,13 @@ export default async function ClientSettingsPage({
         <p className="text-sm text-[#6B6B6B]">{companyResult.data.name}</p>
       </header>
 
-      <section className="rounded-xl border border-[#E8E8E2] bg-white p-4 space-y-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#6B6B6B]">Estado de conexion</p>
-          <p className="mt-1 text-sm font-medium text-[#1A1A1A]">{isConnected ? "Conectada" : "Sin conectar"}</p>
-        </div>
-
-        <div className="grid gap-2 text-sm text-[#1A1A1A]">
-          <p>
-            <span className="font-semibold">ml_account_id:</span> {account.id}
-          </p>
-          <p>
-            <span className="font-semibold">seller_id:</span> {account.seller_id ?? "Sin asignar"}
-          </p>
-          <p>
-            <span className="font-semibold">Estado:</span> {isConnected ? "Conectada" : "No conectada"}
-          </p>
-          {isGrowthAccount ? (
-            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
-              Cuenta Growth detectada: {GROWTH_ML_ACCOUNT_ID}
-            </p>
-          ) : null}
-        </div>
-
-        {oauthError ? (
-          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{oauthError}</p>
-        ) : (
-          <a
-            href={oauthUrl ?? "#"}
-            className="inline-flex items-center justify-center rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]"
-          >
-            {buttonLabel}
-          </a>
-        )}
-      </section>
+      <MLConnectionCard
+        mlAccountId={account.id}
+        sellerId={account.seller_id}
+        isConfigured={ml.isConfigured}
+        oauthUrl={oauthUrl}
+        lastSyncAt={account.updated_at}
+      />
     </main>
   );
 }

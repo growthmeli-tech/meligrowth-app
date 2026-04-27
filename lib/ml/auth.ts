@@ -1,4 +1,5 @@
 import { decryptJsonString, encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
+import { getServerEnv } from "@/lib/config/env";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { MlStoredTokens, MlTokenResponse } from "@/lib/ml/mappers/types";
 
@@ -19,8 +20,9 @@ function normalizeStoredTokens(tokens: Partial<MlStoredTokens>): MlStoredTokens 
 }
 
 function assertMlCredentials() {
-  const clientId = process.env.ML_CLIENT_ID;
-  const clientSecret = process.env.ML_CLIENT_SECRET;
+  const { ml } = getServerEnv();
+  const clientId = ml.clientId;
+  const clientSecret = ml.clientSecret;
 
   if (!clientId || !clientSecret) {
     throw new Error("Missing ML_CLIENT_ID or ML_CLIENT_SECRET");
@@ -30,8 +32,9 @@ function assertMlCredentials() {
 }
 
 export function getAuthorizationUrl(state: string) {
-  const clientId = process.env.ML_CLIENT_ID;
-  const redirectUri = process.env.ML_REDIRECT_URI;
+  const { ml } = getServerEnv();
+  const clientId = ml.clientId;
+  const redirectUri = ml.redirectUri;
 
   if (!clientId || !redirectUri) {
     throw new Error("Missing ML_CLIENT_ID or ML_REDIRECT_URI");
@@ -49,7 +52,9 @@ export function getAuthorizationUrl(state: string) {
 
 export async function exchangeCodeForTokens(code: string): Promise<MlTokenResponse> {
   const { clientId, clientSecret } = assertMlCredentials();
-  const redirectUri = process.env.ML_REDIRECT_URI;
+  const {
+    ml: { redirectUri }
+  } = getServerEnv();
   if (!redirectUri) throw new Error("Missing ML_REDIRECT_URI");
 
   const response = await fetch(ML_TOKEN_URL, {

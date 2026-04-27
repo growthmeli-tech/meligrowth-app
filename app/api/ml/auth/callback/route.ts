@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { exchangeCodeForTokens, saveSessionTokens } from "@/lib/ml/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function internalClientsRedirect(request: NextRequest, search: string) {
   return NextResponse.redirect(new URL(`/internal/clients?${search}`, request.url));
 }
@@ -12,7 +14,7 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state");
   const oauthError = searchParams.get("error");
 
-  if (!state) {
+  if (!state || !UUID_V4_REGEX.test(state)) {
     return internalClientsRedirect(request, "ml_error=invalid_state");
   }
 
@@ -31,12 +33,16 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = await createServerSupabaseClient();
-    const { data: mlAccount, error: mlAccountError } = await supabase.from("ml_accounts").select("id").eq("id", state).maybeSingle();
+    const { data: mlAccount, error: mlAccountError } = await supabase
+      .from("ml_accounts")
+      .select("id, company_id")
+      .eq("id", state)
+      .maybeSingle();
     if (mlAccountError || !mlAccount) {
       throw new Error("Invalid callback state");
     }
 
-    const storagePath = `oauth/${state}/tokens.json`;
+    const storagePath = `${state}/session.json`;
     const tokenPayload = {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -50,9 +56,10 @@ export async function GET(request: NextRequest) {
       throw new Error("Could not update ml_accounts.seller_id");
     }
 
-    return internalClientsRedirect(request, "ml_connected=true");
+    return NextResponse.redirect(new URL(`/internal/clients/${mlAccount.company_id}?ml_connected=true`, request.url));
   } catch (error) {
     console.error("[ml-auth-callback]", error);
-    return internalClientsRedirect(request, "ml_error=token_exchange_failed");
+    const message = error instanceof Error ? error.message : "token_exchange_failed";
+    return internalClientsRedirect(request, `ml_error=${encodeURIComponent(message)}`);
   }
 }
