@@ -1,5 +1,6 @@
 import { decryptJsonString, encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
 import { getServerEnv } from "@/lib/config/env";
+import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { MlStoredTokens, MlTokenResponse } from "@/lib/ml/mappers/types";
 
@@ -118,7 +119,7 @@ async function readSessionTokens(storagePath: string) {
 }
 
 export async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
-  const supabase = await createServerSupabaseClient();
+  const supabase = createServiceClient();
   const canonicalTokens = normalizeStoredTokens(tokens);
   const rawPayload = JSON.stringify(canonicalTokens);
   const storedPayload = isAppEncryptionConfigured() ? encryptJsonString(rawPayload) : rawPayload;
