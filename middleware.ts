@@ -4,10 +4,11 @@ import { getSupabaseConfig, isSupabaseConfigured } from "@/lib/supabase/config";
 import type { UserRoleV2 } from "@/lib/types/enums";
 
 const INTERNAL_ROLES: UserRoleV2[] = ["super_admin_meli_growth", "internal_operator_meli_growth"];
+type OperatorAccessRow = { ops_access_enabled?: boolean | null };
 
-function getHomeForRole(role: UserRoleV2) {
+function getHomeForRole(role: UserRoleV2, operatorHasOpsAccess = true) {
   if (INTERNAL_ROLES.includes(role)) return "/internal/dashboard";
-  if (role === "client_manager") return "/brand/dashboard";
+  if (role === "client_manager" || (role === "client_operator" && !operatorHasOpsAccess)) return "/brand/dashboard";
   return "/ops/dashboard";
 }
 
@@ -58,26 +59,44 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login?error=missing_role", request.url));
   }
 
+  let operatorHasOpsAccess = true;
+  if (role === "client_operator") {
+    const { data: operatorAccess } = await supabase
+      .from("user_account_access")
+      .select("ops_access_enabled")
+      .eq("user_id", user.id)
+      .eq("access_type", "operator")
+      .maybeSingle();
+
+    operatorHasOpsAccess = (operatorAccess as OperatorAccessRow | null)?.ops_access_enabled === true;
+  }
+
   if (pathname.startsWith("/operator")) {
     return NextResponse.redirect(new URL(pathname.replace("/operator", "/internal"), request.url));
   }
 
   if (pathname.startsWith("/client")) {
-    return NextResponse.redirect(new URL(getHomeForRole(role), request.url));
+    return NextResponse.redirect(new URL(getHomeForRole(role, operatorHasOpsAccess), request.url));
   }
 
   const requiredScope = getRequiredScope(pathname);
 
   if (requiredScope === "internal" && !INTERNAL_ROLES.includes(role)) {
-    return NextResponse.redirect(new URL(getHomeForRole(role), request.url));
+    return NextResponse.redirect(new URL(getHomeForRole(role, operatorHasOpsAccess), request.url));
   }
 
-  if (requiredScope === "brand" && role !== "client_manager") {
-    return NextResponse.redirect(new URL(getHomeForRole(role), request.url));
+  if (requiredScope === "brand") {
+    const canAccessBrand = role === "client_manager" || (role === "client_operator" && !operatorHasOpsAccess);
+    if (!canAccessBrand) {
+      return NextResponse.redirect(new URL(getHomeForRole(role, operatorHasOpsAccess), request.url));
+    }
   }
 
-  if (requiredScope === "ops" && role !== "client_operator") {
-    return NextResponse.redirect(new URL(getHomeForRole(role), request.url));
+  if (requiredScope === "ops" && (role !== "client_operator" || !operatorHasOpsAccess)) {
+    if (role === "client_operator") {
+      return NextResponse.redirect(new URL("/brand/dashboard", request.url));
+    }
+    return NextResponse.redirect(new URL(getHomeForRole(role, operatorHasOpsAccess), request.url));
   }
 
   return response;

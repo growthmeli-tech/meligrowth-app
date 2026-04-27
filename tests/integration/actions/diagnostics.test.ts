@@ -22,7 +22,7 @@ vi.mock("@/lib/recommendations/engine", () => ({
   generateRecommendations: vi.fn()
 }));
 
-import { createDiagnostic } from "@/app/(operator)/operator/clients/[id]/diagnostic/new/actions";
+import { createDiagnostic } from "@/app/(internal)/internal/clients/[id]/diagnostic/new/actions";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { persistDiagnostic } from "@/lib/diagnostics/persist-diagnostic";

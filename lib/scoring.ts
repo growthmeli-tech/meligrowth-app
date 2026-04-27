@@ -103,6 +103,26 @@ function capWhenCritical(score: number, metricScores: number[]) {
   return metricScores.some((metricScore) => metricScore < 45) ? Math.min(score, 55) : score;
 }
 
+export function getGlobalScoreWeights(hasAdsData = true) {
+  if (hasAdsData) {
+    return {
+      salud: 35,
+      publicaciones: 20,
+      ads: 20,
+      logistica: 15,
+      stock: 10
+    } as const;
+  }
+
+  return {
+    salud: 43.75,
+    publicaciones: 25,
+    ads: 0,
+    logistica: 18.75,
+    stock: 12.5
+  } as const;
+}
+
 export function calcSaludScore(data: SaludData): number {
   const scores = [
     calcScore("reclamos", data.reclamos),
@@ -166,13 +186,15 @@ export function calcBloqueScore(bloque: { key: BlockKey; data: DiagnosticInput[B
   return calcStockScore(bloque.data as StockData);
 }
 
-export function calcScoreGlobal(bloques: BloqueScores): number {
+export function calcScoreGlobal(bloques: BloqueScores, options?: { hasAdsData?: boolean }): number {
+  const weights = getGlobalScoreWeights(options?.hasAdsData ?? true);
+
   return weightedAverage([
-    [bloques.salud, 35],
-    [bloques.publicaciones, 20],
-    [bloques.ads, 20],
-    [bloques.logistica, 15],
-    [bloques.stock, 10]
+    [bloques.salud, weights.salud],
+    [bloques.publicaciones, weights.publicaciones],
+    [bloques.ads, weights.ads],
+    [bloques.logistica, weights.logistica],
+    [bloques.stock, weights.stock]
   ]);
 }
 
@@ -205,9 +227,9 @@ export function getDecision(estado: Estado, bloques: BloqueScores): Decision {
   };
 }
 
-export function scoreDiagnostic(input: DiagnosticInput) {
+export function scoreDiagnostic(input: DiagnosticInput, options?: { hasAdsData?: boolean }) {
   const scores = calcBloqueScores(input);
-  const scoreGlobal = calcScoreGlobal(scores);
+  const scoreGlobal = calcScoreGlobal(scores, options);
   return {
     scores,
     scoreGlobal,

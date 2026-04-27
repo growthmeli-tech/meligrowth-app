@@ -18,7 +18,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createServerSupabaseClient: vi.fn()
 }));
 
-import { createClientAction } from "@/app/(operator)/operator/clients/[id]/actions";
+import { createClientAction } from "@/app/(internal)/internal/clients/[id]/actions";
 import { getCurrentProfile } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";

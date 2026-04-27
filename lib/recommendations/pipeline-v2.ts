@@ -43,7 +43,7 @@ export async function runRecommendationsPipelineV2(input: {
   }
 
   const scoringInput = snapshotToDiagnosticInput(snapshot);
-  const scored = scoreDiagnostic(scoringInput);
+  const scored = scoreDiagnostic(scoringInput, { hasAdsData: hasAdsSnapshotData(snapshot) });
   const estadoGlobal = getEstadoGlobalLabel(scored.scoreGlobal);
 
   const { data: accountHealth, error: healthError } = await supabase
@@ -185,6 +185,10 @@ function deriveAdsMetrics(snapshot: MetricSnapshotRow): { acos: number; roas: nu
     roas: snapshot.roas ?? (gastoAds > 0 ? ventasAds / gastoAds : 0),
     tacos: snapshot.tacos ?? (ventasTotales > 0 ? (gastoAds / ventasTotales) * 100 : 0)
   };
+}
+
+function hasAdsSnapshotData(snapshot: MetricSnapshotRow): boolean {
+  return snapshot.gasto_ads !== null && snapshot.ventas_ads !== null && snapshot.ventas_totales !== null;
 }
 
 function getEstadoGlobalLabel(score: number) {

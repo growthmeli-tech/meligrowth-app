@@ -21,7 +21,7 @@ vi.mock("@/lib/diagnostics/persist-diagnostic", () => ({
   persistDiagnostic: vi.fn()
 }));
 
-import { createDiagnostic } from "@/app/(operator)/operator/clients/[id]/diagnostic/new/actions";
+import { createDiagnostic } from "@/app/(internal)/internal/clients/[id]/diagnostic/new/actions";
 import { getDiagnosticHistory, getDiagnosticWithDelta, getEstadoSimpleParaCliente } from "@/lib/data/diagnostics";
 import { getClientRecommendations } from "@/lib/data/recommendations";
 import { generateRecommendations } from "@/lib/recommendations/engine";
