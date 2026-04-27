@@ -4,6 +4,7 @@ export type UserRoleV2 =
   | "internal_operator_meli_growth"
   | "client_manager"
   | "client_operator";
+
 export type ClientPlan = "starter" | "growth" | "scale";
 export type DiagnosticSource = "manual" | "scraping" | "import";
 export type ActionPriority = "urgente" | "alta" | "media";
@@ -19,5 +20,15 @@ export type NotificationType =
   | "reporte_semanal";
 export type MeliSessionStatus = "missing" | "uploaded" | "validated" | "error";
 export type PricingProposalSource = "manual" | "template";
+
+export type PlanType = "360" | "360_copilot";
+export type UserAccountAccessType = "manager" | "operator" | "internal";
+export type MetricSnapshotSource = "api" | "scraper" | "manual" | "csv";
+export type AlertPriority = "urgente" | "alta" | "media" | "baja";
+export type AlertAudience = "internal" | "manager" | "operator" | "all";
+export type TaskPriority = "urgente" | "alta" | "media" | "baja";
+export type TaskStatus = "pendiente" | "en_curso" | "completada" | "descartada";
+export type IngestionRunSource = "api" | "scraper" | "manual" | "csv";
+export type IngestionRunStatus = "pending" | "running" | "success" | "error";
 
 export type ScoreStatus = "platinum" | "muy_bueno" | "solido" | "en_desarrollo" | "en_riesgo" | "critico";

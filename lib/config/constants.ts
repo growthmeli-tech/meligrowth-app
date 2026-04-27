@@ -7,3 +7,6 @@ export const DEFAULT_NOTIFICATIONS_LIMIT = 20;
 export const DEFAULT_SCRAPING_JOBS_LIMIT = 12;
 export const DEFAULT_PRICING_HISTORY_LIMIT = 8;
 export const DEFAULT_PRICING_TEMPLATE_LIMIT = 20;
+
+export const PLAN_TYPE_VALUES = ["360", "360_copilot"] as const;
+export const USER_ACCOUNT_ACCESS_TYPES = ["manager", "operator", "internal"] as const;

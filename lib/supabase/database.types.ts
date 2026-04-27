@@ -325,6 +325,228 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["scraping_jobs"]["Row"]>;
         Relationships: [];
       };
+      companies: {
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          plan: "360" | "360_copilot";
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["companies"]["Row"]> & {
+          name: string;
+          slug: string;
+          plan?: "360" | "360_copilot";
+        };
+        Update: Partial<Database["public"]["Tables"]["companies"]["Row"]>;
+        Relationships: [];
+      };
+      ml_accounts: {
+        Row: {
+          id: string;
+          company_id: string;
+          seller_id: string | null;
+          account_name: string;
+          active: boolean;
+          meli_account_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ml_accounts"]["Row"]> & {
+          company_id: string;
+          account_name: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_accounts"]["Row"]>;
+        Relationships: [];
+      };
+      users_v2: {
+        Row: {
+          id: string;
+          email: string;
+          name: string | null;
+          role:
+            | "super_admin_meli_growth"
+            | "internal_operator_meli_growth"
+            | "client_manager"
+            | "client_operator";
+          company_id: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["users_v2"]["Row"]> & {
+          id: string;
+          email: string;
+          role:
+            | "super_admin_meli_growth"
+            | "internal_operator_meli_growth"
+            | "client_manager"
+            | "client_operator";
+        };
+        Update: Partial<Database["public"]["Tables"]["users_v2"]["Row"]>;
+        Relationships: [];
+      };
+      user_account_access: {
+        Row: {
+          id: string;
+          user_id: string;
+          ml_account_id: string;
+          access_type: "manager" | "operator" | "internal";
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["user_account_access"]["Row"]> & {
+          user_id: string;
+          ml_account_id: string;
+          access_type: "manager" | "operator" | "internal";
+        };
+        Update: Partial<Database["public"]["Tables"]["user_account_access"]["Row"]>;
+        Relationships: [];
+      };
+      metric_snapshots: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          snapshot_date: string;
+          source: "api" | "scraper" | "manual" | "csv";
+          reclamos: number | null;
+          mediaciones: number | null;
+          cancelaciones_vendedor: number | null;
+          envios_a_tiempo: number | null;
+          pubs_activas_pct: number | null;
+          pubs_optimizadas_pct: number | null;
+          ctr: number | null;
+          margen_pre_ads: number | null;
+          gasto_ads: number | null;
+          ventas_ads: number | null;
+          ventas_totales: number | null;
+          acos: number | null;
+          roas: number | null;
+          tacos: number | null;
+          incidencias_pct: number | null;
+          uso_full_flex_pct: number | null;
+          cancelaciones_stock_pct: number | null;
+          skus_sin_stock_pct: number | null;
+          dias_stock: number | null;
+          lead_time_reposicion: number | null;
+          sistema_reposicion: number | null;
+          data_sources: Json;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["metric_snapshots"]["Row"]> & {
+          ml_account_id: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["metric_snapshots"]["Row"]>;
+        Relationships: [];
+      };
+      account_health: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          snapshot_id: string;
+          snapshot_date: string;
+          score_global: number;
+          estado_global: string;
+          score_salud: number | null;
+          score_publicaciones: number | null;
+          score_ads: number | null;
+          score_logistica: number | null;
+          score_stock: number | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["account_health"]["Row"]> & {
+          ml_account_id: string;
+          snapshot_id: string;
+          snapshot_date: string;
+          score_global: number;
+          estado_global: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["account_health"]["Row"]>;
+        Relationships: [];
+      };
+      alerts: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          health_id: string | null;
+          categoria: string;
+          prioridad: "urgente" | "alta" | "media" | "baja";
+          titulo: string;
+          descripcion: string | null;
+          accion_concreta: string | null;
+          benchmark_objetivo: string | null;
+          audiencia: "internal" | "manager" | "operator" | "all";
+          resuelta: boolean;
+          resuelta_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["alerts"]["Row"]> & {
+          ml_account_id: string;
+          categoria: string;
+          prioridad: "urgente" | "alta" | "media" | "baja";
+          titulo: string;
+          audiencia: "internal" | "manager" | "operator" | "all";
+        };
+        Update: Partial<Database["public"]["Tables"]["alerts"]["Row"]>;
+        Relationships: [];
+      };
+      tasks: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          alert_id: string | null;
+          assigned_to: string | null;
+          titulo: string;
+          descripcion: string | null;
+          prioridad: "urgente" | "alta" | "media" | "baja";
+          estado: "pendiente" | "en_curso" | "completada" | "descartada";
+          due_date: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["tasks"]["Row"]> & {
+          ml_account_id: string;
+          titulo: string;
+          prioridad: "urgente" | "alta" | "media" | "baja";
+        };
+        Update: Partial<Database["public"]["Tables"]["tasks"]["Row"]>;
+        Relationships: [];
+      };
+      task_events: {
+        Row: {
+          id: string;
+          task_id: string;
+          user_id: string | null;
+          evento: string;
+          detalle: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["task_events"]["Row"]> & {
+          task_id: string;
+          evento: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["task_events"]["Row"]>;
+        Relationships: [];
+      };
+      ingestion_runs: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          source: "api" | "scraper" | "manual" | "csv";
+          status: "pending" | "running" | "success" | "error";
+          blocks_fetched: Json;
+          error_msg: string | null;
+          started_at: string | null;
+          finished_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ingestion_runs"]["Row"]> & {
+          ml_account_id: string;
+          source: "api" | "scraper" | "manual" | "csv";
+          status: "pending" | "running" | "success" | "error";
+        };
+        Update: Partial<Database["public"]["Tables"]["ingestion_runs"]["Row"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -340,6 +562,12 @@ export type Database = {
       notification_type: "score_bajo" | "alerta_critica" | "accion_completada" | "archivo_procesado" | "reporte_semanal";
       meli_session_status: "missing" | "uploaded" | "validated" | "error";
       pricing_proposal_source: "manual" | "template";
+      user_role_v2:
+        | "super_admin_meli_growth"
+        | "internal_operator_meli_growth"
+        | "client_manager"
+        | "client_operator";
+      plan_type: "360" | "360_copilot";
     };
     CompositeTypes: Record<string, never>;
   };
