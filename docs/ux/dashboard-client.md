@@ -1,97 +1,75 @@
-# Dashboard Client (`/client/dashboard`)
+# Vista Gerencial (`/brand/dashboard`)
 
-## Objetivo de la pantalla
-Explicar al cliente en lenguaje simple si su cuenta mejora, qué se está haciendo y qué necesita aportar para sostener el crecimiento.
+## Objetivo
+Demostrar valor de gestion mensual con lenguaje simple y visual premium. El cliente debe entender progreso y control sin interpretar jerga tecnica.
 
-## Usuario principal
-- Vendedor de Mercado Libre (no técnico, sesiones cortas)
+## Principios de copy
+- Nunca usar jerga tecnica directa (`ACOS`, `TACOS`, `score bloque`).
+- Traducir a lenguaje negocio:
+  - "eficiencia publicitaria",
+  - "salud de tu cuenta",
+  - "areas a reforzar esta semana".
+- Siempre mostrar contexto temporal: "este mes", "vs mes pasado".
 
-## Principio editorial
-- Hablar en resultados y progreso.
-- Evitar jerga operativa interna (`ACOS`, `TACOS`, `RLS`, etc.).
-
-## Preguntas que debe responder
-- "¿Estoy mejorando?"
-- "¿Qué áreas están bien y cuáles en proceso?"
-- "¿Qué me falta subir para que el equipo avance?"
-
-## Wireframe simplificado
+## Wireframe de referencia
 ```text
-┌─────────────────────────────────────────────────────┐
-│ SUPLEMENTOS MADERO                                 │
-│ Plan Growth · Desde enero 2026                     │
-├─────────────────────────────────────────────────────┤
-│ TU CUENTA ESTE MES                                 │
-│ [77] Sólida                                        │
-│ ↑ Subió 5 puntos vs el mes pasado                  │
-│ Actualizado hoy                                    │
-├─────────────────────────────────────────────────────┤
-│ QUÉ ESTÁ PASANDO                                   │
-│ ✅ Logística: bien                                 │
-│ ✅ Stock: muy bien                                 │
-│ ⚠️ Publicaciones: en proceso                       │
-│ ⚠️ Salud: revisando                                │
-├─────────────────────────────────────────────────────┤
-│ EVOLUCIÓN (6 meses)                                │
-│ [EvolutionChart]                                   │
-├─────────────────────────────────────────────────────┤
-│ TU REPORTE QUINCENAL                               │
-│ Último reporte: 15/04/2026 [Ver]                  │
-├─────────────────────────────────────────────────────┤
-│ ARCHIVOS PENDIENTES                                │
-│ ✅ SKUs y stock                                    │
-│ ✅ Márgenes                                        │
-│ ⚠️ Ficha técnica [Subir ahora]                     │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ EMPRESA ABC                                Abril 2026       │
+│ Plan 360° · Activa desde enero                              │
+│ [Selector de cuenta ▼] (si hay multiples ml_accounts)       │
+├──────────────────────────────────────────────────────────────┤
+│ TU CUENTA ESTE MES                                           │
+│                                                              │
+│     [  77  ]                                                 │
+│     Tu cuenta esta Solida                                    │
+│     ↑ Subio 5 puntos vs el mes pasado                        │
+├───────────────┬──────────────────────────────────────────────┤
+│ QUE ESTA      │ EVOLUCION                                    │
+│ PASANDO       │ [grafico de linea 6 meses]                   │
+│ ✅ Logistica  │                                              │
+│ ✅ Stock      │                                              │
+│ ⚠️ Pubs       │                                              │
+│ ⚠️ Salud      │                                              │
+│ 🔴 Publicidad │                                              │
+└───────────────┴──────────────────────────────────────────────┘
 ```
 
-## Especificación de experiencia
-- Score principal grande + delta obligatorio.
-- Estado por área con iconografía simple (`✅`, `⚠️`, `🔴`) y texto humano.
-- Gráfico de evolución como prueba de progreso mensual.
-- CTA de archivo faltante siempre visible (alto contraste).
+## Jerarquia
+- Numero principal mas grande de pantalla: score global o crecimiento de ventas.
+- Segundo nivel: estado cualitativo + delta.
+- Tercer nivel: resumen por areas con iconos.
+- Cuarto nivel: evolucion historica (6 meses).
 
-## Especificación de componentes UX (para Agente UI)
+## Selector de cuenta (multicuenta)
+- Visible en header solo si la company tiene mas de una `ml_account`.
+- Dropdown compacto con nickname + estado.
+- Cambio de cuenta conserva periodo seleccionado.
 
-### `EvolutionChart`
-- Línea de score 6 meses.
-- Tooltip simple: "Mes X: 74 puntos".
-- Destacar último punto y variación mensual.
-- Debe ser legible en mobile (sin saturar ejes).
+## Reglas visuales
+- CTA primario unico por pantalla: `Ver reporte quincenal`.
+- Score siempre acompañado por frase explicativa.
+- Tarjetas de estado por area sin numeros tecnicos crudos.
+- Fondo claro, cards blancas y bordes suaves para look SaaS premium.
 
-### `EmptyState` (cliente)
-- Si no hay diagnóstico:
-  - copy: "Todavía estamos preparando tu primera medición."
-  - CTA: `Contactar a tu operador`.
-
-## Reglas de lenguaje
-- Sí usar: "mejorando", "en proceso", "revisando", "listo".
-- No usar: "score bloque ads", "incidencias logísticas", "KPI técnico".
-- Cada mensaje debe poder entenderlo alguien sin contexto interno.
-
-## Estados de la pantalla
-
-### Cargando
-- Skeleton de score principal + checklist + gráfico.
+## Estados de pantalla
+### Loading
+- Skeleton hero de score + checklist + chart.
 
 ### Con datos
-- Render completo con progreso y próximos pasos.
+- Render completo con texto humano.
 
-### Vacío
-- Explicar que falta el diagnóstico inicial y qué sucederá después.
+### Sin diagnostico
+- Mensaje: "Aun no tenemos tu primera medicion completa".
+- CTA: `Contactar a tu operador`.
 
 ### Error
-- Mensaje amigable:
-  - "No pudimos cargar tu resumen ahora. Reintentá en unos minutos."
+- Mensaje amigable + `Reintentar`.
 
 ## Edge cases
-- Score estable (delta 0): mostrar "Se mantuvo igual este mes".
-- Delta negativo: copy empático + foco en plan de recuperación.
-- Falta de historial para gráfico: mostrar últimos 2 puntos disponibles.
-- Archivos todos completos: reemplazar CTA por mensaje positivo de cumplimiento.
-- Cliente sin plan activo: mostrar estado administrativo y canal de contacto.
+- Delta 0: "Tu cuenta se mantuvo estable este mes".
+- Delta negativo: mensaje empatico + foco en plan de recuperacion.
+- Historial < 6 puntos: mostrar puntos disponibles y leyenda explicativa.
+- Todos los frentes en verde: destacar hito positivo mensual.
 
-## KPIs UX
-- Comprensión del estado general en < 10 segundos.
-- Click rate en CTA de archivo pendiente > 30%.
-- Disminución de consultas de soporte por "no entiendo el reporte".
+## Accion principal de la pantalla
+`Ver reporte quincenal`.

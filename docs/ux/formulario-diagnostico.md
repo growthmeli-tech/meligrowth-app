@@ -1,128 +1,91 @@
-# Formulario de Diagnóstico (`/operator/clients/[id]/diagnostic/new`)
+# Formulario de Diagnostico (`/internal/clients/[id]/diagnostic/new`)
 
-## Objetivo de la pantalla
-Permitir cargar un diagnóstico completo en menos de 10 minutos, con feedback inmediato de benchmark, score en tiempo real y claridad sobre fuente de cada dato (ML, scraper o manual).
+## Objetivo
+Hacer que la carga quincenal se sienta como un asistente inteligente: rapido, guiado y con impacto visible en tiempo real.
 
-## Usuario principal
-- Joaquín (uso intensivo, análisis técnico)
+## Estructura de experiencia (obligatoria)
+- Dos zonas diferenciadas:
+  - Zona A: datos rapidos (obligatoria, 10 min max).
+  - Zona B: analisis profundo (opcional, no penaliza).
+- Zona A sobre fondo blanco.
+- Zona B sobre fondo `#F5F5F0` con etiqueta `Opcional — no penaliza`.
 
-## Flujo esperado
-1. Abrir formulario con prefill automático disponible.
-2. Completar Zona A (rápida) por bloque.
-3. Ver benchmark inline y score actualizándose en tiempo real.
-4. Completar Zona B opcional si hay más datos.
-5. Guardar y ver resultado inmediato con recomendaciones generadas.
-
-## Wireframe (edición)
+## Wireframe de trabajo
 ```text
-┌────────────────────────────────────────────────────────────┐
-│ Cliente X                        Nuevo diagnóstico          │
-│ Fuente global: API ML + Manual                            │
-├────────────────────────────────────────────────────────────┤
-│ Tabs bloque: Salud | Publicaciones | Ads | Logística | Stock
-├────────────────────────────────────────────────────────────┤
-│ 01 Salud                                     Score [67] 🟡  │
-│ Zona A (rápida)                                           │
-│ Reclamos %                                                │
-│ [ 0.6 ] %   [Badge: ML/API]                               │
-│ 🟡 En desarrollo                                           │
-│ Benchmark: <0.5 sólido · >1 crítico                       │
-│ Objetivo sugerido: bajar a <0.5%                          │
-│                                                            │
-│ Zona B (opcional) [colapsada/expandible]                  │
-├────────────────────────────────────────────────────────────┤
-│ PREVIEW                                                    │
-│ Score global [77] Sólido ↑+5                              │
-│ Barras por bloque + warnings + calidad de datos           │
-│ [Guardar diagnóstico]                                      │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ EMPRESA ABC · Nuevo diagnostico                             │
+├──────────────────────────────────────────────────────────────┤
+│ Zona A — Datos rapidos (obligatoria)                        │
+│ Reclamos %                                     🟢 API        │
+│ [ 0.6 ]                                                     │
+│ 🟡 En desarrollo — benchmark: <0.5% solido                  │
+│ Objetivo: llevar a <0.5%                                    │
+│                                                              │
+│ 01 SALUD                             [67] 🟡 En desarrollo   │
+│ ████████████████░░░░░░░░░░  67/100                           │
+├──────────────────────────────────────────────────────────────┤
+│ Zona B — Opcional (no penaliza)                              │
+│ Campos de contexto interno, lead time, etc.                  │
+├──────────────────────────────────────────────────────────────┤
+│ Score global en tiempo real: [63] En riesgo ↓ -5            │
+│ [Guardar diagnostico]                                        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Wireframe (post-submit)
+## Campo con benchmark inline (`DiagnosticFieldBenchmark`)
+- Estructura fija:
+  - label de metrica.
+  - badge de fuente (`🟢 API` o `✏️ Manual`).
+  - input.
+  - estado semaforo.
+  - benchmark y objetivo en texto corto.
+- Feedback al tipear, sin esperar blur o submit.
+
+## Score en tiempo real por bloque
+- Cada bloque muestra:
+  - id (`01`, `02`, `03`, `04`, `05`),
+  - score numerico,
+  - estado semaforo,
+  - barra de progreso animada.
+- Actualizacion sugerida: debounce 150-250ms.
+
+## Comportamiento de fuentes de datos
+- Prefill API: badge `🟢 API` y tooltip "Dato de API ML".
+- Campo no cubierto por API: badge `✏️ Manual`.
+- Si falla sync, formulario sigue habilitado en modo manual.
+
+## Post-submit (sin redireccion)
 ```text
-┌────────────────────────────────────────────┐
-│ ✅ Diagnóstico guardado                    │
-│ SCORE FINAL: 77  Sólido  ↑+5              │
-│                                            │
-│ Recomendaciones generadas (3)              │
-│ 🔴 Envíos a tiempo (impacto +8)            │
-│ 🟠 ACOS vs margen (impacto +6)             │
-│ 🟡 Catálogo (impacto +3)                   │
-│                                            │
-│ [Ver cuenta completa]                      │
-│ [Generar reporte quincenal]                │
-└────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ ✅ Diagnostico guardado                                     │
+│ [  63  ] En riesgo  ↓-5 pts vs anterior                     │
+│ 🔴 URGENTE: Ads destruyendo margen — pausar ahora           │
+│ 🟡 ALTA: Envios a tiempo al 90%                             │
+│ [Ver cuenta completa] [Crear tareas automaticas]            │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Diseño de campos con benchmark inline
+## Reglas UX innegociables
+- Nunca redirigir automaticamente al listado.
+- Validaciones inline por campo (no solo toast global).
+- Score visible durante toda la carga.
+- Alertas urgentes de inputs criticos (ejemplo ads) en rojo inmediato.
 
-### `DiagnosticFieldWithBenchmark` (componente obligatorio)
-- Estructura por campo:
-  - label de métrica,
-  - input numérico,
-  - badge de fuente (`ML API`, `Scraper`, `Manual`),
-  - estado semáforo textual,
-  - benchmark corto,
-  - objetivo accionable.
-- Feedback inmediato al tipear (sin submit).
-- Si el valor rompe umbral crítico, mostrar alerta compacta bajo el campo.
+## Estados
+### Loading
+- Skeleton que respeta estructura real de zonas y barras de score.
 
-## Score en tiempo real
-- Recalcular:
-  - score del bloque activo,
-  - score global,
-  - estado global y por bloque,
-  - warnings de coherencia.
-- Frecuencia: en cada cambio de input, con debounce suave (150-250ms).
-- Visualización:
-  - score numérico + barra de progreso + estado textual.
-
-## Badge de fuente de datos ML
-- Tipos permitidos:
-  - `ML API` (verde claro),
-  - `Scraper` (ámbar),
-  - `Manual` (gris).
-- Se muestra junto al input y en tooltip explicativo.
-- Si un bloque tiene mezcla de fuentes, mostrar resumen en cabecera del bloque.
-
-## Reglas UX por zona
-- Zona A visible por defecto.
-- Zona B colapsada por defecto para acelerar carga.
-- Cambiar de bloque mantiene valores temporales ya ingresados.
-- Nunca ocultar preview global ni botón de guardar.
-
-## Estados de la pantalla
-
-### Cargando
-- Skeleton de tabs, 4 campos y preview lateral.
-
-### Con datos prefill
-- Valores iniciales + badges de fuente.
+### Con datos
+- Zona A expandida por defecto, Zona B plegada.
 
 ### Sin prefill
-- Todos los badges en `Manual`.
-- Mensaje informativo: "Sin sync reciente de ML para esta cuenta."
+- Todos los campos con `✏️ Manual` y aviso de sync pendiente.
 
-### Error de guardado
-- Banner rojo con motivo técnico traducido.
-- Mantener valores cargados en memoria.
-
-### Éxito de guardado
-- No redirigir automáticamente al listado.
-- Mostrar pantalla de resultado con recomendaciones.
+### Error submit
+- Banner rojo + conservar inputs para no perder trabajo.
 
 ## Edge cases
-- Porcentajes >100 o <0: validación inline inmediata.
-- Inconsistencia ads (`gasto_ads` alto y `ventas_ads` cero): warning crítico.
-- Pérdida de conexión al guardar: guardar borrador local temporal.
-- Usuario cierra pestaña con cambios sin guardar: confirmación de salida.
-- Bloque no disponible por falta de datos ML: fallback a carga manual guiada.
-
-## Contenido de ayuda contextual
-- Microcopy orientado a decisión, no teoría.
-- Ejemplo: "ACOS ideal: menor al 36% del margen pre ads."
-
-## KPIs UX
-- Tiempo medio de carga completa: < 10 minutos.
-- Porcentaje de campos con fuente no manual en cuentas conectadas: > 60%.
-- Error rate de validación por campo: < 5%.
+- Valores fuera de rango: correccion y mensaje inmediato.
+- Ads con `ventas_ads = 0`: alerta critica contextual.
+- Salida accidental con cambios: modal de confirmacion.
+- Bloque sin datos: marcar `Sin datos` sin romper submit global.

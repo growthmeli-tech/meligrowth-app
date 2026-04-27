@@ -1,88 +1,73 @@
-# Panel de Recomendaciones por Cuenta
+# Panel de Recomendaciones (`/internal/clients/[id]` y `/ops/dashboard`)
 
-## Objetivo del módulo
-Convertir recomendaciones del motor en decisiones ejecutables por prioridad, con contexto de impacto y CTA directo a acción.
+## Objetivo
+Traducir señal tecnica del motor en acciones claras segun audiencia, con una sola decision visible por card.
 
-## Ubicación sugerida
-- Vista de cuenta operator (`/operator/clients/[id]`), debajo de score global.
-- También reutilizable como sección dedicada en tab "Acciones".
-
-## Estructura general
-- Agrupado por bloque (`Salud`, `Publicaciones`, `Ads`, `Logística`, `Stock`).
-- Orden interno por prioridad (`urgente`, `alta`, `media`).
-- Filtros rápidos por prioridad y estado de ejecución.
-
-## Card de recomendación (wireframe)
+## Segmentacion por audiencia
+### `manager` (lenguaje ejecutivo)
 ```text
-┌──────────────────────────────────────────────────────┐
-│ 🔴 URGENTE                      Bloque: Salud        │
-│ Envíos a tiempo en 90%                                │
-│ Riesgo: penalización activa posible                   │
-│                                                       │
-│ QUÉ HACER                                             │
-│ Revisar SLA con logística y recuperar >95% esta semana│
-│                                                       │
-│ MÉTRICA ACTUAL: 90%                                   │
-│ OBJETIVO: >95%                                        │
-│ IMPACTO ESTIMADO: +8 pts en score Salud               │
-│ FUENTE: ML API · Confianza alta                       │
-│                                                       │
-│ [Crear acción] [Marcar en curso] [Ver evidencia]      │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│ 🔴 URGENTE          Publicidad                 │
+│ Tu publicidad esta consumiendo mas de lo       │
+│ que genera                                     │
+│ Situacion: por cada $1 invertido, generas      │
+│ $0.5 — estas perdiendo dinero                  │
+│ Impacto estimado: +15 pts si se corrige        │
+│ esta semana                                    │
+│ [Solicitar accion al operador]                 │
+└─────────────────────────────────────────────────┘
 ```
 
-## Especificación de `RecommendationCard` (para Agente UI)
-- Header:
-  - chip de prioridad,
-  - bloque asociado,
-  - fecha sugerida de resolución.
-- Cuerpo:
-  - título directo (problema),
-  - contexto de riesgo,
-  - sección "Qué hacer" orientada a acción concreta.
-- Footer:
-  - métrica actual,
-  - objetivo benchmark,
-  - impacto estimado en puntos,
-  - fuente y nivel de confianza.
-- Acciones:
-  - `Crear acción` (primaria),
-  - `Marcar en curso` (secundaria),
-  - `Ver evidencia` (terciaria, opcional).
+### `operator` (lenguaje operativo)
+```text
+┌─────────────────────────────────────────────────┐
+│ 🔴 URGENTE · Ads            borde rojo izq      │
+│ ACOS 200% — Pausar campanas ahora               │
+│ ROAS 0.5x (minimo necesario: 3.33x)             │
+│ QUE HACER:                                      │
+│ 1. Entrar a Mercado Ads                         │
+│ 2. Pausar campanas activas                      │
+│ 3. Revisar costos con Joaquin                   │
+│ Objetivo: llevar ROAS a >3.33x                  │
+│ Impacto: +5 pts en score global                 │
+│ [Crear tarea]                                   │
+└─────────────────────────────────────────────────┘
+```
 
-## Reglas visuales
-- Borde izquierdo por prioridad:
-  - urgente rojo,
-  - alta naranja,
-  - media amarillo.
-- Altura de card flexible pero estable (evitar saltos de layout).
-- Impacto siempre visible (nunca escondido en tooltip).
-- Si no hay objetivo cuantitativo, mostrar objetivo cualitativo estándar.
+## Reglas de cards (aplican a ambos perfiles)
+- Borde izquierdo con color de prioridad.
+- Titulo en lenguaje directo, maximo 1 linea.
+- Contexto de situacion y objetivo explicito.
+- Impacto visible, nunca oculto en tooltip.
+- Exactamente un CTA visible por card.
+
+## Prioridades visuales
+- Urgente: rojo (`#DC2626`), pulso suave opcional.
+- Alta: naranja (`#EA580C`).
+- Media: ambar (`#D97706`).
+- Baja: azul (`#2563EB`).
+
+## Estructura de `RecommendationCard`
+- Header: prioridad + bloque.
+- Body: problema, situacion, que hacer.
+- Footer: objetivo + impacto + CTA unico.
 
 ## Estados del panel
-
-### Cargando
-- 3 skeleton cards con distribución real de contenido.
+### Loading
+- Skeleton con forma real de 3 cards.
 
 ### Con datos
-- Cards ordenadas por prioridad y bloque.
+- Orden por prioridad y luego por impacto.
 
 ### Sin recomendaciones
-- Empty state:
-  - "No hay recomendaciones activas para esta cuenta."
-  - CTA: `Crear acción preventiva`.
+- Mensaje: "No hay recomendaciones activas".
+- CTA: `Crear accion preventiva`.
 
 ### Error
-- Mensaje inline dentro del panel con botón `Reintentar`.
+- Error inline + `Reintentar`.
 
 ## Edge cases
-- Más de 12 recomendaciones: paginación o "ver más" incremental.
-- Recomendación duplicada por misma métrica: consolidar en una sola card.
-- Sin impacto estimado: mostrar etiqueta `impacto por validar`.
-- Recomendación vencida: badge adicional `atrasada`.
-- Acción ya creada para recomendación: reemplazar CTA por "Ver acción".
-
-## Relación con acciones operativas
-- Cada recomendación debe mapear a una acción rastreable.
-- Guardar vínculo `recommendationId -> actionId` para trazabilidad.
-- Permitir estado de ciclo: `pendiente`, `en_curso`, `resuelta`.
+- Recomendacion duplicada: consolidar por bloque y metrica.
+- Recomendacion vencida: badge `Atrasada`.
+- Sin impacto cuantitativo: usar impacto cualitativo estandar.
+- Accion ya creada: CTA cambia a `Ver tarea`.

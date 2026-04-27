@@ -1,114 +1,78 @@
-# Vista de Cuenta (`/operator/clients/[id]`)
+# Vista de Cuenta (`/internal/clients/[id]`)
 
-## Objetivo de la pantalla
-Concentrar diagnóstico actual, evolución y recomendaciones accionables para decidir "qué hacer esta semana" en una cuenta específica.
+## Objetivo
+Pantalla de mayor densidad informativa del producto. Debe permitir escaneo total en 5 segundos: estado global, peor bloque y siguiente accion.
 
-## Usuario principal
-- Joaquín (análisis profundo, desktop)
-- Nacho (operación rápida con foco en urgencias)
-
-## Preguntas que debe responder
-- "¿Cómo está esta cuenta hoy?"
-- "¿Qué cambió vs diagnóstico anterior?"
-- "¿Qué recomendaciones tengo que ejecutar primero?"
-
-## Wireframe base
+## Wireframe de referencia
 ```text
-┌─────────────────────────────────────────────────────────┐
-│ ← Cartera             SUPLEMENTOS MADERO · Growth      │
-│                        Activo · Último sync ML: hoy     │
-├─────────────────────────────────────────────────────────┤
-│ SCORE GLOBAL                                            │
-│ [ 77 ] Sólido  ↑+5 vs mes anterior                      │
-│ Última actualización: 20/04/2026                        │
-├─────────────────────────────────────────────────────────┤
-│ RECOMENDACIONES (3 pendientes)                          │
-│ 🔴 Envíos a tiempo al 90% (impacto +8) [Crear acción]   │
-│ 🟠 ACOS alto vs margen (impacto +6) [Ver detalle]       │
-│ 🟡 Catálogo optimizable (impacto +3)                    │
-├─────────────────────────────────────────────────────────┤
-│ BLOQUES                                                 │
-│ Salud 67 🟡 | Publicaciones 81 🔵 | Ads 85 🟢           │
-│ Logística 81 🔵 | Stock 89 🟢                           │
-├─────────────────────────────────────────────────────────┤
-│ TABS: [Diagnóstico] [Evolución] [Acciones]             │
-├─────────────────────────────────────────────────────────┤
-│ CONTENIDO TAB                                            │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ ← Cartera · EMPRESA ABC · Plan Copilot 🟡                      │
+├──────────────┬──────────────────────────────────────────────────┤
+│ SCORE        │ RECOMENDACIONES                                 │
+│              │ 🔴 URGENTE — Ads critico                        │
+│  [  77  ]    │ Pausar campanas. ACOS al 200%.                  │
+│  Solido      │ [Crear tarea]                                   │
+│  ↑ +5 pts    │                                                  │
+│              │ 🟡 ALTA — Envios a tiempo                        │
+│ BLOQUES      │ Penalizacion posible. Revisar SLA.              │
+│ 01 67 🟡     │ [Crear tarea]                                   │
+│ 02 81 🔵     │                                                  │
+│ 03 15 🔴     │ TAREAS                                           │
+│ 04 81 🔵     │ [3 pendientes · 1 urgente]                       │
+│ 05 82 🔵     │                                                  │
+├──────────────┴──────────────────────────────────────────────────┤
+│ TABS: Diagnostico · Historial · Archivos · Config              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Jerarquía visual obligatoria
-1. `ScoreDisplay` (dominante)
-2. Recomendaciones del motor (siempre visibles, nunca ocultas tras tab)
-3. `BlockScoreRow` de los 5 bloques
-4. Acciones/diagnóstico detallado por tab
-5. CTAs persistentes: `Nuevo diagnóstico`, `Ver reporte`
+## Jerarquia obligatoria
+- Primer elemento visual: score global (`text-6xl font-black`) con color semaforo.
+- Segundo bloque: recomendaciones visibles siempre (nunca ocultas en tabs).
+- Tercer bloque: chips de los 5 bloques con enfasis en el peor score.
+- Cuarto bloque: tabs de profundizacion.
 
-## Presentación de recomendaciones del motor
-- Ubicación fija bajo score global.
-- Orden por prioridad (`urgente` > `alta` > `media`).
-- Cada item muestra:
-  - bloque afectado,
-  - métrica actual,
-  - objetivo benchmark,
-  - impacto estimado en puntos,
-  - CTA contextual (`Crear acción`, `Marcar en curso`, `Ver cuenta`).
-- Si hay más de 3, mostrar top 3 + enlace "Ver todas las recomendaciones".
+## Columna izquierda (score + bloques)
+- `ScoreDisplay` dominante:
+  - numero, estado, delta y fecha de actualizacion.
+  - color segun sistema semaforo.
+- `BlockScoresRow` vertical/compacta con 5 chips.
+- Peor bloque:
+  - borde mas grueso.
+  - microetiqueta `Prioridad actual`.
 
-## Especificación de componentes UX (para Agente UI)
+## Columna derecha (recomendaciones + tareas)
+- Recomendaciones ordenadas por prioridad: urgente > alta > media > baja.
+- Cada recomendacion usa borde izquierdo por prioridad.
+- Cada card muestra exactamente un CTA visible:
+  - `Crear tarea` para operator.
+  - `Solicitar accion` para manager.
+- Panel de tareas compacto siempre visible debajo de recomendaciones.
 
-### `ScoreDisplay`
-- Elementos:
-  - número grande (`text-6xl`, fuente black),
-  - etiqueta de estado semáforo,
-  - delta con flecha y color,
-  - timestamp de actualización.
-- Debe soportar:
-  - estado sin delta ("Base inicial"),
-  - estado negativo/positivo.
-
-### `BlockScoreRow`
-- Fila compacta con 5 bloques y color semáforo inline.
-- Interacción: click en bloque filtra el tab `Diagnóstico` a métricas del bloque.
-- Tooltip opcional con benchmark del bloque.
-
-### `RecommendationCard` (versión resumida)
-- Se usa en lista superior de recomendaciones.
-- Variante compacta (1 línea de título + impacto + CTA).
-- Prioridad indicada por borde izquierdo y chip.
-
-## Reglas de diseño
-- El score global ocupa el área de máxima atención.
-- El operador debe ver recomendaciones sin cambiar de tab.
-- No esconder acciones críticas debajo de folds largos.
-- Lenguaje operativo directo: "Revisar SLA", "Reducir ACOS", "Corregir stock".
-- Mantener consistencia de semáforo entre score global, bloques y recomendaciones.
+## Reglas de contenido
+- Lenguaje operativo directo para internal/ops.
+- Metricas en fuente mono (`font-mono`).
+- No esconder la principal recomendacion por encima de tabs o acordeones.
+- Si hay alerta urgente, aparece antes de tareas y tabs.
 
 ## Estados de la pantalla
-
-### Cargando
-- Skeleton de score principal + 3 recommendation cards + tabs.
+### Loading
+- Skeleton dividido en dos columnas con forma real (score, 3 recomendaciones, chips, tabs).
 
 ### Con datos
-- Score + recomendaciones + tabs activos.
+- Layout completo con score, recomendaciones y tabs.
 
-### Sin diagnóstico
-- Empty state específico:
-  - copy: "Esta cuenta aún no tiene diagnóstico inicial."
-  - CTA primario: `Cargar diagnóstico`.
-  - CTA secundario: `Ver archivos`.
+### Sin diagnostico
+- Mensaje: "Esta cuenta aun no tiene diagnostico inicial".
+- CTA principal: `Crear primer diagnostico`.
 
 ### Error
-- Error inline sobre contenido, manteniendo header de cuenta.
-- Botón de recuperación: `Reintentar carga`.
+- Banner superior de error + CTA `Reintentar`.
 
 ## Edge cases
-- Score sin historial previo: ocultar delta, mostrar "Primera medición".
-- Recomendación sin impacto estimado: mostrar "Impacto cualitativo".
-- Cuenta inactiva: bloquear CTAs de ejecución y mostrar estado.
-- Sin recomendaciones del motor: mostrar mensaje "Sin urgencias detectadas" + CTA a crear acción manual.
-- Score global crítico + tabs no diagnóstico: pin de alerta persistente en header.
+- `ads` sin datos: chip `03 --` con estado `Sin datos`, sin penalizar visualmente.
+- Primera medicion: ocultar delta y mostrar `Base inicial`.
+- Cuenta pausada/churned: bloquear acciones de ejecucion y mostrar badge administrativo.
+- Multiples cuentas ML por company: selector de cuenta debajo del header.
 
-## KPIs UX
-- Tiempo hasta abrir recomendación prioritaria: < 10 segundos.
-- Tasa de conversión recomendación -> acción creada: > 40%.
+## Accion principal de la pantalla
+`Crear tarea` sobre la recomendacion mas urgente.
