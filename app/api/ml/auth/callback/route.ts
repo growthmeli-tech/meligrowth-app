@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { exchangeCodeForTokens, saveSessionTokens } from "@/lib/ml/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       userId: tokens.user_id
     });
 
-    const supabase = await createServerSupabaseClient();
+    const supabase = createServiceClient();
     const { data: mlAccount, error: mlAccountError } = await supabase
       .from("ml_accounts")
       .select("id, company_id")
