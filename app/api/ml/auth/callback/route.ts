@@ -1,3 +1,4 @@
-export async function GET(req: Request) {
-  return Response.json({ ok: true, route: "ml-auth-callback" });
+export async function GET() {
+  console.log("🔥 CALLBACK HIT");
+  return new Response("OK CALLBACK");
 }
