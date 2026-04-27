@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchMLDiagnosticData } from "@/lib/ml/pipeline";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
@@ -24,12 +25,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  const serviceSupabase = createServiceClient();
+
   let result:
     | Awaited<ReturnType<typeof fetchMLDiagnosticData>>
     | { success: false; error: string };
 
   if (mlAccountId) {
-    const { data: mlAccount, error: mlAccountError } = await supabase
+    const { data: mlAccount, error: mlAccountError } = await serviceSupabase
       .from("ml_accounts")
       .select("id, seller_id, company_id")
       .eq("id", mlAccountId)
