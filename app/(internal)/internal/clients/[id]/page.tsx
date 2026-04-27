@@ -1,11 +1,14 @@
 import Link from "next/link";
+import { DownloadReportButton } from "@/components/reports/download-report-button";
 import { BlockScoresRow } from "@/components/score/block-scores-row";
 import { ScoreDisplay } from "@/components/score/score-display";
 import { EmptyState } from "@/components/ui/empty-state";
 import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel";
-import { getAccountHealthWithDelta } from "@/lib/data-v2/account-health";
+import { getAccountHealthWithDelta, listAccountHealthByAccount } from "@/lib/data-v2/account-health";
+import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getCompanyById } from "@/lib/data-v2/companies";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
+import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
 
 export default async function InternalClientDetailPage({
   params,
@@ -39,6 +42,7 @@ export default async function InternalClientDetailPage({
   const needsMlConnection = !account?.seller_id;
   const hasConnectedBanner = resolvedSearchParams.ml_connected === "true";
   const hasErrorBanner = typeof resolvedSearchParams.ml_error === "string" && resolvedSearchParams.ml_error.length > 0;
+  const reportData = account && health ? await buildReportData(companyResult.data, account.id, health) : null;
 
   return (
     <main className="p-4 md:p-6 space-y-4">
@@ -51,6 +55,7 @@ export default async function InternalClientDetailPage({
           <Link href={`/internal/clients/${id}/settings`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
             {needsMlConnection ? "Conectar ML" : "Configurar ML"}
           </Link>
+          <DownloadReportButton reportData={reportData ?? emptyReportData(companyResult.data.name, companyResult.data.plan)} disabled={!reportData} />
           <Link href={`/internal/clients/${id}/diagnostic/new`} className="bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">
             Nuevo diagnostico
           </Link>
@@ -135,4 +140,82 @@ export default async function InternalClientDetailPage({
       ) : null}
     </main>
   );
+}
+
+async function buildReportData(
+  company: { name: string; plan: string },
+  mlAccountId: string,
+  health: {
+    score_global: number;
+    estado_global: string;
+    score_salud: number | null;
+    score_publicaciones: number | null;
+    score_ads: number | null;
+    score_logistica: number | null;
+    score_stock: number | null;
+  }
+): Promise<DiagnosticReportData> {
+  const [alertsResult, historyResult] = await Promise.all([
+    listAlertsByAccount(mlAccountId, { includeResolved: false, limit: 12 }),
+    listAccountHealthByAccount(mlAccountId, 6)
+  ]);
+
+  const alerts = alertsResult.success ? alertsResult.data : [];
+  const sortedAlerts = [...alerts].sort((a, b) => priorityOrder(a.prioridad) - priorityOrder(b.prioridad));
+  const top3 = sortedAlerts.slice(0, 3);
+
+  return {
+    company_name: company.name,
+    plan: company.plan,
+    fecha: new Date().toISOString().slice(0, 10),
+    score_global: Number(health.score_global ?? 0),
+    estado_global: String(health.estado_global ?? "critico"),
+    score_salud: Number(health.score_salud ?? 0),
+    score_publicaciones: Number(health.score_publicaciones ?? 0),
+    score_ads: Number(health.score_ads ?? 0),
+    score_logistica: Number(health.score_logistica ?? 0),
+    score_stock: Number(health.score_stock ?? 0),
+    alertas: top3.map((alert) => ({
+      titulo: alert.titulo,
+      descripcion: alert.descripcion ?? "Sin detalle adicional.",
+      accion_concreta: alert.accion_concreta ?? "Definir plan de acción con el equipo.",
+      prioridad: alert.prioridad,
+      categoria: alert.categoria
+    })),
+    recomendaciones_top3: top3.map((alert) => ({
+      titulo: alert.titulo,
+      accion_concreta: alert.accion_concreta ?? "Definir plan de acción con el equipo.",
+      impacto_estimado: "Impacto estimado: mejora directa del score global"
+    })),
+    historial: historyResult.success
+      ? historyResult.data.map((item) => ({
+          fecha: item.snapshot_date,
+          score_global: Number(item.score_global ?? 0)
+        }))
+      : undefined
+  };
+}
+
+function emptyReportData(companyName: string, plan: string): DiagnosticReportData {
+  return {
+    company_name: companyName,
+    plan,
+    fecha: new Date().toISOString().slice(0, 10),
+    score_global: 0,
+    estado_global: "sin_diagnostico",
+    score_salud: 0,
+    score_publicaciones: 0,
+    score_ads: 0,
+    score_logistica: 0,
+    score_stock: 0,
+    alertas: [],
+    recomendaciones_top3: []
+  };
+}
+
+function priorityOrder(priority: "urgente" | "alta" | "media" | "baja") {
+  if (priority === "urgente") return 0;
+  if (priority === "alta") return 1;
+  if (priority === "media") return 2;
+  return 3;
 }

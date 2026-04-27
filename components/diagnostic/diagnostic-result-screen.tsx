@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { DownloadReportButton } from "@/components/reports/download-report-button";
 import { RecommendationCard } from "@/components/recommendations/recommendation-card";
 import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
+import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 
 type DiagnosticResultScreenProps = {
@@ -9,11 +11,12 @@ type DiagnosticResultScreenProps = {
   estado: string;
   delta: number | null;
   recommendations: DiagnosticRecommendations;
+  reportData: DiagnosticReportData;
   clientId: string;
   diagnosticId: string;
 };
 
-export function DiagnosticResultScreen({ score, estado, delta, recommendations, clientId }: DiagnosticResultScreenProps) {
+export function DiagnosticResultScreen({ score, estado, delta, recommendations, reportData, clientId }: DiagnosticResultScreenProps) {
   const topRecommendations = recommendations.recomendaciones.slice(0, 3);
 
   return (
@@ -39,9 +42,7 @@ export function DiagnosticResultScreen({ score, estado, delta, recommendations, 
         <Link href={`/internal/clients/${clientId}`}>
           <Button>Ver cuenta completa</Button>
         </Link>
-        <Link href={`/internal/clients/${clientId}`}>
-          <Button variant="secondary">Generar reporte quincenal</Button>
-        </Link>
+        <DownloadReportButton reportData={reportData} label="Descargar reporte gerencial" />
       </div>
     </section>
   );

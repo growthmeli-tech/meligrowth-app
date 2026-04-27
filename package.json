@@ -15,6 +15,7 @@
     "setup:supabase-users": "node --env-file=.env.local scripts/setup-supabase-users.mjs"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.49.4",
     "clsx": "^2.1.1",
@@ -32,6 +33,7 @@
     "@types/node": "^20.17.10",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/react-pdf": "^6.2.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.15",

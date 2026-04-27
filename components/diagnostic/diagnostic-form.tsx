@@ -5,6 +5,7 @@ import { Save } from "lucide-react";
 import { BlockScoreRealtime } from "@/components/diagnostic/block-score-realtime";
 import { DiagnosticFieldBenchmark } from "@/components/diagnostic/diagnostic-field-benchmark";
 import { DiagnosticResultScreen } from "@/components/diagnostic/diagnostic-result-screen";
+import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
 import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,6 +30,7 @@ type SaveDiagnosticPayload = {
     estado_global: string;
   };
   recommendations: DiagnosticRecommendations;
+  reportData: DiagnosticReportData;
 };
 
 const tabs: Array<{ key: BlockKey; label: string }> = [
@@ -270,6 +272,7 @@ export function DiagnosticForm({
         estado={savedResult.diagnostic.estado_global}
         delta={null}
         recommendations={savedResult.recommendations}
+        reportData={savedResult.reportData}
         clientId={companyId}
         diagnosticId={savedResult.diagnostic.id}
       />

@@ -34,7 +34,7 @@ export function AlertBanner({ alerts, loading = false, error = null }: AlertBann
           <span className="inline-block w-2 h-2 rounded-full bg-white animate-pulse mr-2" />
           {title}
         </h2>
-        <Link href="/ops/alerts" className="text-white font-semibold underline-offset-2 hover:underline">
+        <Link href="/internal/alerts" className="text-white font-semibold underline-offset-2 hover:underline">
           Ver todas →
         </Link>
       </header>

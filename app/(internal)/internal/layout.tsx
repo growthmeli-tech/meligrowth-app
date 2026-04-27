@@ -29,7 +29,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
               badge={clientsCount > 0 ? String(clientsCount) : undefined}
             />
             <NavItem
-              href="/internal/dashboard#alertas"
+              href="/internal/alerts"
               label="Alertas"
               icon={<Bell className="h-4 w-4" />}
               badge={unreadAlerts > 0 ? String(unreadAlerts) : undefined}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
 import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
+import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/lib/types/api";
@@ -17,7 +18,13 @@ export async function createDiagnostic(
   companyId: string,
   mlAccountId: string,
   formData: FormData
-): Promise<ActionResult<{ diagnostic: { id: string; score_global: number; estado_global: string }; recommendations: DiagnosticRecommendations }>> {
+): Promise<
+  ActionResult<{
+    diagnostic: { id: string; score_global: number; estado_global: string };
+    recommendations: DiagnosticRecommendations;
+    reportData: DiagnosticReportData;
+  }>
+> {
   if (!isSupabaseConfigured()) {
     return { success: false, error: "Supabase no esta configurado" };
   }
@@ -88,6 +95,34 @@ export async function createDiagnostic(
   revalidatePath(`/internal/clients/${companyId}`);
   revalidatePath(`/internal/clients/${companyId}/diagnostic/new`);
 
+  const { data: company } = await supabase.from("companies").select("name, plan").eq("id", companyId).maybeSingle();
+  const topRecommendations = pipelineResult.data.recommendations.recomendaciones.slice(0, 3);
+
+  const reportData: DiagnosticReportData = {
+    company_name: company?.name ?? "Company",
+    plan: company?.plan ?? "360",
+    fecha: date,
+    score_global: Number(pipelineResult.data.account_health.score_global ?? 0),
+    estado_global: String(pipelineResult.data.account_health.estado_global ?? "critico"),
+    score_salud: Number(pipelineResult.data.account_health.score_salud ?? 0),
+    score_publicaciones: Number(pipelineResult.data.account_health.score_publicaciones ?? 0),
+    score_ads: Number(pipelineResult.data.account_health.score_ads ?? 0),
+    score_logistica: Number(pipelineResult.data.account_health.score_logistica ?? 0),
+    score_stock: Number(pipelineResult.data.account_health.score_stock ?? 0),
+    alertas: topRecommendations.map((recommendation) => ({
+      titulo: recommendation.titulo,
+      descripcion: recommendation.descripcion,
+      accion_concreta: recommendation.accion_concreta,
+      prioridad: recommendation.prioridad,
+      categoria: recommendation.categoria
+    })),
+    recomendaciones_top3: topRecommendations.map((recommendation) => ({
+      titulo: recommendation.titulo,
+      accion_concreta: recommendation.accion_concreta,
+      impacto_estimado: recommendation.impacto_estimado
+    }))
+  };
+
   return {
     success: true,
     data: {
@@ -96,7 +131,8 @@ export async function createDiagnostic(
         score_global: Number(pipelineResult.data.account_health.score_global ?? 0),
         estado_global: String(pipelineResult.data.account_health.estado_global ?? "critico")
       },
-      recommendations: pipelineResult.data.recommendations
+      recommendations: pipelineResult.data.recommendations,
+      reportData
     }
   };
 }
