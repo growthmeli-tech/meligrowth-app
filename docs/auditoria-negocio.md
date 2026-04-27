@@ -1,39 +1,41 @@
-## Integridad de scoring
+## Scoring global y pesos
 
-- **Pesos globales**: Cumple 100 (35/20/20/15/10) en `lib/scoring.ts`.
-- **Cap inteligente Salud**: **No cumple** la regla esperada (`<40 => 55`, `40-54 => 72`). Implementacion actual aplica cap 55 cuando cualquier metrica del bloque <45, y ademas aplica ese patron a todos los bloques.
-- **Rango score global 0-100**: Parcial. Cada metrica se clamp a 0..100, pero `calcScoreGlobal` no hace clamp final explicito.
-- **Estados de score**: **No cumple** la grilla de 6 estados requerida (falta `muy_bueno`, y `riesgo` arranca en 55, dejando 40-54 dentro de critico).
+- **Estado**: PARCIAL
+- **Evidencia**: `lib/scoring.ts`
+- **Resultado**:
+  - Caso normal: pesos 35/20/20/15/10, suma 100%.
+  - Sin Ads: redistribucion 43.75/25/0/18.75/12.5, suma 100%.
+  - Riesgo funcional: en formulario legacy se completan nulls con `0`, por lo que "sin datos Ads" puede terminar penalizando en vez de excluirse.
 
-## Ads: formulas y decisiones
+## Benchmarks vs contexto de producto
 
-- **ACOS/ROAS/TACOS**: Cumple formulas matematicas en `lib/recommendations/ads-analyzer.ts` y `lib/ml/endpoints/ads.ts`.
-- **ROAS break-even**: Cumple (`1 / (margen_pre_ads/100)`).
-- **Regla TACOS > 65% del margen => urgente**: Cumple en `analyzeAds()`.
-- **"Sin datos Ads no penaliza"**: **No cumple** en flujo manual actual. `DiagnosticForm` rellena faltantes con `0`, por lo que bloque Ads puede penalizar por ausencia de datos en vez de quedar neutro.
+- **Estado**: NO CUMPLE
+- **Evidencia**: `lib/recommendations/benchmarks.ts` vs `docs/meligrowth-product-context.md`
+- **Desvios detectados**:
+  - `reclamos`: para score 85 el contexto define `<0.5`, el benchmark actual usa tramo hasta `0.8`.
+  - `pubs_activas_pct`: contexto define score 85 para `>65`, pero el score en `lib/scoring.ts` usa umbrales de otra escala (`platinum 95`, `solid 85`).
+  - `roas`: contexto define 100 en `>8x`; scoring usa platinum en `10`.
+- **Impacto**: la cuenta puede tener score de bloque y recomendacion con lectura contradictoria.
 
-## Motor de recomendaciones
+## Audiencias de alertas (`internal/manager/operator/all`)
 
-- **Motor dedicado**: Existe (`lib/recommendations/engine.ts`) y genera recomendaciones por metrica + analisis Ads.
-- **Orden por prioridad**: Cumple via `sortByPriority`.
-- **IDs unicos**: Cumple por composicion `diagnostic.id + metrica`.
-- **Cuenta Platinum sin urgentes**: Riesgo medio. No hay guard explicito "hard-stop"; en escenarios borde una regla por metrica podria marcar urgente aunque el global sea alto.
+- **Estado**: PARCIAL
+- **Evidencia**: `lib/recommendations/engine.ts`, `lib/recommendations/persist.ts`, `supabase/migrations/0004_new_model_360.sql`
+- **Resultado**:
+  - El motor ya asigna audiencias v2 (`internal`, `manager`, `operator`, `all`).
+  - Se persisten solo prioridades `urgente` y `alta`; `media`/`baja` quedan en memoria.
+  - En UI brand/ops se filtra por audiencia correcta, pero el motor sigue tipado sobre `diagnostics` legacy como input.
 
-## Consistencia benchmarks negocio
+## Diferenciacion 360 vs Copilot en permisos y vistas
 
-- **Inconsistencia detectada**: `lib/scoring.ts` y `lib/recommendations/benchmarks.ts` usan umbrales distintos para varias metricas (ej. `pubs_activas_pct`, `reclamos`, `roas`).
-- **Impacto**: Puede mostrar score "solido" pero recomendacion "en riesgo" para la misma metrica.
-- **Accion**: Centralizar benchmark canonico en una sola fuente y derivar score + recomendaciones desde ese contrato.
+- **Estado**: NO CUMPLE
+- **Evidencia**: `middleware.ts`, `app/(ops)/ops/*`, `docs/meligrowth-product-context.md`
+- **Resultado**:
+  - En visual, la UI distingue plan (`360`/`360_copilot`) con badges y cards.
+  - En permisos, `/ops/**` no contempla operador interno MG para Copilot.
+  - No hay decision runtime por `companies.plan` para alternar comportamiento operativo.
 
-## Pipeline ML y dato confiable
+## Conclusiones de negocio
 
-- **Mapeo `delayed_handling_time.rate` invertido**: Cumple (`(1-rate)*100`) en `mapReputationToDiagnostic`.
-- **Conversion de porcentaje decimal ML**: Cumple para `claims/cancellations/negative` con `*100`.
-- **Persistencia de `data_sources`**: **No cumple**. El pipeline produce `data_sources`, pero `diagnostics` no tiene columna para guardarlo ni se persiste en guardado.
-- **Fallback por bloque sin dato falso**: Parcial. Cuando falla API, intenta scraper y deja `null` en varios campos; pero la UI no integra aun el sync ML para reflejarlo de punta a punta.
-
-## Calculadora de negocio
-
-- **Formula de precio ML requerida** (`(costo+envio+costoFijo)/(1-comision-publicidad-margen)`): **No implementada** en el modulo actual.
-- **Constante comision ML 13.75% en `lib/config/constants.ts`**: **No existe**.
-- **Riesgo**: La calculadora actual (`lib/pricing.ts`) es comercial de fee MG, no de precio final ML. Hay desalineacion entre requerimiento funcional y codigo disponible.
+- El proyecto tiene buena base v2 de datos y UI, pero la logica efectiva de negocio aun esta repartida entre v2 y legacy.
+- Para operar 360/Copilot con consistencia real falta unificar benchmarks y cerrar la brecha de permisos por plan.

@@ -1,59 +1,50 @@
-## Hallazgos de performance
+## 1) Dashboard interno con 32 cuentas (foco N+1)
 
-## 1) Dashboard operator
-- `lib/data/dashboard.ts` usa selects explicitos (sin `select('*')`) e indice esperable por filtros (`clients.active`, `diagnostics` por `client_id/date/created_at`).
-- No se detecto N+1 en carga de diagnosticos del dashboard: trae clientes, diagnosticos y archivos por lote con `.in(...)`.
-- **Riesgo**: El dashboard depende de varias queries separadas (clientes/diagnosticos/files/users). Con 100 cuentas puede crecer latencia total si no hay cache o paralelismo adicional en DB.
+- **Estado**: CUMPLE (sin N+1 evidente)
+- **Evidencia**: `lib/data-v2/dashboard-internal.ts`
+- **Resultado**:
+  - 1 query para companies activas.
+  - 1 query para cuentas activas por company.
+  - 3 queries batch (`account_health`, `alerts`, `tasks`) por `IN(accountIds)`.
+  - No hay loops con queries por cuenta; los loops solo agregan resultados en memoria.
 
-## 2) N+1 y secuencialidad en scraping dispatch
-- **Hallazgo ALTO** en `lib/scraping/daily-dispatch.ts`: bucle por cliente y bucle por tipo (`salud/publicaciones/ads/stock`) con checks e inserts secuenciales.
-- Impacto: patron O(clientes * tipos) con roundtrips secuenciales + ejecucion de scraper una por una.
-- **Fix recomendado**:
-  - Batch de existencia por cliente/dia en una sola query.
-  - Cola con concurrencia limitada (ej. 3-5 clientes en paralelo).
-  - Consolidacion por lotes, no inline por cliente.
+## 2) Indices v2 vs queries frecuentes
 
-## 3) ML API rate limits
-- `lib/ml/client.ts` tiene retry para `429` y backoff basico (cumple minimo).
-- **Gap**: no hay logging especifico/metricas de rate-limit hit, ni presupuesto por cliente/dia.
-- **Proyeccion de requests (estimada)**:
-  - Salud: ~1
-  - Publicaciones: ~3 + hasta 40 detalle performance
-  - Ads: ~2
-  - Logistica: hasta ~10 (paginas ordenes)
-  - Stock: hasta ~130+ (items + detalle por item + fulfillment sample)
-  - **Total por cliente**: ~180 requests en escenario alto.
-  - **10 clientes**: ~1.8k requests/sync.
-  - **32 clientes**: ~5.7k requests/sync.
-  - **100 clientes**: ~18k requests/sync.
-- Con sync diario puede ser viable segun cuota, pero sin budget ni throttling central es riesgo alto de 429 en picos.
+- **Estado**: PARCIAL
+- **Evidencia**: `supabase/migrations/0004_new_model_360.sql`, `lib/data-v2/*`, `middleware.ts`
+- **Alineados**:
+  - `idx_snapshots_account_date` para historial y latest snapshot.
+  - `idx_health_account_date` para latest health por cuenta.
+  - `idx_alerts_account_prioridad` para urgentes pendientes.
+  - `idx_tasks_account_estado` para pendientes/en_curso.
+- **Gap**:
+  - Falta indice explicito sobre `user_account_access(user_id, access_type)` para chequeo frecuente de middleware en `/ops/**`.
 
-## 4) Trigger score_history
-- Trigger `on_diagnostic_insert_score_history` existe en schema y pobla `score_history`.
-- Cobertura funcional base correcta para graficos de evolucion.
+## 3) Rate limit ML con cartera objetivo
 
-## 5) Bundle y runtime
-- `recharts` aparece en componentes client, no se detecto uso obvio en server components.
-- Layouts autenticados exportan `dynamic = "force-dynamic"` en areas operator/client.
+- **Estado**: RIESGO ALTO
+- **Evidencia**: `lib/ml/endpoints/*.ts`, `lib/ml/client.ts`, `lib/scraping/daily-dispatch.ts`
+- **Proyeccion aproximada por cuenta/sync**:
+  - Salud: ~1 request.
+  - Publicaciones: ~4 + hasta 40 `item/performance`.
+  - Ads: ~2.
+  - Logistica: hasta 10 (`/orders/search` paginado + 2 listados).
+  - Stock: hasta 135 (3 paginas items + hasta 120 detalles + hasta 3 fulfillment).
+  - **Total pico por cuenta**: ~190-200 requests.
+- **Escenarios**:
+  - 32 cuentas: ~6.0k-6.4k requests por corrida.
+  - 100 cuentas: ~19k-20k requests por corrida.
+- **Problema**:
+  - Hay retry de `429` en `mlFetch`, pero no hay budget global, cola por cuota ni metricas de consumo diario.
 
-## Fixes tecnicos sugeridos (codigo)
+## 4) Cuellos adicionales detectados
 
-```ts
-// 1) Concurrencia controlada para dispatch diario
-const MAX_CLIENT_CONCURRENCY = 4;
-await pMap(clients, processClient, { concurrency: MAX_CLIENT_CONCURRENCY });
-```
+- `runDailyScrapingDispatch` ejecuta ciclos secuenciales cliente x tipo de job y consolida inline, lo que eleva latencia total al escalar.
+- No existe control central de concurrencia por cuenta para llamadas ML y scraping en lote.
 
-```ts
-// 2) Presupuesto de rate-limit por cliente
-if (estimatedRequests > DAILY_BUDGET_PER_CLIENT) {
-  return { ok: false, error: "ml_budget_exceeded" };
-}
-```
+## Recomendaciones prioritarias
 
-```ts
-// 3) Logging estructurado de 429
-if (response.status === 429) {
-  logRateLimit({ endpoint: path, retryAfter, clientId, sellerId });
-}
-```
+1. Agregar presupuesto diario por cuenta y global de requests ML con corte preventivo.
+2. Instrumentar logs/metricas de `429` y `Retry-After` por endpoint.
+3. Ejecutar dispatch con concurrencia acotada (pool) en vez de flujo totalmente secuencial.
+4. Crear indice para filtro de acceso operativo (`user_id` + `access_type`) si se mantiene esa consulta en middleware.

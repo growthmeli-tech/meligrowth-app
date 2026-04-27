@@ -1,55 +1,48 @@
-## Hallazgo: OAuth callback con `state` debil (riesgo CSRF)
-- **Nivel**: CRITICO
-- **Archivo**: `app/api/ml/auth/callback/route.ts`
-- **Descripcion**: El callback usa `state` como `client_id` directo y solo valida existencia del cliente. No hay nonce firmado, expiracion ni vinculacion a sesion del operador. Un actor con un `code` valido podria intentar vincular tokens a otro cliente.
-- **Fix recomendado**: Generar `state` firmado (HMAC) con `client_id`, `operator_id`, `ts` y nonce; persistir nonce temporal; validar firma/TTL/owner en callback antes de guardar tokens.
-- **Estado**: PENDIENTE
-
-## Hallazgo: Tokens OAuth quedan en texto plano despues de refresh
-- **Nivel**: CRITICO
-- **Archivo**: `lib/ml/auth.ts`, `app/api/ml/auth/callback/route.ts`
-- **Descripcion**: El callback cifra tokens solo si `APP_ENCRYPTION_KEY` existe, pero `saveSessionTokens()` reescribe siempre JSON plano. Resultado: una sesion inicialmente cifrada puede pasar a texto plano cuando refresca token.
-- **Fix recomendado**: Unificar escritura en una sola capa que siempre cifre (si no hay clave, fallar duro). Agregar test de roundtrip callback -> refresh -> read.
-- **Estado**: PENDIENTE
-
-## Hallazgo: Uso de `createServiceSupabaseClient` no alineado al flujo ML sensible
+## Hallazgo: RLS v2 habilitado en tablas nuevas, con cobertura parcial por rol
 - **Nivel**: ALTO
-- **Archivo**: `lib/ml/auth.ts`
-- **Descripcion**: El flujo de lectura/escritura de `meli_sessions` y bucket `meli-sessions` usa cliente server de usuario, no cliente service para tareas internas. Puede fallar en jobs internos sin sesion y mezcla responsabilidades de seguridad.
-- **Fix recomendado**: Encapsular acceso sensible en helper interno con `createServiceSupabaseClient` y controles explicitos de ownership/client_id.
-- **Estado**: PENDIENTE
-
-## Hallazgo: Actualizaciones criticas sin control de error
-- **Nivel**: ALTO
-- **Archivo**: `app/api/ml/auth/callback/route.ts`
-- **Descripcion**: Los `upsert`/`update` de `meli_sessions` y `clients` no chequean `error`; el callback puede redirigir como exitoso con persistencia parcial.
-- **Fix recomendado**: Validar errores de cada write; si falla, registrar `ml_error` y no marcar `ml_connected=true`.
-- **Estado**: PENDIENTE
-
-## Hallazgo: Superficie de autorizacion en layouts depende de disciplina por pagina
-- **Nivel**: MEDIO
-- **Archivo**: `app/(operator)/operator/layout.tsx`, `app/(client)/client/layout.tsx`
-- **Descripcion**: Los layouts no fuerzan auth/rol. Hoy la proteccion existe en funciones de datos por pagina, pero una pagina nueva podria quedar expuesta si no reutiliza esos guards.
-- **Fix recomendado**: Agregar guard de sesion+rol en layout de cada area para defensa en profundidad.
-- **Estado**: PENDIENTE
-
-## Hallazgo: RLS de tablas y buckets base esta correctamente definida
-- **Nivel**: BAJO
-- **Archivo**: `supabase/migrations/0001_initial_schema.sql`, `supabase/migrations/0002_pricing_proposals.sql`, `supabase/migrations/0003_meli_sessions.sql`
-- **Descripcion**: Se verifico RLS habilitado y politicas para tablas criticas (`clients`, `diagnostics`, `score_history`, `actions`, `client_files`, `meli_sessions`, `scraping_jobs`, `weekly_reports`) y bucket `meli-sessions`.
-- **Fix recomendado**: Mantener cobertura con tests de politicas por rol.
+- **Archivo**: `supabase/migrations/0004_new_model_360.sql`
+- **Descripcion**: Las tablas `companies`, `ml_accounts`, `users_v2`, `user_account_access`, `metric_snapshots`, `account_health`, `alerts`, `tasks` tienen RLS habilitado y politicas de lectura para usuarios finales. Para gestion (`INSERT/UPDATE/DELETE`) la mayoria queda restringida al equipo interno (`is_meli_growth_team()`), lo cual es correcto para MVP operativo.
+- **Fix recomendado**: Mantener este modelo de escritura centralizada y agregar tests de politicas por rol para cada tabla v2.
 - **Estado**: RESUELTO
 
-## Hallazgo: Endpoints internos con `x-cron-secret` validados
+## Hallazgo: `is_meli_growth_team()` y `can_access_ml_account()` funcionan, pero no fuerzan limites de company para roles cliente
+- **Nivel**: CRITICO
+- **Archivo**: `supabase/migrations/0004_new_model_360.sql`
+- **Descripcion**: `can_access_ml_account()` da acceso por existencia de fila en `user_account_access` (o por equipo interno), sin validar que un `client_manager` pertenezca a la misma company del `ml_account` ni que `client_operator` quede limitado a una sola cuenta. Si se crea un acceso cruzado por error operativo, la RLS lo habilita.
+- **Fix recomendado**: Endurecer `can_access_ml_account()` con chequeo por rol+company y/o constraints que impidan accesos cruzados para roles cliente.
+- **Estado**: PENDIENTE
+
+## Hallazgo: `/ops/**` si verifica `ops_access_enabled`, pero la columna no existe en schema v2
+- **Nivel**: CRITICO
+- **Archivo**: `middleware.ts`, `supabase/migrations/0004_new_model_360.sql`, `lib/supabase/database.types.ts`
+- **Descripcion**: El middleware consulta `user_account_access.ops_access_enabled` antes de permitir `/ops/**`, pero ni la migracion 0004 ni los tipos incluyen esa columna. En runtime esto puede devolver error o `null`, bloqueando acceso legitimo a operadores.
+- **Fix recomendado**: Crear migracion que agregue `ops_access_enabled` (con default claro) y actualizar tipos/reglas de negocio para usarla de forma consistente.
+- **Estado**: PENDIENTE
+
+## Hallazgo: Regla Copilot de `/ops/` no esta alineada con el contexto de producto
+- **Nivel**: ALTO
+- **Archivo**: `middleware.ts`, `docs/meligrowth-product-context.md`
+- **Descripcion**: En Copilot, la operacion diaria deberia poder ser usada por `internal_operator_meli_growth`; hoy `/ops/**` solo permite `client_operator` (y solo si `ops_access_enabled=true`), por lo que el modelo 360 vs Copilot queda incompleto en autorizacion.
+- **Fix recomendado**: Incorporar regla por plan (`companies.plan`) + rol interno para habilitar flujo `/ops/**` en cuentas Copilot.
+- **Estado**: PENDIENTE
+
+## Hallazgo: Tokens ML siguen almacenados en Storage, no en columnas de DB
 - **Nivel**: BAJO
-- **Archivo**: `app/api/internal/health/route.ts`, `app/api/internal/daily-scraping/route.ts`, `app/api/internal/consolidate-scraping/route.ts`
-- **Descripcion**: Los endpoints internos validan header secreto correctamente.
-- **Fix recomendado**: Sumar rate limiting y logging estructurado por IP/origen.
+- **Archivo**: `app/api/ml/auth/callback/route.ts`, `lib/ml/auth.ts`, `supabase/migrations/0003_meli_sessions.sql`
+- **Descripcion**: La DB guarda `storage_path` en `meli_sessions`; `access_token/refresh_token` se escriben en bucket `meli-sessions`. No se encontraron columnas de tokens en tablas SQL.
+- **Fix recomendado**: Mantener el patron y reforzar cifrado consistente en write/refresh.
 - **Estado**: RESUELTO
 
-## Hallazgo: Gap de proceso de auditoria previa
-- **Nivel**: MEDIO
-- **Archivo**: `docs/testing-cambios.md`, `docs/bugs-encontrados.md`
-- **Descripcion**: No existen los documentos de testing requeridos por regla del auditor, por lo que faltan evidencias de bugs previos y cobertura.
-- **Fix recomendado**: Exigir estos entregables como condicion del pipeline de auditoria.
+## Hallazgo: Riesgo de cifrado inconsistente de tokens durante refresh
+- **Nivel**: CRITICO
+- **Archivo**: `app/api/ml/auth/callback/route.ts`, `lib/ml/auth.ts`
+- **Descripcion**: El callback cifra payload cuando hay `APP_ENCRYPTION_KEY`, pero `saveSessionTokens()` vuelve a subir JSON plano en refresh. Esto puede degradar seguridad luego de la primera rotacion de token.
+- **Fix recomendado**: Centralizar serializacion de tokens en una sola funcion (siempre cifrada) y agregar test callback->refresh->read.
+- **Estado**: PENDIENTE
+
+## Hallazgo: `client_manager` y `client_operator` no tienen garantia fuerte de aislamiento absoluto
+- **Nivel**: ALTO
+- **Archivo**: `supabase/migrations/0004_new_model_360.sql`, `lib/data-v2/viewer.ts`
+- **Descripcion**: A nivel de vistas, `client_manager` usa `company_id` y `client_operator` usa cuenta primaria de `user_account_access`, pero el aislamiento final depende de datos correctos en `user_account_access` y no de constraints estrictos por rol.
+- **Fix recomendado**: Agregar constraints/politicas explicitas: manager solo cuentas de su company, operator solo cuentas con `access_type='operator'` y, si aplica negocio, maximo una cuenta activa.
 - **Estado**: PENDIENTE

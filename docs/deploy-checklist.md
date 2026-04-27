@@ -1,66 +1,60 @@
-## Estado de deploy
+## Estado de deploy 360/Copilot
 
-**Resultado actual: DEPLOY BLOQUEADO**
-
-Bloqueantes principales:
-- ❌ `state` OAuth sin proteccion CSRF robusta.
-- ❌ Tokens ML pueden quedar en texto plano tras refresh.
-- ❌ Scraper fallback devuelve mocks (riesgo de dato no real).
-- ❌ Falta trazabilidad persistida de `data_sources` ML.
+**Resultado actual: DEPLOY BLOQUEADO (❌)**
 
 ## SEGURIDAD
-- ✅ RLS habilitado en tablas de dominio principales.
-- ✅ Bucket `meli-sessions` privado con politicas operator.
-- ❌ CSRF OAuth robusto (`state` firmado + nonce + TTL) no implementado.
-- ✅ Endpoints internos validan `x-cron-secret`.
-- ✅ No se detectaron secrets hardcodeados en app/lib/components.
-- ⚠️ `service_role` no se expone en cliente, pero el flujo ML sensible no esta totalmente encapsulado para jobs internos.
-- ❌ No hay garantia de cifrado consistente de tokens en storage.
 
-## INTEGRIDAD DE DATOS
-- ✅ Pesos de scoring suman 100.
-- ❌ Cap inteligente de Salud no coincide con regla esperada.
-- ✅ ACOS/ROAS/TACOS matematicamente correctos.
-- ❌ Benchmarks no estan alineados entre scoring y recomendaciones.
-- ✅ Enums SQL <-> TypeScript estan mayormente sincronizados.
-- ⚠️ Hay server actions con `ActionResult<T>`, pero otras acciones usan `redirect` y no contrato uniforme.
-- ⚠️ Persistencia de errores es razonable, pero hay writes criticos sin chequeo de error en callback OAuth.
+- ✅ RLS habilitado para tablas nuevas: `companies`, `ml_accounts`, `users_v2`, `user_account_access`, `metric_snapshots`, `account_health`, `alerts`, `tasks`.
+- ⚠️ `is_meli_growth_team()` y `can_access_ml_account()` operan, pero no fuerzan aislamiento estricto por company para roles cliente.
+- ❌ Check `ops_access_enabled` en middleware activo, pero columna no existe en migraciones/tipos v2.
+- ✅ Tokens ML en Storage (`meli-sessions`), no en columnas SQL.
+- ❌ Cifrado de tokens no es consistente entre callback y refresh.
+- ❌ `state` OAuth sin firma/nonce/TTL (hardening CSRF incompleto).
+- ✅ Endpoints `/api/internal/*` validan `x-cron-secret`.
 
-## INTEGRACION ML
-- ⚠️ Flujo authorize->callback existe parcialmente; falta hardening de seguridad.
-- ✅ Refresh de token con margen (5 min) implementado.
-- ✅ Pipeline cubre 5 bloques con fallback.
-- ⚠️ Fallback logistica usa bloque scraper `stock` (desalineado).
-- ❌ `data_sources` no persiste en diagnostico.
-- ❌ Scraper real aun no implementa extraccion real (mock en runtime).
-- ❌ `SCRAPER_MOCK_MODE=false` no esta garantizado por defecto.
+## MODELO 360/COPILOT
+
+- ⚠️ Diferenciacion visual por plan (`360` vs `360_copilot`) implementada en UI.
+- ❌ Diferenciacion de permisos por plan incompleta: `/ops/**` no habilita flujo esperado para `internal_operator_meli_growth` en Copilot.
+- ⚠️ Aislamiento manager/operator depende de calidad de `user_account_access`, no de constraints duras por rol.
+
+## DATOS Y NEGOCIO
+
+- ✅ Pesos de scoring suman 100 en caso normal.
+- ✅ Redistribucion sin Ads implementada en `lib/scoring.ts`.
+- ❌ Benchmarks de `lib/recommendations/benchmarks.ts` no coinciden plenamente con el contexto de producto.
+- ❌ Flujo productivo sigue escribiendo en `diagnostics` legacy; pipeline v2 (`metric_snapshots`/`account_health`) no esta cableado end-to-end.
+- ⚠️ Audiencias de alerta v2 implementadas, pero se persisten solo `urgente/alta`.
 
 ## PERFORMANCE
-- ✅ Dashboard evita `select('*')` en consultas criticas.
-- ✅ No N+1 evidente en lectura de diagnosticos del dashboard.
-- ✅ Trigger `score_history` existe.
-- ✅ Indices principales alineados con queries frecuentes.
-- ⚠️ Dispatch scraping secuencial (riesgo en 32/100 cuentas).
-- ⚠️ Sin gobernanza observable de rate-limit ML (budget + metricas).
 
-## EXPERIENCIA
-- ✅ Redirect de `/` por rol implementado.
-- ✅ Mensajes de error en espanol en pantallas principales.
-- ✅ Submit loading/deshabilitado en formulario de diagnostico.
-- ⚠️ Mapeo de estados/colores no coincide 1:1 con semaforo de 6 estados esperado.
-- ⚠️ Delta de score no siempre visible (varios componentes usan `delta=null`).
+- ✅ `lib/data-v2/dashboard-internal.ts` evita N+1 (batch por `IN(...)`).
+- ✅ Indices principales v2 cubren lecturas frecuentes de dashboard.
+- ⚠️ Falta indice afinado para consulta frecuente `user_account_access` en middleware (`user_id` + `access_type`).
+- ⚠️ Rate limit ML sin presupuesto global/telemetria de consumo; riesgo al escalar a 32+ cuentas.
 
-## INFRAESTRUCTURA
-- ⚠️ No existe `lib/config/env.ts` dedicado; validaciones de runtime viven en `lib/supabase/config.ts`.
-- ✅ Healthcheck `/api/internal/health` responde con checks y readiness.
-- ❌ Falta `docs/testing-cambios.md` y `docs/bugs-encontrados.md` (gap de proceso).
-- ❌ No existe `docs/mocks-pendientes.md`.
+## INTEGRACION ML
+
+- ✅ OAuth base y refresh implementados.
+- ⚠️ Fallback scraper se ejecuta cuando falla API.
+- ❌ Scraper aun retorna mocks en runtime (no apto para decisiones productivas).
+- ❌ Persistencia de snapshots v2 no esta activa en flujo principal.
+
+## Checklist final con estado
+
+- ✅ Tablas nuevas existen y tienen RLS.
+- ❌ `ops_access_enabled` definido y operativo de punta a punta.
+- ❌ Diferenciacion de planes aplicada en permisos y vistas operativas.
+- ❌ Pipeline productivo escribiendo en `metric_snapshots`/`account_health`.
+- ❌ Fallback scraper real sin mocks.
+- ❌ OAuth endurecido (state firmado + cifrado consistente tokens).
+- ⚠️ Rate limit gobernado con presupuesto y observabilidad.
 
 ## Decision final
 
-- **Deploy**: ❌ NO APROBADO
-- **Condicion para habilitar deploy**:
-  1) Corregir CSRF + cifrado tokens ML.
-  2) Eliminar mocks del scraper en entorno productivo.
-  3) Persistir trazabilidad de origen de datos ML.
-  4) Cerrar gaps de testing/documentacion obligatoria.
+- **Deploy**: ❌ NO APROBADO.
+- **Bloqueantes minimos para habilitar primera cuenta real**:
+  1) Migrar y estabilizar `ops_access_enabled` + regla de permisos Copilot.
+  2) Activar pipeline v2 en flujo productivo (`metric_snapshots` -> `account_health` -> `alerts`).
+  3) Corregir seguridad OAuth (`state` robusto + cifrado consistente tokens).
+  4) Quitar mocks del scraper en runtime y medir cuota/rate limit ML.
