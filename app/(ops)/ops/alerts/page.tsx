@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { Recommendation } from "@/lib/recommendations/types";
 import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
-import { getOperationalPriorityCopy, translateOperationalCopy } from "@/lib/ops/copy";
+import { getOperationalPriorityCopy, translateAlertDescription, translateOperationalCopy } from "@/lib/ops/copy";
 import type { AlertPriority } from "@/lib/types/enums";
 
 const PRIORITIES: Array<AlertPriority | "all"> = ["all", "urgente", "alta", "media", "baja"];
@@ -34,8 +34,8 @@ export default async function OpsAlertsPage({
     categoria: (alert.categoria as Recommendation["categoria"]) ?? "salud",
     prioridad: alert.prioridad,
     titulo: getOperationalPriorityCopy(alert).title,
-    descripcion: translateOperationalCopy(alert.descripcion ?? alert.titulo),
-    accion_concreta: translateOperationalCopy(alert.accion_concreta ?? "Revisar alerta"),
+    descripcion: translateAlertDescription(alert.descripcion ?? alert.titulo),
+    accion_concreta: translateAlertDescription(alert.accion_concreta ?? "Revisar alerta"),
     metrica_afectada: alert.categoria ?? "general",
     impacto_estimado: "Impacto directo",
     benchmark_objetivo: translateOperationalCopy(alert.benchmark_objetivo ?? "Mejorar"),

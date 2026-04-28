@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { DESIGN_TOKENS } from "@/lib/config/design-tokens";
-import { createTaskFromRecommendation } from "@/app/(internal)/internal/clients/[id]/tasks/actions";
+import { createTaskFromRecommendation } from "@/app/(ops)/ops/actions";
 import type { Recommendation } from "@/lib/recommendations/types";
 import { cn } from "@/lib/utils";
 

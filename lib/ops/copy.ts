@@ -79,13 +79,56 @@ export function getOperationalPriorityCopy(alert: Pick<AlertRow, "categoria" | "
   const actionTitle = metric ? ACCIONES_POR_METRICA[metric] ?? fallbackTitle : fallbackTitle;
   return {
     title: toShortSentence(translateOperationalCopy(actionTitle)),
-    subtitle: translateOperationalCopy(alert.descripcion || alert.titulo || "Revisá el detalle para avanzar."),
+    subtitle: translateAlertDescription(alert.descripcion || alert.titulo || "Revisá el detalle para avanzar."),
     block: blockFromAlertCategory(alert.categoria),
     priority: alert.prioridad
   };
 }
 
+export function translateAlertDescription(text: string): string {
+  const normalized = text.trim();
+  const metricPattern = /([a-z_]+)\s+en estado\s+[a-z_]+\s+con valor actual\s+([0-9.,-]+)\.?\s+brecha estimada:\s*([0-9.,-]+)\.?/i;
+  const match = normalized.match(metricPattern);
+
+  if (!match) {
+    return translateOperationalCopy(
+      normalized
+        .replace(/brecha estimada:\s*([0-9.,-]+)/gi, "Objetivo: $1%")
+        .replace(/valor actual\s*([0-9.,-]+)/gi, "valor actual $1")
+    );
+  }
+
+  const metric = match[1].toLowerCase();
+  const value = Number.parseFloat(match[2].replace(",", "."));
+  const gap = Number.parseFloat(match[3].replace(",", "."));
+  if (!Number.isFinite(value) || !Number.isFinite(gap)) return translateOperationalCopy(normalized);
+
+  if (metric === "uso_full_flex_pct") {
+    return `Solo el ${formatNumber(value)}% de tus envíos usan Full/Flex. Llevá ese número a ${formatNumber(value + gap)}%.`;
+  }
+
+  if (metric === "envios_a_tiempo") {
+    return `El ${formatNumber(value)}% de tus pedidos llegan a tiempo. Necesitás llegar al ${formatNumber(value + gap)}% para evitar penalizaciones.`;
+  }
+
+  if (metric === "reclamos") {
+    return `Tus reclamos están en ${formatNumber(value)}%. Objetivo: bajar a ${formatNumber(Math.max(0, value - gap))}%.`;
+  }
+
+  if (metric === "pubs_activas_pct") {
+    return `El ${formatNumber(value)}% de tus publicaciones están activas. Objetivo: ${formatNumber(value + gap)}% para máxima visibilidad.`;
+  }
+
+  const translatedMetric = TRADUCCIONES_METRICAS[metric] ?? translateOperationalCopy(metric);
+  const targetValue = metric.includes("reclamos") || metric.includes("cancelaciones") || metric.includes("incidencias") ? Math.max(0, value - gap) : value + gap;
+  return `${translatedMetric}: valor actual ${formatNumber(value)}. Objetivo: ${formatNumber(targetValue)}%.`;
+}
+
 function toShortSentence(text: string): string {
   const [firstSentence] = text.split(".");
   return firstSentence?.trim() || text;
+}
+
+function formatNumber(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }

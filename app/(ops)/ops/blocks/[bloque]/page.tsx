@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { MetricRow } from "@/components/ops/metric-row";
 import { ScoreEvolutionChart } from "@/components/charts/score-evolution-chart";
+import { RecommendationCard } from "@/components/recommendations/recommendation-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getLatestAccountHealthByAccount, listAccountHealthByAccount } from "@/lib/data-v2/account-health";
 import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getLatestMetricSnapshotByAccount } from "@/lib/data-v2/metric-snapshots";
+import { listTasksByAccount } from "@/lib/data-v2/tasks";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
-import { OPS_BLOCKS, translateOperationalCopy, type OpsBlockKey } from "@/lib/ops/copy";
+import { OPS_BLOCKS, getOperationalPriorityCopy, translateAlertDescription, translateOperationalCopy, type OpsBlockKey } from "@/lib/ops/copy";
 import { getBlockContextHighlights, getBlockMeta, getBlockMetricRows } from "@/lib/ops/metrics";
+import type { Recommendation } from "@/lib/recommendations/types";
 import { getScoreLabel } from "@/lib/utils/scores";
 
 const VALID_BLOCKS: OpsBlockKey[] = ["salud", "publicaciones", "ads", "logistica", "stock"];
@@ -28,12 +31,14 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
   const blockKey = bloque as OpsBlockKey;
   const accountResult = await getPrimaryAccountForOperator();
   if (!accountResult.success || !accountResult.data) return <EmptyState context="recomendaciones" />;
+  const account = accountResult.data;
 
-  const [healthResult, snapshotResult, alertsResult, historyResult] = await Promise.all([
-    getLatestAccountHealthByAccount(accountResult.data.id),
-    getLatestMetricSnapshotByAccount(accountResult.data.id),
-    listAlertsByAccount(accountResult.data.id, { audience: "operator", includeResolved: false, limit: 20 }),
-    listAccountHealthByAccount(accountResult.data.id, 8)
+  const [healthResult, snapshotResult, alertsResult, historyResult, pendingTasksResult] = await Promise.all([
+    getLatestAccountHealthByAccount(account.id),
+    getLatestMetricSnapshotByAccount(account.id),
+    listAlertsByAccount(account.id, { audience: "operator", includeResolved: false, limit: 20 }),
+    listAccountHealthByAccount(account.id, 8),
+    listTasksByAccount(account.id, { status: "pendiente" })
   ]);
 
   if (!healthResult.success || !healthResult.data || !snapshotResult.success || !snapshotResult.data) {
@@ -46,7 +51,23 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
   const blockScore = getBlockScore(health, blockKey);
   const metricRows = getBlockMetricRows(blockKey, snapshot);
   const highlights = getBlockContextHighlights(blockKey, snapshot);
-  const priorities = (alertsResult.success ? alertsResult.data : []).filter((alert) => alert.categoria === blockKey).slice(0, 3);
+  const blockAlerts = (alertsResult.success ? alertsResult.data : []).filter((alert) => alert.categoria === blockKey).slice(0, 6);
+  const priorityRecommendations: Recommendation[] = blockAlerts.map((alert) => ({
+    id: alert.id,
+    categoria: (alert.categoria as Recommendation["categoria"]) ?? "salud",
+    prioridad: alert.prioridad,
+    titulo: getOperationalPriorityCopy(alert).title,
+    descripcion: translateAlertDescription(alert.descripcion ?? alert.titulo),
+    accion_concreta: translateAlertDescription(alert.accion_concreta ?? alert.titulo),
+    metrica_afectada: alert.categoria ?? "general",
+    impacto_estimado: "Impacto directo",
+    benchmark_objetivo: translateOperationalCopy(alert.benchmark_objetivo ?? "Mejorar"),
+    audiencia: alert.audiencia,
+    bloque: alert.categoria ?? "General"
+  }));
+  const blockAlertIds = new Set(blockAlerts.map((alert) => alert.id));
+  const pendingTasks = pendingTasksResult.success ? pendingTasksResult.data : [];
+  const blockTasks = pendingTasks.filter((task) => task.alert_id && blockAlertIds.has(task.alert_id));
   const history = historyResult.success
     ? [...historyResult.data]
         .reverse()
@@ -88,18 +109,33 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
         <aside className="space-y-3">
           <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
             <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Qué hacer hoy</p>
-            <ul className="mt-3 space-y-2">
-              {priorities.length > 0 ? (
-                priorities.map((alert, index) => (
-                  <li key={alert.id} className="rounded-lg border border-[#E8E8E2] bg-[#F5F5F0] p-2 text-sm text-[#1A1A1A]">
-                    <span className="font-semibold">{`${index + 1}. `}</span>
-                    {translateOperationalCopy(alert.accion_concreta ?? alert.titulo)}
-                  </li>
-                ))
-              ) : (
-                <li className="text-sm text-[#6B6B6B]">No hay alertas activas para este bloque.</li>
-              )}
-            </ul>
+            {priorityRecommendations.length === 0 && blockTasks.length === 0 ? (
+              <p className="mt-3 text-sm text-[#1A1A1A]">Este bloque está al día ✅</p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {priorityRecommendations.map((recommendation) => (
+                  <RecommendationCard
+                    key={recommendation.id}
+                    recommendation={recommendation}
+                    variant="operator"
+                    compact
+                    mlAccountId={account.id}
+                  />
+                ))}
+                {blockTasks.length > 0 ? (
+                  <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-[#F5F5F0] p-3">
+                    <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Tareas pendientes del bloque</p>
+                    <ul className="space-y-1">
+                      {blockTasks.map((task) => (
+                        <li key={task.id} className="text-sm text-[#1A1A1A]">
+                          {`• ${task.titulo} (${task.estado.replace("_", " ")})`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </section>
 
           <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
