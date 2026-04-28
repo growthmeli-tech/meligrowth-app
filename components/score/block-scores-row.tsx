@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { DESIGN_TOKENS, type ScoreStatusKey } from "@/lib/config/design-tokens";
 import { cn } from "@/lib/utils";
 import { getScoreStatus } from "@/lib/utils/scores";
@@ -15,6 +16,7 @@ export type BlockScoresRowProps = {
     stock: number;
   };
   interactive?: boolean;
+  linkBasePath?: string;
   activeBlock?: BlockKey | null;
   onSelectBlock?: (block: BlockKey) => void;
   loading?: boolean;
@@ -33,6 +35,7 @@ const BLOCKS: Array<{ key: BlockKey; number: string; label: string }> = [
 export function BlockScoresRow({
   scores,
   interactive = false,
+  linkBasePath,
   activeBlock = null,
   onSelectBlock,
   loading = false,
@@ -70,8 +73,8 @@ export function BlockScoresRow({
 
         const baseClass = cn(
           "h-14 w-14 rounded-lg border border-[#E8E8E2] bg-white flex flex-col items-center justify-center md:h-16 md:w-16",
-          "transition-transform duration-150",
-          interactive && "hover:scale-105",
+          "transition-all duration-150",
+          interactive && "cursor-pointer hover:scale-105 hover:ring-2 hover:ring-[#FFD600]",
           isWorst && "ring-2 ring-offset-1 shadow-sm",
           isActive && "ring-2 ring-[#FFD600]"
         );
@@ -85,6 +88,14 @@ export function BlockScoresRow({
             <p className="text-[10px] font-medium text-[#6B6B6B]">{value === null ? "Sin datos" : label}</p>
           </>
         );
+
+        if (interactive && linkBasePath) {
+          return (
+            <Link key={key} href={`${linkBasePath}/${key}`} className={baseClass} title="Click para ver detalle del bloque">
+              {content}
+            </Link>
+          );
+        }
 
         if (interactive) {
           return (

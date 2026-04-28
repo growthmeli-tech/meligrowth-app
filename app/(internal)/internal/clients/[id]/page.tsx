@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { ScoreEvolutionChart } from "@/components/charts/score-evolution-chart";
 import { DownloadReportButton } from "@/components/reports/download-report-button";
+import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel";
 import { BlockScoresRow } from "@/components/score/block-scores-row";
 import { ScoreDisplay } from "@/components/score/score-display";
 import { EmptyState } from "@/components/ui/empty-state";
-import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel";
 import { getAccountHealthWithDelta, listAccountHealthByAccount } from "@/lib/data-v2/account-health";
 import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getCompanyById } from "@/lib/data-v2/companies";
+import { getLatestMetricSnapshotByAccount } from "@/lib/data-v2/metric-snapshots";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
 import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
 
@@ -15,10 +17,11 @@ export default async function InternalClientDetailPage({
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ ml_connected?: string; ml_error?: string }>;
+  searchParams?: Promise<{ ml_connected?: string; ml_error?: string; tab?: string }>;
 }) {
   const { id } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const activeTab = resolvedSearchParams.tab === "historial" ? "historial" : "diagnostico";
   const companyResult = await getCompanyById(id);
 
   if (!companyResult.success || !companyResult.data) {
@@ -36,9 +39,26 @@ export default async function InternalClientDetailPage({
     account = fallbackAccountsResult.success ? (fallbackAccountsResult.data[0] ?? null) : null;
   }
 
-  const healthResult = account ? await getAccountHealthWithDelta(account.id) : null;
+  const [healthResult, latestSnapshotResult, historyResult] = await Promise.all([
+    account ? getAccountHealthWithDelta(account.id) : null,
+    account ? getLatestMetricSnapshotByAccount(account.id) : null,
+    account ? listAccountHealthByAccount(account.id, 6) : null
+  ]);
   const health = healthResult?.success && healthResult.data ? healthResult.data.current : null;
   const delta = healthResult?.success && healthResult.data ? healthResult.data.delta : null;
+  const latestSnapshot = latestSnapshotResult?.success ? latestSnapshotResult.data : null;
+  const historyData =
+    historyResult?.success && historyResult.data
+      ? [...historyResult.data]
+          .reverse()
+          .map((item) => ({
+            date: new Date(item.snapshot_date).toLocaleDateString("es-AR", { month: "short" }),
+            score_global: Number(item.score_global ?? 0),
+            score_salud: Number(item.score_salud ?? 0),
+            score_ads: Number(item.score_ads ?? 0)
+          }))
+      : [];
+  const hasSingleHistoryPoint = historyData.length === 1;
   const needsMlConnection = !account?.seller_id;
   const hasConnectedBanner = resolvedSearchParams.ml_connected === "true";
   const hasErrorBanner = typeof resolvedSearchParams.ml_error === "string" && resolvedSearchParams.ml_error.length > 0;
@@ -50,6 +70,19 @@ export default async function InternalClientDetailPage({
         <div>
           <p className="text-xs text-[#6B6B6B]">Cartera interna</p>
           <h1 className="text-xl font-bold text-[#1A1A1A]">{companyResult.data.name}</h1>
+          <p className="mt-1 inline-flex items-center gap-2 text-sm font-semibold text-[#1A1A1A]">
+            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${needsMlConnection ? "bg-red-500" : "bg-emerald-500"}`} />
+            {needsMlConnection ? (
+              <>
+                Sin conexión ML
+                <Link href={`/internal/clients/${id}/settings`} className="underline underline-offset-2">
+                  Configurar
+                </Link>
+              </>
+            ) : (
+              "ML Conectada"
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Link href={`/internal/clients/${id}/settings`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
@@ -76,12 +109,18 @@ export default async function InternalClientDetailPage({
       <nav className="rounded-xl border border-[#E8E8E2] bg-white p-2">
         <ul className="flex flex-wrap gap-2 text-sm font-semibold text-[#1A1A1A]">
           <li>
-            <Link href={`/internal/clients/${id}/diagnostic/new`} className="inline-flex rounded-lg px-3 py-2 hover:bg-[#F5F5F0]">
+            <Link
+              href={`/internal/clients/${id}?tab=diagnostico`}
+              className={`inline-flex rounded-lg px-3 py-2 ${activeTab === "diagnostico" ? "bg-[#F5F5F0]" : "hover:bg-[#F5F5F0]"}`}
+            >
               Diagnostico
             </Link>
           </li>
           <li>
-            <Link href={`/internal/clients/${id}`} className="inline-flex rounded-lg bg-[#F5F5F0] px-3 py-2">
+            <Link
+              href={`/internal/clients/${id}?tab=historial`}
+              className={`inline-flex rounded-lg px-3 py-2 ${activeTab === "historial" ? "bg-[#F5F5F0]" : "hover:bg-[#F5F5F0]"}`}
+            >
               Historial
             </Link>
           </li>
@@ -122,24 +161,83 @@ export default async function InternalClientDetailPage({
       ) : null}
 
       {account && health ? (
-        <section className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-          <div className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
-            <ScoreDisplay score={health.score_global} delta={delta} size="lg" animated />
-            <BlockScoresRow
-              scores={{
-                salud: Number(health.score_salud ?? 0),
-                publicaciones: Number(health.score_publicaciones ?? 0),
-                ads: health.score_ads === null ? null : Number(health.score_ads),
-                logistica: Number(health.score_logistica ?? 0),
-                stock: Number(health.score_stock ?? 0)
-              }}
-            />
+        <section className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+            <div className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4 space-y-4">
+              <ScoreDisplay score={health.score_global} delta={delta} size="lg" animated />
+              <BlockScoresRow
+                interactive
+                linkBasePath={`/internal/clients/${id}/blocks`}
+                scores={{
+                  salud: Number(health.score_salud ?? 0),
+                  publicaciones: Number(health.score_publicaciones ?? 0),
+                  ads: health.score_ads === null ? null : Number(health.score_ads),
+                  logistica: Number(health.score_logistica ?? 0),
+                  stock: Number(health.score_stock ?? 0)
+                }}
+              />
+            </div>
+            <RecommendationsPanel clientId={id} maxVisible={5} />
           </div>
-          <RecommendationsPanel clientId={id} maxVisible={5} />
+
+          <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Métricas clave</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <MetricCard label="Ventas totales del período" value={formatCurrency(latestSnapshot?.ventas_totales ?? null)} />
+              <MetricCard label="Gasto en ads" value={formatCurrency(latestSnapshot?.gasto_ads ?? null)} />
+              <MetricCard label="Retorno en publicidad" value={formatRoas(latestSnapshot?.ventas_ads ?? null, latestSnapshot?.gasto_ads ?? null)} />
+              <MetricCard
+                label="% de ventas gastado en publicidad"
+                value={formatTacos(latestSnapshot?.gasto_ads ?? null, latestSnapshot?.ventas_totales ?? null)}
+              />
+              <MetricCard label="SKUs sin stock" value={formatPercent(latestSnapshot?.skus_sin_stock_pct ?? null)} />
+            </div>
+          </section>
+
+          {activeTab === "historial" ? (
+            <section className="rounded-xl border border-[#E8E8E2] bg-white p-4 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Historial de score</p>
+              {historyData.length > 0 ? <ScoreEvolutionChart data={historyData} showBlocks /> : <EmptyState context="historial" />}
+              {hasSingleHistoryPoint ? <p className="text-sm text-[#6B6B6B]">Agregá más diagnósticos para ver la evolución.</p> : null}
+            </section>
+          ) : (
+            <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+              <p className="text-sm text-[#6B6B6B]">Usá los bloques para ir al detalle de cada área o crear un nuevo diagnóstico.</p>
+            </section>
+          )}
         </section>
       ) : null}
     </main>
   );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <article className="rounded-lg border border-[#E8E8E2] bg-[#F5F5F0] p-3">
+      <p className="text-xs font-semibold text-[#6B6B6B]">{label}</p>
+      <p className={`mt-2 text-sm font-bold ${value === "Sin datos" ? "text-[#9CA3AF]" : "text-[#1A1A1A]"}`}>{value}</p>
+    </article>
+  );
+}
+
+function formatCurrency(value: number | null) {
+  if (value === null) return "Sin datos";
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) return "Sin datos";
+  return `${value.toFixed(1)}%`;
+}
+
+function formatRoas(ventasAds: number | null, gastoAds: number | null) {
+  if (ventasAds === null || gastoAds === null || gastoAds <= 0) return "Sin datos";
+  return `${(ventasAds / gastoAds).toFixed(2)}x`;
+}
+
+function formatTacos(gastoAds: number | null, ventasTotales: number | null) {
+  if (gastoAds === null || ventasTotales === null || ventasTotales <= 0) return "Sin datos";
+  return `${((gastoAds / ventasTotales) * 100).toFixed(1)}%`;
 }
 
 async function buildReportData(

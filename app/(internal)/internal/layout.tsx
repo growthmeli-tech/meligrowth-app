@@ -1,13 +1,19 @@
 import Link from "next/link";
-import { LayoutDashboard, Users, Bell } from "lucide-react";
+import { LayoutDashboard, Users, Bell, LogOut } from "lucide-react";
+import { logout } from "@/app/(auth)/login/actions";
 import { getInternalDashboardCompanies } from "@/lib/data-v2/dashboard-internal";
+import { getCurrentViewerProfile } from "@/lib/data-v2/viewer";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function InternalLayout({ children }: { children: React.ReactNode }) {
   const dashboardResult = await getInternalDashboardCompanies();
+  const viewerResult = await getCurrentViewerProfile();
   const companies = dashboardResult.success ? dashboardResult.data : [];
+  const viewerName = viewerResult.success ? viewerResult.data.profile.name || viewerResult.data.profile.email : "Usuario";
+  const viewerRole = viewerResult.success ? translateRole(viewerResult.data.profile.role) : "Operador";
+  const initials = toInitials(viewerName);
   const clientsCount = companies.length;
   const unreadAlerts = companies.reduce((acc, company) => acc + company.urgentAlertsPending, 0);
 
@@ -38,14 +44,40 @@ export default async function InternalLayout({ children }: { children: React.Rea
         </div>
 
         <div className="rounded-xl border border-[#E8E8E2] p-3">
-          <p className="text-sm font-semibold text-[#1A1A1A]">Joaquin</p>
-          <p className="text-xs text-[#6B6B6B]">internal</p>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600] text-[#1A1A1A] text-sm font-black">
+              {initials}
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[#1A1A1A]">{viewerName}</p>
+              <p className="text-xs text-[#6B6B6B]">{viewerRole}</p>
+            </div>
+          </div>
+          <form action={logout} className="mt-3">
+            <button className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-600 font-semibold">
+              <LogOut className="h-3.5 w-3.5" />
+              Cerrar sesión
+            </button>
+          </form>
         </div>
       </aside>
 
       <main className="min-h-screen">{children}</main>
     </div>
   );
+}
+
+function toInitials(value: string) {
+  const chunks = value.trim().split(/\s+/).filter(Boolean);
+  if (chunks.length === 0) return "MG";
+  if (chunks.length === 1) return chunks[0].slice(0, 2).toUpperCase();
+  return `${chunks[0][0] ?? ""}${chunks[1][0] ?? ""}`.toUpperCase();
+}
+
+function translateRole(role: string) {
+  if (role === "super_admin_meli_growth") return "Super Admin";
+  if (role === "internal_operator_meli_growth") return "Operador";
+  return "Operador";
 }
 
 function NavItem({
