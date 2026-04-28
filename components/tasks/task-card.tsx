@@ -33,7 +33,10 @@ export function TaskCard({
   const titleClassName = task.status === "descartada" ? "line-through text-gray-400" : "text-[#1A1A1A]";
   const priorityClassName = getPriorityClassName(task.priority);
   const statusLabel = task.status.replace("_", " ");
-  const steps = useMemo(() => getTaskSteps(task.title, task.category ?? task.description ?? "salud"), [task.title, task.category, task.description]);
+  const steps = useMemo(
+    () => getTaskSteps(task.title, task.description ?? "", task.category ?? ""),
+    [task.title, task.category, task.description]
+  );
   const storageKey = `task_${task.id}_steps`;
   const [checkedSteps, setCheckedSteps] = useState<boolean[]>(() => Array.from({ length: steps.length }, () => false));
   const [expanded, setExpanded] = useState(task.status === "en_curso");

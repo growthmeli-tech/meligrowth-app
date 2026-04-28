@@ -1,7 +1,21 @@
 import { TasksBoard } from "@/components/ops/tasks-board";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getCurrentViewerProfile, getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
+import type { TaskPriority, TaskStatus } from "@/lib/types/enums";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+
+type OpsTaskRow = {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  prioridad: TaskPriority;
+  due_date: string | null;
+  estado: TaskStatus;
+  ml_account_id: string;
+  assigned_to: string | null;
+  alert_id: string | null;
+  alerts: { categoria: string | null } | null;
+};
 
 export default async function OpsTasksPage() {
   const [viewerResult, accountResult] = await Promise.all([getCurrentViewerProfile(), getPrimaryAccountForOperator()]);
@@ -10,7 +24,7 @@ export default async function OpsTasksPage() {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select("id, titulo, descripcion, prioridad, due_date, estado, ml_account_id, assigned_to")
+    .select("id, titulo, descripcion, prioridad, due_date, estado, ml_account_id, assigned_to, alert_id, alerts(categoria)")
     .or(`assigned_to.eq.${viewerResult.data.userId},ml_account_id.eq.${accountResult.data.id}`)
     .order("created_at", { ascending: false });
 
@@ -18,7 +32,7 @@ export default async function OpsTasksPage() {
     return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">No pudimos cargar tareas.</div>;
   }
 
-  const tasks = data ?? [];
+  const tasks = (data ?? []) as OpsTaskRow[];
   if (tasks.length === 0) {
     return <div className="rounded-xl border border-[#E8E8E2] bg-white p-6 text-center text-sm text-[#1A1A1A]">Sin tareas pendientes. Revisá las alertas para crear nuevas.</div>;
   }
@@ -33,7 +47,7 @@ export default async function OpsTasksPage() {
           id: task.id,
           title: task.titulo,
           description: task.descripcion,
-          category: null,
+          category: task.alerts?.categoria ?? null,
           priority: task.prioridad,
           dueDate: task.due_date,
           status: task.estado
