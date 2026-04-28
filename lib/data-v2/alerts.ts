@@ -25,7 +25,11 @@ export async function listAlertsByAccount(
     query = query.eq("resuelta", false);
   }
   if (options?.audience) {
-    query = query.eq("audiencia", options.audience);
+    if (options.audience === "operator" || options.audience === "manager" || options.audience === "internal") {
+      query = query.in("audiencia", [options.audience, "all"]);
+    } else {
+      query = query.eq("audiencia", options.audience);
+    }
   }
   if (options?.limit) {
     query = query.limit(options.limit);

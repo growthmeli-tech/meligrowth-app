@@ -5,67 +5,56 @@ import { cn } from "@/lib/utils";
 export type TaskCardTask = {
   id: string;
   title: string;
-  block: string;
+  description?: string | null;
+  priority: "urgente" | "alta" | "media" | "baja";
   dueDate?: string | null;
-  assignee?: string | null;
   status: "pendiente" | "en_curso" | "completada" | "descartada";
 };
 
 export type TaskCardProps = {
   task: TaskCardTask;
-  onComplete?: (taskId: string) => void;
-  onReassign?: (taskId: string) => void;
-  onViewDetail?: (taskId: string) => void;
-  loading?: boolean;
-  error?: string | null;
-  empty?: boolean;
+  onAdvance?: (taskId: string) => void;
+  advancing?: boolean;
 };
 
-export function TaskCard({ task, onComplete, onReassign, onViewDetail, loading = false, error = null, empty = false }: TaskCardProps) {
-  if (loading) return <div className="h-24 rounded-xl bg-gray-200 animate-pulse" />;
-
-  if (error) {
-    return (
-      <article className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
-        <p className="text-sm text-red-600">No se pudo cargar la tarea</p>
-        <button type="button" className="mt-2 text-xs font-semibold text-[#1A1A1A]">
-          Reintentar
-        </button>
-      </article>
-    );
-  }
-
-  if (empty) {
-    return (
-      <article className="bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4">
-        <p className="text-sm text-[#6B6B6B]">No hay tareas pendientes</p>
-        <button type="button" className="mt-2 bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">
-          Crear tarea manual
-        </button>
-      </article>
-    );
-  }
-
+export function TaskCard({ task, onAdvance, advancing = false }: TaskCardProps) {
   const statusClassName = getStatusClassName(task.status);
   const titleClassName = task.status === "descartada" ? "line-through text-gray-400" : "text-[#1A1A1A]";
+  const priorityClassName = getPriorityClassName(task.priority);
+  const statusLabel = task.status.replace("_", " ");
 
   return (
     <article className={cn("bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4 hover:shadow-sm transition-shadow duration-150", statusClassName)}>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <p className={cn("text-sm font-semibold", titleClassName)}>{task.title}</p>
-        <p className="text-xs font-semibold text-[#6B6B6B] uppercase">{task.status.replace("_", " ")}</p>
+        <div className="flex items-center gap-2">
+          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold uppercase", priorityClassName)}>{task.priority}</span>
+          <p className="text-xs font-semibold uppercase text-[#6B6B6B]">{statusLabel}</p>
+        </div>
       </div>
-      <p className="mt-1 text-xs text-[#6B6B6B]">{`Bloque: ${task.block} · Vence: ${task.dueDate ?? "Sin fecha"} · ${task.assignee ?? "Sin asignar"}`}</p>
+      {task.description ? <p className="mt-2 text-sm text-[#6B6B6B]">{task.description}</p> : null}
+      <p className="mt-2 text-xs text-[#6B6B6B]">{`Vence: ${task.dueDate ?? "Sin fecha"}`}</p>
       <div className="mt-3 border-t border-[#E8E8E2] pt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <button type="button" className="text-xs font-semibold text-[#1A1A1A]" onClick={() => onComplete?.(task.id)}>
-          Completar ✓
-        </button>
-        <button type="button" className="text-xs font-semibold text-[#1A1A1A]" onClick={() => onReassign?.(task.id)}>
-          Reasignar
-        </button>
-        <button type="button" className="text-xs font-semibold text-[#1A1A1A]" onClick={() => onViewDetail?.(task.id)}>
-          Ver detalle →
-        </button>
+        {task.status === "pendiente" ? (
+          <button
+            type="button"
+            className="rounded-lg bg-[#FFD600] px-3 py-2 text-xs font-semibold text-[#1A1A1A] disabled:opacity-70"
+            onClick={() => onAdvance?.(task.id)}
+            disabled={advancing}
+          >
+            {advancing ? "Iniciando..." : "Iniciar"}
+          </button>
+        ) : null}
+        {task.status === "en_curso" ? (
+          <button
+            type="button"
+            className="rounded-lg bg-[#FFD600] px-3 py-2 text-xs font-semibold text-[#1A1A1A] disabled:opacity-70"
+            onClick={() => onAdvance?.(task.id)}
+            disabled={advancing}
+          >
+            {advancing ? "Completando..." : "Completar"}
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -76,4 +65,11 @@ function getStatusClassName(status: TaskCardTask["status"]) {
   if (status === "en_curso") return "border-l-4 border-l-blue-500";
   if (status === "completada") return "border-l-4 border-l-green-500 opacity-60";
   return "border-l-4 border-l-gray-300";
+}
+
+function getPriorityClassName(priority: TaskCardTask["priority"]) {
+  if (priority === "urgente") return "bg-red-100 text-red-700";
+  if (priority === "alta") return "bg-orange-100 text-orange-700";
+  if (priority === "media") return "bg-amber-100 text-amber-700";
+  return "bg-blue-100 text-blue-700";
 }

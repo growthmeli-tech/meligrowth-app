@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 export type PriorityItem = {
@@ -7,6 +8,7 @@ export type PriorityItem = {
   title: string;
   subtitle: string;
   priority: "urgente" | "alta" | "media" | "baja";
+  href?: string;
 };
 
 export type PriorityListProps = {
@@ -63,24 +65,31 @@ export function PriorityList({ items, activeId = null, onSelect, loading = false
       <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">HOY HACES ESTO</p>
       <div className="mt-2">
         {items.map((item, index) => (
-          <button
+          <div
             key={item.id}
-            type="button"
-            onClick={() => onSelect?.(item)}
-            className={cn("group w-full py-3 border-b border-[#E8E8E2] text-left hover:bg-gray-50 cursor-pointer transition-colors duration-150", activeId === item.id && "bg-yellow-50")}
+            className={cn("group w-full py-3 border-b border-[#E8E8E2] text-left hover:bg-gray-50 transition-colors duration-150", activeId === item.id && "bg-yellow-50")}
           >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold text-[#1A1A1A]">
-                  <span className="text-2xl font-black font-mono tabular-nums mr-2">{index + 1}</span>
+            <div className="flex items-start justify-between gap-2 px-1">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[#1A1A1A] line-clamp-2">
+                  <span className="mr-2 text-2xl font-black font-mono tabular-nums">{index + 1}</span>
                   <span className="mr-1">{EMOJI_PRIORITY[item.priority]}</span>
                   {item.title}
                 </p>
-                <p className="text-xs text-[#6B6B6B] line-clamp-2 md:line-clamp-1">{item.subtitle}</p>
+                <p className="text-xs text-[#6B6B6B] line-clamp-2">{item.subtitle}</p>
               </div>
-              <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">→</span>
+              <span className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">→</span>
             </div>
-          </button>
+            {item.href ? (
+              <Link href={item.href} className="mt-2 inline-flex items-center text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">
+                Ver detalle →
+              </Link>
+            ) : (
+              <button type="button" onClick={() => onSelect?.(item)} className="mt-2 text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">
+                Ver detalle →
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </section>

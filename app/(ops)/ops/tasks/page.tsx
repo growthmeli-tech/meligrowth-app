@@ -1,39 +1,43 @@
-import { TaskCard } from "@/components/tasks/task-card";
+import { TasksBoard } from "@/components/ops/tasks-board";
 import { EmptyState } from "@/components/ui/empty-state";
-import { listTasksByAccount } from "@/lib/data-v2/tasks";
-import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
+import { getCurrentViewerProfile, getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export default async function OpsTasksPage() {
-  const accountResult = await getPrimaryAccountForOperator();
-  if (!accountResult.success || !accountResult.data) return <EmptyState context="tareas" />;
+  const [viewerResult, accountResult] = await Promise.all([getCurrentViewerProfile(), getPrimaryAccountForOperator()]);
+  if (!viewerResult.success || !accountResult.success || !accountResult.data) return <EmptyState context="tareas" />;
 
-  const tasksResult = await listTasksByAccount(accountResult.data.id);
-  if (!tasksResult.success || !tasksResult.data) {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id, titulo, descripcion, prioridad, due_date, estado, ml_account_id, assigned_to")
+    .or(`assigned_to.eq.${viewerResult.data.userId},ml_account_id.eq.${accountResult.data.id}`)
+    .order("created_at", { ascending: false });
+
+  if (error) {
     return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">No pudimos cargar tareas.</div>;
   }
 
-  if (tasksResult.data.length === 0) return <EmptyState context="tareas" />;
+  const tasks = data ?? [];
+  if (tasks.length === 0) {
+    return <div className="rounded-xl border border-[#E8E8E2] bg-white p-6 text-center text-sm text-[#1A1A1A]">Sin tareas pendientes. Revisá las alertas para crear nuevas.</div>;
+  }
 
   return (
     <main className="space-y-4">
       <header>
         <h1 className="text-xl font-bold text-[#1A1A1A]">Tareas</h1>
       </header>
-      <section className="space-y-3">
-        {tasksResult.data.map((task) => (
-          <TaskCard
-            key={task.id}
-            task={{
-              id: task.id,
-              title: task.titulo,
-              block: task.prioridad,
-              dueDate: task.due_date,
-              assignee: task.assigned_to,
-              status: task.estado
-            }}
-          />
-        ))}
-      </section>
+      <TasksBoard
+        initialTasks={tasks.map((task) => ({
+          id: task.id,
+          title: task.titulo,
+          description: task.descripcion,
+          priority: task.prioridad,
+          dueDate: task.due_date,
+          status: task.estado
+        }))}
+      />
     </main>
   );
 }
