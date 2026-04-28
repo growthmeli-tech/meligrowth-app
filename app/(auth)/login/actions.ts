@@ -9,20 +9,26 @@ export type LoginState = {
   error: string | null;
 };
 
-function getDefaultRouteForRole(role: UserRoleV2 | "operator" | "client") {
-  switch (role) {
-    case "super_admin_meli_growth":
-    case "internal_operator_meli_growth":
-    case "operator":
-      return "/internal/dashboard";
-    case "client_manager":
-    case "client":
-      return "/brand/dashboard";
-    case "client_operator":
-      return "/ops/dashboard";
-    default:
-      return null;
+async function getClientOperatorHome(userId: string, supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
+  const { data: accessRow, error: accessError } = await supabase
+    .from("user_account_access")
+    .select("ops_access_enabled")
+    .eq("user_id", userId)
+    .eq("access_type", "operator")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (accessError) {
+    console.error("[login-action] operator_access_lookup_failed", {
+      userId,
+      code: accessError.code,
+      message: accessError.message
+    });
+    return "/brand/dashboard";
   }
+
+  return accessRow?.ops_access_enabled ? "/ops/dashboard" : "/brand/dashboard";
 }
 
 export async function login(_previousState: LoginState, formData: FormData): Promise<LoginState> {
@@ -69,8 +75,16 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
   const role = profileV2?.role as UserRoleV2 | undefined;
 
   if (role) {
-    const route = getDefaultRouteForRole(role);
-    if (route) redirect(route);
+    if (role === "super_admin_meli_growth" || role === "internal_operator_meli_growth") {
+      redirect("/internal/dashboard");
+    }
+    if (role === "client_manager") {
+      redirect("/brand/dashboard");
+    }
+    if (role === "client_operator") {
+      const home = await getClientOperatorHome(user.id, supabase);
+      redirect(home);
+    }
   }
 
   const { data: legacyProfile, error: legacyProfileError } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
@@ -83,9 +97,11 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
   }
 
   const legacyRole = legacyProfile?.role as "operator" | "client" | undefined;
-  if (legacyRole) {
-    const route = getDefaultRouteForRole(legacyRole);
-    if (route) redirect(route);
+  if (legacyRole === "operator") {
+    redirect("/internal/dashboard");
+  }
+  if (legacyRole === "client") {
+    redirect("/brand/dashboard");
   }
 
   console.error("[login-action] role_not_found", { userId: user.id, email });

@@ -87,7 +87,8 @@ export async function middleware(request: NextRequest) {
   }
 
   if (requiredScope === "brand") {
-    const canAccessBrand = role === "client_manager" || (role === "client_operator" && !operatorHasOpsAccess);
+    const canAccessBrand =
+      role === "client_manager" || (role === "client_operator" && !operatorHasOpsAccess && pathname === "/brand/dashboard");
     if (!canAccessBrand) {
       return NextResponse.redirect(new URL(getHomeForRole(role, operatorHasOpsAccess), request.url));
     }
