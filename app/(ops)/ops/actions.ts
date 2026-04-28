@@ -35,6 +35,14 @@ export async function createTaskFromRecommendation(input: {
     return { success: false, error: "No tenés acceso a esta cuenta para crear tareas." };
   }
 
+  let stepsPayload: string[] = [];
+  if (input.alert_id) {
+    const { data: alertRow } = await service.from("alerts").select("steps").eq("id", input.alert_id).maybeSingle();
+    if (alertRow?.steps && Array.isArray(alertRow.steps)) {
+      stepsPayload = alertRow.steps.filter((s): s is string => typeof s === "string");
+    }
+  }
+
   const { data: taskRow, error: taskError } = await service
     .from("tasks")
     .insert({
@@ -44,7 +52,8 @@ export async function createTaskFromRecommendation(input: {
       descripcion: input.descripcion,
       prioridad: input.prioridad,
       estado: "pendiente",
-      assigned_to: null
+      assigned_to: null,
+      steps: stepsPayload
     })
     .select("id")
     .single();

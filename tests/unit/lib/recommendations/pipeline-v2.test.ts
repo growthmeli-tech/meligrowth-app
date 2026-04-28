@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import type { Database } from "@/lib/supabase/database.types";
+import type { Recommendation } from "@/lib/recommendations/types";
 import { createMockAccountHealth, createMockMetricSnapshot } from "@/tests/helpers/factories";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { persistRecommendationsAsAlerts } from "@/lib/recommendations/persist";
@@ -14,6 +15,10 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("@/lib/recommendations/persist", () => ({
   persistRecommendationsAsAlerts: vi.fn()
+}));
+
+vi.mock("@/lib/recommendations/ai-enricher", () => ({
+  enrichRecommendationsWithClaude: vi.fn(async (recs: Recommendation[]) => recs.map((r) => ({ ...r, steps: [] as string[] })))
 }));
 
 function createPipelineSupabaseMock(snapshot: MetricSnapshotRow, healthOverride: Partial<AccountHealthRow> = {}) {
@@ -44,10 +49,18 @@ function createPipelineSupabaseMock(snapshot: MetricSnapshotRow, healthOverride:
     })
   };
 
+  const alertsCountQuery = {
+    select: vi.fn(() => alertsCountQuery),
+    eq: vi.fn(() => alertsCountQuery),
+    gte: vi.fn(() => alertsCountQuery),
+    not: vi.fn(async () => ({ count: 0, error: null }))
+  };
+
   const client = {
     from: vi.fn((table: string) => {
       if (table === "metric_snapshots") return metricSnapshotQuery;
       if (table === "account_health") return accountHealthQuery;
+      if (table === "alerts") return alertsCountQuery;
       throw new Error(`Tabla no mockeada: ${table}`);
     })
   };

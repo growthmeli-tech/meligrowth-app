@@ -233,6 +233,7 @@ export function createMockAlert(audiencia: AlertAudience, overrides: Partial<Ale
     accion_concreta: "Priorizar correcciones en bloque salud y ads.",
     benchmark_objetivo: "Volver a score >= 70",
     audiencia,
+    steps: [],
     resuelta: false,
     resuelta_at: null,
     created_at: "2026-04-24T10:10:00.000Z",

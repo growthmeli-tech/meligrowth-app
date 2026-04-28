@@ -476,6 +476,7 @@ export type Database = {
           accion_concreta: string | null;
           benchmark_objetivo: string | null;
           audiencia: "internal" | "manager" | "operator" | "all";
+          steps: Json;
           resuelta: boolean;
           resuelta_at: string | null;
           created_at: string;
@@ -502,6 +503,7 @@ export type Database = {
           estado: "pendiente" | "en_curso" | "completada" | "descartada";
           due_date: string | null;
           completed_at: string | null;
+          steps: Json;
           created_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["tasks"]["Row"]> & {

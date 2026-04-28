@@ -43,7 +43,8 @@ export async function persistRecommendationsAsAlerts(
     descripcion: recommendation.descripcion,
     accion_concreta: recommendation.accion_concreta,
     benchmark_objetivo: recommendation.benchmark_objetivo,
-    audiencia: recommendation.audiencia
+    audiencia: recommendation.audiencia,
+    steps: recommendation.steps ?? []
   }));
 
   const result = await createAlertsBulk(payload);

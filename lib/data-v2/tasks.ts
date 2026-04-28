@@ -8,7 +8,7 @@ type TaskRow = Database["public"]["Tables"]["tasks"]["Row"];
 type TaskEventRow = Database["public"]["Tables"]["task_events"]["Row"];
 
 const TASK_SELECT =
-  "id, ml_account_id, alert_id, assigned_to, titulo, descripcion, prioridad, estado, due_date, completed_at, created_at";
+  "id, ml_account_id, alert_id, assigned_to, titulo, descripcion, prioridad, estado, due_date, completed_at, created_at, steps";
 const TASK_EVENT_SELECT = "id, task_id, user_id, evento, detalle, created_at";
 
 export async function listTasksByAccount(
@@ -83,4 +83,57 @@ export async function listTaskEvents(taskId: string): Promise<ActionResult<TaskE
   }
 
   return { success: true, data: (data ?? []) as TaskEventRow[] };
+}
+
+/**
+ * Crea una tarea a partir de una alerta, copiando sus steps generados por IA.
+ * Usar cuando el equipo interno convierte una alerta en tarea operativa.
+ */
+export async function createTaskFromAlert(input: {
+  ml_account_id: string;
+  alert_id: string;
+  assigned_to?: string;
+}): Promise<ActionResult<TaskRow>> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: alert, error: alertError } = await supabase
+    .from("alerts")
+    .select("titulo, descripcion, prioridad, steps")
+    .eq("id", input.alert_id)
+    .maybeSingle();
+
+  if (alertError || !alert) {
+    return {
+      success: false,
+      error: alertError?.message ?? "No se encontró la alerta"
+    };
+  }
+
+  const stepsFromAlert = Array.isArray(alert.steps) ? (alert.steps as string[]) : [];
+
+  const { data: task, error: taskError } = await supabase
+    .from("tasks")
+    .insert({
+      ml_account_id: input.ml_account_id,
+      alert_id: input.alert_id,
+      assigned_to: input.assigned_to ?? null,
+      titulo: alert.titulo,
+      descripcion: alert.descripcion,
+      prioridad: alert.prioridad,
+      estado: "pendiente",
+      steps: stepsFromAlert
+    })
+    .select(TASK_SELECT)
+    .single();
+
+  if (taskError || !task) {
+    logServerError("data-v2.createTaskFromAlert", taskError ?? "task_not_created", input);
+    return {
+      success: false,
+      error: isPostgresError(taskError) ? formatSupabaseError(taskError) : "No se pudo crear la tarea",
+      code: taskError?.code
+    };
+  }
+
+  return { success: true, data: task as TaskRow };
 }

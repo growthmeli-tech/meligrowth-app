@@ -14,6 +14,7 @@ type OpsTaskRow = {
   ml_account_id: string;
   assigned_to: string | null;
   alert_id: string | null;
+  steps: unknown;
   alerts: { categoria: string | null } | null;
 };
 
@@ -24,7 +25,7 @@ export default async function OpsTasksPage() {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select("id, titulo, descripcion, prioridad, due_date, estado, ml_account_id, assigned_to, alert_id, alerts(categoria)")
+    .select("id, titulo, descripcion, prioridad, due_date, estado, ml_account_id, assigned_to, alert_id, steps, alerts(categoria)")
     .or(`assigned_to.eq.${viewerResult.data.userId},ml_account_id.eq.${accountResult.data.id}`)
     .order("created_at", { ascending: false });
 
@@ -50,7 +51,8 @@ export default async function OpsTasksPage() {
           category: task.alerts?.categoria ?? null,
           priority: task.prioridad,
           dueDate: task.due_date,
-          status: task.estado
+          status: task.estado,
+          steps: Array.isArray(task.steps) ? (task.steps as string[]) : null
         }))}
       />
     </main>

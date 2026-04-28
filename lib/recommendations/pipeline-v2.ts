@@ -1,3 +1,4 @@
+import { enrichRecommendationsWithClaude, type EnrichedRecommendation } from "@/lib/recommendations/ai-enricher";
 import { generateRecommendations, type RecommendationsDiagnosticInput } from "@/lib/recommendations/engine";
 import { persistRecommendationsAsAlerts } from "@/lib/recommendations/persist";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
@@ -72,8 +73,30 @@ export async function runRecommendationsPipelineV2(input: {
     };
   }
 
+  // Cache: evitar llamadas duplicadas a Claude en el mismo día
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { count: existingAlertsCount } = await supabase
+    .from("alerts")
+    .select("id", { count: "exact", head: true })
+    .eq("ml_account_id", input.ml_account_id)
+    .eq("resuelta", false)
+    .gte("created_at", `${today}T00:00:00.000Z`)
+    .not("steps", "eq", "[]");
+
+  const shouldEnrich = (existingAlertsCount ?? 0) === 0;
+
   const recommendationsInput = snapshotToRecommendationsInput(snapshot, accountHealth);
-  const recommendations = generateRecommendations(recommendationsInput);
+  const baseRecommendations = generateRecommendations(recommendationsInput);
+
+  const enrichedRecs: EnrichedRecommendation[] = shouldEnrich
+    ? await enrichRecommendationsWithClaude(baseRecommendations.recomendaciones, snapshot)
+    : baseRecommendations.recomendaciones.map((r) => ({ ...r, steps: [] }));
+
+  const recommendations = {
+    ...baseRecommendations,
+    recomendaciones: enrichedRecs
+  };
 
   const persistResult = await persistRecommendationsAsAlerts({
     ml_account_id: input.ml_account_id,

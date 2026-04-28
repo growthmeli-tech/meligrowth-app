@@ -15,6 +15,8 @@ export type Recommendation = {
   benchmark_objetivo: string;
   audiencia: RecommendationAudience;
   bloque: string;
+  /** Checklist persistido (IA); vacío si aún no se enriqueció */
+  steps?: string[];
 };
 
 export type DiagnosticRecommendations = {
