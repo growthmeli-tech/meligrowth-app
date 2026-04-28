@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { LogIn } from "lucide-react";
 import { login, type LoginState } from "@/app/(auth)/login/actions";
-import { Button } from "@/components/ui/button";
 
 type LoginFormProps = {
   initialError?: string | null;
@@ -26,13 +24,36 @@ export function LoginForm({ initialError = null }: LoginFormProps) {
 
   return (
     <form action={submit} className="mt-6 space-y-3">
-      <input className="focus-ring h-11 w-full rounded-component border border-black/10 px-3" name="email" placeholder="Email" type="email" required />
-      <input className="focus-ring h-11 w-full rounded-component border border-black/10 px-3" name="password" placeholder="Password" type="password" required />
-      <Button className="w-full" disabled={isPending}>
-        <LogIn className="h-4 w-4" />
+      <div className="space-y-1">
+        <label htmlFor="login-email" className="text-sm font-medium text-[#1A1A1A]">
+          Email
+        </label>
+        <input
+          id="login-email"
+          className="h-11 rounded-lg border border-[#E8E8E2] focus:border-[#FFD600] focus:outline-none px-3 text-sm w-full"
+          name="email"
+          placeholder="Email"
+          type="email"
+          required
+        />
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="login-password" className="text-sm font-medium text-[#1A1A1A]">
+          Contraseña
+        </label>
+        <input
+          id="login-password"
+          className="h-11 rounded-lg border border-[#E8E8E2] focus:border-[#FFD600] focus:outline-none px-3 text-sm w-full"
+          name="password"
+          placeholder="Contraseña"
+          type="password"
+          required
+        />
+      </div>
+      {state.error ? <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{state.error}</div> : null}
+      <button type="submit" className="w-full h-11 bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg hover:brightness-95" disabled={isPending}>
         {isPending ? "Ingresando..." : "Ingresar"}
-      </Button>
-      {state.error ? <div className="rounded-component bg-[#FCEBEB] px-3 py-2 text-sm font-medium text-[#791F1F]">{state.error}</div> : null}
+      </button>
     </form>
   );
 }
