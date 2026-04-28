@@ -6,17 +6,17 @@ import { NotificationBell } from "@/components/notifications/notification-bell";
 import { getOperatorClientsList, getUnreadNotificationCount } from "@/lib/data";
 
 function getOperatorNav(clientId: string | null) {
-  const defaultClientHref = clientId ? `/operator/clients/${clientId}` : "/operator/clients/new";
-  const defaultFilesHref = clientId ? `/operator/clients/${clientId}/files` : "/operator/clients/new";
+  const defaultClientHref = clientId ? `/internal/clients/${clientId}` : "/internal/clients/new";
+  const defaultFilesHref = clientId ? `/internal/clients/${clientId}/files` : "/internal/clients/new";
 
   return [
-    { href: "/operator/dashboard", label: "Cartera", icon: LayoutDashboard },
-    { href: "/operator/clients/new", label: "Nuevo cliente", icon: Building2 },
+    { href: "/internal/dashboard", label: "Cartera", icon: LayoutDashboard },
+    { href: "/internal/clients/new", label: "Nuevo cliente", icon: Building2 },
     { href: defaultClientHref, label: "Cliente", icon: Building2 },
     { href: defaultFilesHref, label: "Archivos", icon: Upload },
-    { href: "/operator/pricing", label: "Precios", icon: Calculator },
-    { href: "/operator/notifications", label: "Notificaciones", icon: BellRing },
-    { href: "/operator/settings", label: "Settings", icon: Settings }
+    { href: "/internal/pricing", label: "Precios", icon: Calculator },
+    { href: "/internal/notifications", label: "Notificaciones", icon: BellRing },
+    { href: "/internal/settings", label: "Settings", icon: Settings }
   ];
 }
 
@@ -37,7 +37,7 @@ export async function AppShell({
   const operatorClients = mode === "operator" ? await getOperatorClientsList() : [];
   const nav = mode === "operator" ? getOperatorNav(operatorClients[0]?.id ?? null) : clientNav;
   const unreadCount = await getUnreadNotificationCount();
-  const notificationsHref = mode === "operator" ? "/operator/notifications" : "/client/notifications";
+  const notificationsHref = mode === "operator" ? "/internal/notifications" : "/client/notifications";
   return (
     <div className="min-h-screen bg-[#FBFBFD]">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-black/10 bg-white px-4 py-5 lg:block">

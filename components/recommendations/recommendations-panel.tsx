@@ -75,7 +75,7 @@ export async function RecommendationsPanel({ clientId, diagnosticId, maxVisible 
             <div key={block} className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{block}</p>
               {recommendations.map((recommendation) => (
-                <RecommendationCard key={recommendation.id} recommendation={recommendation} compact />
+                <RecommendationCard key={recommendation.id} recommendation={recommendation} compact mlAccountId={account.id} />
               ))}
             </div>
           ))}
@@ -83,7 +83,7 @@ export async function RecommendationsPanel({ clientId, diagnosticId, maxVisible 
       ) : (
         <div className="space-y-3">
           {visible.map((recommendation) => (
-            <RecommendationCard key={recommendation.id} recommendation={recommendation} compact />
+            <RecommendationCard key={recommendation.id} recommendation={recommendation} compact mlAccountId={account.id} />
           ))}
         </div>
       )}

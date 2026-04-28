@@ -7,8 +7,9 @@ import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 export default async function OpsAlertsPage() {
   const accountResult = await getPrimaryAccountForOperator();
   if (!accountResult.success || !accountResult.data) return <EmptyState context="recomendaciones" />;
+  const account = accountResult.data;
 
-  const alertsResult = await listAlertsByAccount(accountResult.data.id, { audience: "operator", includeResolved: false, limit: 30 });
+  const alertsResult = await listAlertsByAccount(account.id, { audience: "operator", includeResolved: false, limit: 30 });
   if (!alertsResult.success || !alertsResult.data) {
     return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">No pudimos cargar alertas operativas.</div>;
   }
@@ -36,7 +37,7 @@ export default async function OpsAlertsPage() {
       </header>
       <section className="space-y-3">
         {recommendations.map((recommendation) => (
-          <RecommendationCard key={recommendation.id} recommendation={recommendation} variant="operator" />
+          <RecommendationCard key={recommendation.id} recommendation={recommendation} variant="operator" mlAccountId={account.id} />
         ))}
       </section>
     </main>

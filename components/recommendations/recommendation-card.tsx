@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState, useTransition } from "react";
 import { DESIGN_TOKENS } from "@/lib/config/design-tokens";
+import { createTaskFromRecommendation } from "@/app/(internal)/internal/clients/[id]/tasks/actions";
 import type { Recommendation } from "@/lib/recommendations/types";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +15,7 @@ export type RecommendationCardProps = {
   loading?: boolean;
   error?: string | null;
   empty?: boolean;
+  mlAccountId?: string;
 };
 
 const PRIORITY_STYLES: Record<Recommendation["prioridad"], string> = {
@@ -30,8 +33,20 @@ export function RecommendationCard({
   compact = false,
   loading = false,
   error = null,
-  empty = false
+  empty = false,
+  mlAccountId
 }: RecommendationCardProps) {
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [wasCreated, setWasCreated] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
   if (loading) {
     return <div className="h-32 rounded-xl bg-gray-200 animate-pulse" />;
   }
@@ -88,10 +103,35 @@ export function RecommendationCard({
       <div className={cn("mt-4 flex gap-2", variant === "operator" ? "flex-col sm:flex-row sm:justify-between" : "justify-start")}>
         <button
           type="button"
-          className="bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2"
-          onClick={() => onCreateAction?.(recommendation)}
+          className="bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2 disabled:opacity-70"
+          disabled={isPending}
+          onClick={() => {
+            setActionError(null);
+            startTransition(async () => {
+              if (mlAccountId) {
+                const taskResult = await createTaskFromRecommendation({
+                  ml_account_id: mlAccountId,
+                  titulo: recommendation.titulo,
+                  descripcion: recommendation.accion_concreta,
+                  prioridad: recommendation.prioridad,
+                  alert_id: recommendation.id
+                });
+
+                if (!taskResult.success) {
+                  setActionError(taskResult.error);
+                  return;
+                }
+
+                setWasCreated(true);
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                timeoutRef.current = setTimeout(() => setWasCreated(false), 2000);
+              }
+
+              onCreateAction?.(recommendation);
+            });
+          }}
         >
-          {variant === "manager" ? "Solicitar accion al equipo operativo →" : "Crear tarea"}
+          {wasCreated ? "✓ Tarea creada" : variant === "manager" ? "Solicitar accion al equipo operativo →" : "Crear tarea"}
         </button>
         {variant === "operator" ? (
           <button type="button" className="text-gray-500 hover:text-[#1A1A1A] text-sm font-medium" onClick={() => onMarkViewed?.(recommendation.id)}>
@@ -99,6 +139,7 @@ export function RecommendationCard({
           </button>
         ) : null}
       </div>
+      {actionError ? <p className="mt-2 text-xs text-red-600">{actionError}</p> : null}
     </article>
   );
 }
