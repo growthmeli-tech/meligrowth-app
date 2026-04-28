@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { advanceTaskStatus } from "@/app/(ops)/ops/tasks/actions";
+import { updateTaskStatus } from "@/app/(ops)/ops/actions";
 import { TaskCard, type TaskCardTask } from "@/components/tasks/task-card";
 import type { TaskStatus } from "@/lib/types/enums";
 
@@ -20,7 +20,8 @@ export function TasksBoard({ initialTasks }: TasksBoardProps) {
   const [tasks, setTasks] = useState(initialTasks);
   const [selectedStatus, setSelectedStatus] = useState<"all" | TaskStatus>("all");
   const [error, setError] = useState<string | null>(null);
-  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  const [startPendingTaskId, setStartPendingTaskId] = useState<string | null>(null);
+  const [completePendingTaskId, setCompletePendingTaskId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const visibleTasks = useMemo(() => {
@@ -60,22 +61,46 @@ export function TasksBoard({ initialTasks }: TasksBoardProps) {
               <TaskCard
                 key={task.id}
                 task={task}
-                advancing={isPending && pendingTaskId === task.id}
-                onAdvance={(taskId) => {
+                advancingStart={isPending && startPendingTaskId === task.id}
+                advancingComplete={isPending && completePendingTaskId === task.id}
+                onStart={(taskId) => {
                   setError(null);
-                  setPendingTaskId(taskId);
+                  setStartPendingTaskId(taskId);
                   startTransition(async () => {
-                    const result = await advanceTaskStatus(taskId);
+                    const result = await updateTaskStatus({
+                      task_id: taskId,
+                      estado: "en_curso"
+                    });
                     if (!result.success) {
                       setError(result.error);
-                      setPendingTaskId(null);
+                      setStartPendingTaskId(null);
                       return;
                     }
 
                     setTasks((current) =>
                       current.map((item) => (item.id === taskId ? { ...item, status: result.data.estado } : item))
                     );
-                    setPendingTaskId(null);
+                    setStartPendingTaskId(null);
+                  });
+                }}
+                onComplete={(taskId) => {
+                  setError(null);
+                  setCompletePendingTaskId(taskId);
+                  startTransition(async () => {
+                    const result = await updateTaskStatus({
+                      task_id: taskId,
+                      estado: "completada"
+                    });
+                    if (!result.success) {
+                      setError(result.error);
+                      setCompletePendingTaskId(null);
+                      return;
+                    }
+
+                    setTasks((current) =>
+                      current.map((item) => (item.id === taskId ? { ...item, status: result.data.estado } : item))
+                    );
+                    setCompletePendingTaskId(null);
                   });
                 }}
               />

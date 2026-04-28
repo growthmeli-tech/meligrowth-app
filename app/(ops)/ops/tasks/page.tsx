@@ -33,6 +33,7 @@ export default async function OpsTasksPage() {
           id: task.id,
           title: task.titulo,
           description: task.descripcion,
+          category: null,
           priority: task.prioridad,
           dueDate: task.due_date,
           status: task.estado
