@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { UserRoleV2 } from "@/lib/types/enums";
 
@@ -9,8 +10,9 @@ export type LoginState = {
   error: string | null;
 };
 
-async function getClientOperatorHome(userId: string, supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
-  const { data: accessRow, error: accessError } = await supabase
+async function getClientOperatorHome(userId: string) {
+  const service = createServiceSupabaseClient();
+  const { data: accessRow, error: accessError } = await service
     .from("user_account_access")
     .select("ops_access_enabled")
     .eq("user_id", userId)
@@ -40,33 +42,28 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
-    console.error("[login-action] missing_credentials", { hasEmail: Boolean(email), hasPassword: Boolean(password) });
-    return { error: "Ingresá email y password." };
+    console.error("[login] missing_credentials", { hasEmail: Boolean(email), hasPassword: Boolean(password) });
+    return { error: "Email y contraseña son requeridos." };
   }
 
   const supabase = await createServerSupabaseClient();
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
-  if (authError) {
-    console.error("[login-action] sign_in_failed", {
+  if (authError || !authData?.user) {
+    console.error("[login] auth_error", {
       email,
-      code: authError.code,
-      message: authError.message
+      code: authError?.code,
+      message: authError?.message
     });
-    return { error: "No pudimos validar esas credenciales." };
+    return { error: "Email o contraseña incorrectos." };
   }
 
-  const user = authData.user;
-
-  if (!user) {
-    console.error("[login-action] missing_user_after_sign_in", { email });
-    return { error: "No pudimos validar esas credenciales." };
-  }
-
-  const { data: profileV2, error: profileV2Error } = await supabase.from("users_v2").select("role").eq("id", user.id).maybeSingle();
+  const userId = authData.user.id;
+  const service = createServiceSupabaseClient();
+  const { data: profileV2, error: profileV2Error } = await service.from("users_v2").select("role, company_id").eq("id", userId).maybeSingle();
   if (profileV2Error) {
-    console.error("[login-action] users_v2_lookup_failed", {
-      userId: user.id,
+    console.error("[login] users_v2_error", {
+      userId,
       code: profileV2Error.code,
       message: profileV2Error.message
     });
@@ -75,6 +72,7 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
   const role = profileV2?.role as UserRoleV2 | undefined;
 
   if (role) {
+    console.info("[login] role_found_v2", { userId, role });
     if (role === "super_admin_meli_growth" || role === "internal_operator_meli_growth") {
       redirect("/internal/dashboard");
     }
@@ -82,15 +80,15 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
       redirect("/brand/dashboard");
     }
     if (role === "client_operator") {
-      const home = await getClientOperatorHome(user.id, supabase);
+      const home = await getClientOperatorHome(userId);
       redirect(home);
     }
   }
 
-  const { data: legacyProfile, error: legacyProfileError } = await supabase.from("users").select("role").eq("id", user.id).maybeSingle();
+  const { data: legacyProfile, error: legacyProfileError } = await service.from("users").select("role").eq("id", userId).maybeSingle();
   if (legacyProfileError) {
-    console.error("[login-action] users_legacy_lookup_failed", {
-      userId: user.id,
+    console.error("[login] users_legacy_error", {
+      userId,
       code: legacyProfileError.code,
       message: legacyProfileError.message
     });
@@ -104,8 +102,8 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
     redirect("/brand/dashboard");
   }
 
-  console.error("[login-action] role_not_found", { userId: user.id, email });
-  return { error: "Tu usuario no tiene rol asignado para esta app." };
+  console.error("[login] missing_role", { userId, email, userV2: profileV2, userLegacy: legacyProfile });
+  return { error: "Tu usuario no tiene un rol asignado. Contactá al administrador." };
 }
 
 export async function logout() {
