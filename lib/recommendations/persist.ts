@@ -20,9 +20,12 @@ type PersistRecommendationsOutput = {
 export async function persistRecommendationsAsAlerts(
   input: PersistRecommendationsInput
 ): Promise<ActionResult<PersistRecommendationsOutput>> {
-  const candidates = input.recommendations.recomendaciones.filter(
-    (recommendation) => recommendation.prioridad === "urgente" || recommendation.prioridad === "alta"
-  );
+  const candidates = input.recommendations.recomendaciones.filter((recommendation) => {
+    if (recommendation.prioridad === "urgente" || recommendation.prioridad === "alta") return true;
+    if (recommendation.prioridad !== "media") return false;
+    const m = recommendation.metrica_afectada ?? "";
+    return m.startsWith("cross_") || m === "integration_ads";
+  });
 
   if (candidates.length === 0) {
     return {

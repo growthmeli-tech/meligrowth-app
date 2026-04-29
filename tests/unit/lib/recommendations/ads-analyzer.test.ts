@@ -14,12 +14,22 @@ describe("Ads analyzer", () => {
     expect(result.tacos).toBeCloseTo(66.7, 1);
   });
 
-  it("marca sin_datos cuando faltan valores para division", () => {
+  it("sin campanas con gasto/ventas ads en cero pero con ventas totales (organico) -> sin_campanas", () => {
     const result = analyzeAds({
       margen_pre_ads: 30,
       gasto_ads: 0,
       ventas_ads: 0,
       ventas_totales: 30000
+    });
+    expect(result.estado_salud).toBe("sin_campanas");
+  });
+
+  it("marca sin_datos cuando no hay ventas totales en el periodo", () => {
+    const result = analyzeAds({
+      margen_pre_ads: 30,
+      gasto_ads: 0,
+      ventas_ads: 0,
+      ventas_totales: 0
     });
     expect(result.estado_salud).toBe("sin_datos");
   });

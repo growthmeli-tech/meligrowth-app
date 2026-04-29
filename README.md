@@ -7,7 +7,7 @@ Plataforma full-stack para operar y automatizar cuentas de clientes de MeliGrowt
 - Next.js 14 App Router + TypeScript
 - Tailwind CSS
 - Supabase/Postgres con RLS
-- Motor de scoring puro en `lib/scoring.ts`
+- Motor de scoring modular en `lib/scoring/` (barrel `lib/scoring/index.ts`)
 - Motor de acciones automáticas en `lib/actions-engine.ts`
 - Parser FastAPI en `services/parser`
 - Scraper FastAPI/Playwright en `services/scraper`

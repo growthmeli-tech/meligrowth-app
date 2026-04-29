@@ -1,5 +1,7 @@
 import { calcScore } from "@/lib/scoring";
+import type { MlDataSource } from "@/lib/ml/mappers/types";
 import { ACCIONES_POR_METRICA, OPS_BLOCKS, type OpsBlockKey, TRADUCCIONES_METRICAS } from "@/lib/ops/copy";
+import { hasMeaningfulAdsActivity } from "@/lib/ops/meaningful-ads";
 import { getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
 import { getScoreLabel } from "@/lib/utils/scores";
 
@@ -44,12 +46,15 @@ export type OpsMetricRowData = {
   label: string;
   valor: number | null;
   unit: "%" | "x" | "días" | "nivel";
-  score: number;
+  /** null = sin valor para puntuar (no confundir con score 0 = crítico) */
+  score: number | null;
   estado: string;
   benchmark: string;
   accion: string;
-  source: "api" | "manual" | null;
+  source: MlDataSource | null;
   esCritica: boolean;
+  /** Cómo interpretar la ausencia de valor en UI */
+  rowKind: "measured" | "missing" | "optional_absent";
 };
 
 const METRICS_BY_BLOCK: Record<OpsBlockKey, MetricDefinition[]> = {
@@ -105,12 +110,61 @@ export function getBlockMeta(blockKey: OpsBlockKey) {
 }
 
 export function getBlockMetricRows(blockKey: OpsBlockKey, snapshot: Snapshot): OpsMetricRowData[] {
+  if (blockKey === "ads" && !hasMeaningfulAdsActivity(snapshot)) {
+    const ds = snapshot.data_sources && typeof snapshot.data_sources === "object" ? (snapshot.data_sources as Record<string, string>) : {};
+    const src = resolveMetricSource(snapshot.data_sources, "acos", "ads");
+    const unavailable = ds.ads === "unavailable";
+    return [
+      {
+        key: "ads_actividad",
+        label: "Mercado Ads (bloque)",
+        valor: null,
+        unit: "%",
+        score: null,
+        estado: unavailable ? "Integración incompleta" : "Sin campañas en el período",
+        benchmark: "El score de Ads no aplica al global hasta haber gasto o ventas atribuibles a Ads.",
+        accion: unavailable
+          ? "Conectá la cuenta de advertiser o cargá gasto/ventas manualmente en el diagnóstico."
+          : "Si la cuenta no usa Ads aún, es estado esperado. Si debería haber datos, revisá la ingesta.",
+        source: src,
+        esCritica: false,
+        rowKind: "optional_absent"
+      }
+    ];
+  }
+
   return METRICS_BY_BLOCK[blockKey].map((definition) => {
     const value = definition.resolveValue(snapshot);
-    const numericScore = typeof value === "number" ? calcScore(definition.key, value) : 0;
+    const source = resolveMetricSource(snapshot.data_sources, definition.key, blockKey);
     const benchmark = getBenchmarkDefinition(definition.category, definition.key);
     const benchmarkText = benchmark ? formatBenchmarkRanges(benchmark.levels) : "Sin benchmark definido";
-    const source = resolveMetricSource(snapshot.data_sources, definition.key, blockKey);
+
+    if (value === null || Number.isNaN(value)) {
+      const optionalAbsent = !definition.criticalForCap;
+      const rowKind = optionalAbsent ? "optional_absent" : "missing";
+      const accion = optionalAbsent
+        ? "Opcional para el score del bloque. Cargalo si querés afinar el diagnóstico."
+        : source === "unavailable"
+          ? "Sin fuente para esta métrica todavía. Conectá integración o cargá el diagnóstico manual."
+          : "Falta este dato en el snapshot. Revisá la última ingesta o completá el campo.";
+
+      return {
+        key: definition.key,
+        label: definition.label,
+        valor: null,
+        unit: definition.unit,
+        score: null,
+        estado: optionalAbsent ? "No aplica (sin dato)" : "Sin dato",
+        benchmark: benchmarkText,
+        accion,
+        source,
+        esCritica: Boolean(definition.criticalForCap),
+        rowKind
+      };
+    }
+
+    const numericScore = calcScore(definition.key, value);
+    const accion = ACCIONES_POR_METRICA[definition.key] ?? "Revisá esta métrica con prioridad.";
 
     return {
       key: definition.key,
@@ -120,9 +174,10 @@ export function getBlockMetricRows(blockKey: OpsBlockKey, snapshot: Snapshot): O
       score: numericScore,
       estado: getScoreLabel(numericScore),
       benchmark: benchmarkText,
-      accion: ACCIONES_POR_METRICA[definition.key] ?? "Revisá esta métrica con prioridad.",
+      accion,
       source,
-      esCritica: Boolean(definition.criticalForCap)
+      esCritica: Boolean(definition.criticalForCap),
+      rowKind: "measured"
     };
   });
 }
@@ -140,6 +195,16 @@ export function getBlockContextHighlights(blockKey: OpsBlockKey, snapshot: Snaps
   }
 
   if (blockKey === "ads") {
+    const ds = snapshot.data_sources && typeof snapshot.data_sources === "object" ? (snapshot.data_sources as Record<string, string>) : {};
+    if (!hasMeaningfulAdsActivity(snapshot)) {
+      if (ds.ads === "unavailable") {
+        return ["Integración de Ads no disponible: el score de este bloque no entra al global hasta tener fuente."];
+      }
+      return [
+        "Sin gasto ni ventas atribuibles a Ads en el período: no es óptimo ni crítico — no hay actividad de campañas para evaluar."
+      ];
+    }
+
     const margen = snapshot.margen_pre_ads;
     const acos = snapshot.acos ?? computeAcos(snapshot.gasto_ads, snapshot.ventas_ads);
     const roas = snapshot.roas ?? computeRoas(snapshot.ventas_ads, snapshot.gasto_ads);
@@ -151,7 +216,7 @@ export function getBlockContextHighlights(blockKey: OpsBlockKey, snapshot: Snaps
     }
     const tacos = snapshot.tacos ?? computeTacos(snapshot.gasto_ads, snapshot.ventas_totales);
     if (tacos !== null && margen !== null && tacos > margen * 0.65) highlights.push("La publicidad consume más que lo que ganás.");
-    return highlights.length > 0 ? highlights : ["Bloque de ads sin alertas críticas de rentabilidad."];
+    return highlights.length > 0 ? highlights : ["Con actividad en Ads: no hay señales críticas de rentabilidad en los umbrales actuales."];
   }
 
   if (blockKey === "logistica") {
@@ -174,13 +239,17 @@ function formatBenchmarkRanges(levels: Array<{ score: number; label: string; max
     .join(" · ");
 }
 
-function resolveMetricSource(dataSources: unknown, metric: string, block: OpsBlockKey): "api" | "manual" | null {
+function resolveMetricSource(dataSources: unknown, metric: string, block: OpsBlockKey): MlDataSource | null {
   if (!dataSources || typeof dataSources !== "object") return null;
   const record = dataSources as Record<string, unknown>;
   const metricSource = record[metric];
-  if (metricSource === "api" || metricSource === "manual") return metricSource;
-  const blockSource = record[block];
-  if (blockSource === "api" || blockSource === "manual") return blockSource;
+  const fromField = parseMlSource(metricSource);
+  if (fromField) return fromField;
+  return parseMlSource(record[block]);
+}
+
+function parseMlSource(raw: unknown): MlDataSource | null {
+  if (raw === "api" || raw === "manual" || raw === "scraper" || raw === "unavailable") return raw;
   return null;
 }
 

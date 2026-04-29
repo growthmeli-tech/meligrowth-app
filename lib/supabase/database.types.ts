@@ -309,7 +309,8 @@ export type Database = {
       scraping_jobs: {
         Row: {
           id: string;
-          client_id: string;
+          client_id: string | null;
+          ml_account_id: string | null;
           tipo: "salud" | "ads" | "publicaciones" | "stock";
           estado: "pending" | "running" | "success" | "error";
           resultado_json: Json | null;
@@ -319,7 +320,6 @@ export type Database = {
           created_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["scraping_jobs"]["Row"]> & {
-          client_id: string;
           tipo: "salud" | "ads" | "publicaciones" | "stock";
         };
         Update: Partial<Database["public"]["Tables"]["scraping_jobs"]["Row"]>;

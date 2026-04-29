@@ -42,6 +42,74 @@ def load_client_context(supabase, client_id: str) -> ClientContext:
     )
 
 
+def load_context_for_job(supabase, job: dict) -> ClientContext:
+    """
+    - Legacy: scraping_jobs.client_id -> clients
+    - V2: scraping_jobs.ml_account_id -> ml_accounts (+ seller_id, meli_account_url)
+    """
+    ml_account_id = job.get("ml_account_id")
+    if ml_account_id:
+        acc_response = (
+            supabase.table("ml_accounts")
+            .select("id, seller_id, meli_account_url, account_name")
+            .eq("id", ml_account_id)
+            .single()
+            .execute()
+        )
+        row = acc_response.data
+        if not row:
+            raise HTTPException(status_code=404, detail="ml_account not found for scraping job")
+        return ClientContext(
+            id=str(row["id"]),
+            name=row.get("account_name") or "ML Account",
+            meli_seller_id=str(row["seller_id"]) if row.get("seller_id") else None,
+            meli_account_url=row.get("meli_account_url"),
+        )
+
+    client_id = job.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Job missing client_id and ml_account_id")
+    return load_client_context(supabase, str(client_id))
+
+
+def load_session_payload_for_job(supabase, job: dict) -> dict | None:
+    """Session en Storage: v2 usa {ml_account_id}/session.json; legacy meli_sessions por client_id."""
+    ml_account_id = job.get("ml_account_id")
+    if ml_account_id:
+        path = f"{ml_account_id}/session.json"
+        download_response = supabase.storage.from_("meli-sessions").download(path)
+    else:
+        client_id = job.get("client_id")
+        if not client_id:
+            return None
+        session_response = (
+            supabase.table("meli_sessions")
+            .select("storage_path")
+            .eq("client_id", str(client_id))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        session_rows = session_response.data or []
+        if not session_rows:
+            return None
+        storage_path = session_rows[0].get("storage_path")
+        if not storage_path:
+            return None
+        download_response = supabase.storage.from_("meli-sessions").download(storage_path)
+
+    if not download_response:
+        return None
+
+    if isinstance(download_response, bytes):
+        content = download_response.decode("utf-8")
+    elif hasattr(download_response, "decode"):
+        content = download_response.decode("utf-8")
+    else:
+        content = str(download_response)
+    return decrypt_session_payload(content)
+
+
 def load_latest_session_state(supabase, client_id: str) -> dict | None:
     session_response = (
         supabase.table("meli_sessions")
@@ -104,8 +172,8 @@ async def run_job(payload: RunJobRequest, x_scraper_secret: str | None = Header(
     }).eq("id", payload.job_id).execute()
 
     try:
-        client = load_client_context(supabase, job["client_id"])
-        session_state = load_latest_session_state(supabase, job["client_id"])
+        client = load_context_for_job(supabase, job)
+        session_state = load_session_payload_for_job(supabase, job)
         result = await scrape_mercadolibre(client, job["tipo"], session_state=session_state)
 
         supabase.table("scraping_jobs").update({

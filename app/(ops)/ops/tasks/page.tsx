@@ -20,7 +20,10 @@ type OpsTaskRow = {
 
 export default async function OpsTasksPage() {
   const [viewerResult, accountResult] = await Promise.all([getCurrentViewerProfile(), getPrimaryAccountForOperator()]);
-  if (!viewerResult.success || !accountResult.success || !accountResult.data) return <EmptyState context="tareas" />;
+  if (!accountResult.success || !accountResult.data) return <EmptyState context="cuenta" />;
+  if (!viewerResult.success || !viewerResult.data) {
+    return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">No pudimos resolver tu perfil de usuario.</div>;
+  }
 
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase

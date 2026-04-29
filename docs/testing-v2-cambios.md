@@ -63,6 +63,6 @@
   - El acceso a `/ops/**` ahora requiere `ops_access_enabled=true`.
   - Si `ops_access_enabled=false`, la redireccion va a `/brand/dashboard`.
 - **Redistribucion de pesos sin Ads implementada**:
-  - `lib/scoring.ts` ahora centraliza la regla de pesos dinamicos para score global.
+  - El módulo `lib/scoring/` (p. ej. `block-calculations.ts`) centraliza la regla de pesos dinamicos para score global.
   - Cuando `gasto_ads`, `ventas_ads` y `ventas_totales` son `null`, Ads queda con peso `0` y se redistribuyen los `20` puntos entre Salud/Publicaciones/Logistica/Stock.
   - `lib/recommendations/pipeline-v2.ts` usa esa regla al calcular `score_global`.

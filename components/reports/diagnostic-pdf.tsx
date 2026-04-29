@@ -36,7 +36,7 @@ export function DiagnosticPDF({ data }: { data: DiagnosticReportData }) {
     { label: "Ads", score: report.score_ads },
     { label: "Logística", score: report.score_logistica },
     { label: "Stock", score: report.score_stock }
-  ];
+  ] as const;
 
   return (
     <Document>
@@ -70,8 +70,8 @@ export function DiagnosticPDF({ data }: { data: DiagnosticReportData }) {
           {blocks.map((block) => (
             <View key={block.label} style={[styles.blockCard, { backgroundColor: getBlockTone(block.score) }]}>
               <Text style={styles.blockTitle}>{block.label.toUpperCase()}</Text>
-              <Text style={styles.blockScore}>{Math.round(block.score)}</Text>
-              <Text style={styles.blockStatus}>{statusFromScore(block.score)}</Text>
+              <Text style={styles.blockScore}>{block.score == null ? "—" : Math.round(block.score)}</Text>
+              <Text style={styles.blockStatus}>{block.score == null ? "Sin datos" : statusFromScore(block.score)}</Text>
             </View>
           ))}
         </View>
@@ -103,7 +103,8 @@ export function DiagnosticPDF({ data }: { data: DiagnosticReportData }) {
   );
 }
 
-function getBlockTone(score: number) {
+function getBlockTone(score: number | null) {
+  if (score == null) return "#F0F0EB";
   if (score >= 85) return "#DBF4E5";
   if (score >= 70) return "#E3EDFF";
   if (score >= 55) return "#FDF0D7";

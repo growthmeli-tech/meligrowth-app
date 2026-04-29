@@ -30,7 +30,7 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
 
   const blockKey = bloque as OpsBlockKey;
   const accountResult = await getPrimaryAccountForOperator();
-  if (!accountResult.success || !accountResult.data) return <EmptyState context="recomendaciones" />;
+  if (!accountResult.success || !accountResult.data) return <EmptyState context="cuenta" />;
   const account = accountResult.data;
 
   const [healthResult, snapshotResult, alertsResult, historyResult, pendingTasksResult] = await Promise.all([
@@ -49,6 +49,8 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
   const snapshot = snapshotResult.data;
   const blockMeta = getBlockMeta(blockKey);
   const blockScore = getBlockScore(health, blockKey);
+  const blockScoreLabel =
+    blockScore === null ? "—" : `${Math.round(blockScore)} · ${getScoreLabel(blockScore)}`;
   const metricRows = getBlockMetricRows(blockKey, snapshot);
   const highlights = getBlockContextHighlights(blockKey, snapshot);
   const blockAlerts = (alertsResult.success ? alertsResult.data : []).filter((alert) => alert.categoria === blockKey).slice(0, 6);
@@ -71,10 +73,15 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
   const history = historyResult.success
     ? [...historyResult.data]
         .reverse()
-        .map((item) => ({
-          date: new Date(item.snapshot_date).toLocaleDateString("es-AR", { month: "short" }),
-          score_global: Number(getBlockScore(item, blockKey))
-        }))
+        .map((item) => {
+          const blockScorePoint = getBlockScore(item, blockKey);
+          if (blockScorePoint === null) return null;
+          return {
+            date: new Date(item.snapshot_date).toLocaleDateString("es-AR", { month: "short" }),
+            score_global: blockScorePoint
+          };
+        })
+        .filter((row): row is { date: string; score_global: number } => row !== null)
     : [];
 
   return (
@@ -84,7 +91,7 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
           ← Dashboard
         </Link>
         <h1 className="mt-2 text-xl font-bold text-[#1A1A1A]">{`${blockMeta.number} ${blockMeta.label}`}</h1>
-        <p className="mt-1 text-sm text-[#6B6B6B]">{`Score: ${Math.round(blockScore)} · ${getScoreLabel(blockScore)} · Peso ${blockMeta.weight}%`}</p>
+        <p className="mt-1 text-sm text-[#6B6B6B]">{`Score: ${blockScoreLabel} · Peso ${blockMeta.weight}%`}</p>
       </header>
 
       <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -102,6 +109,7 @@ export default async function OpsBlockDetailPage({ params }: { params: Promise<{
               accion={row.accion}
               source={row.source}
               esCritica={row.esCritica}
+              rowKind={row.rowKind}
             />
           ))}
         </div>
@@ -168,10 +176,10 @@ function getBlockScore(
     score_stock: number | null;
   },
   blockKey: OpsBlockKey
-) {
-  if (blockKey === "salud") return Number(health.score_salud ?? 0);
-  if (blockKey === "publicaciones") return Number(health.score_publicaciones ?? 0);
-  if (blockKey === "ads") return Number(health.score_ads ?? 0);
-  if (blockKey === "logistica") return Number(health.score_logistica ?? 0);
-  return Number(health.score_stock ?? 0);
+): number | null {
+  if (blockKey === "salud") return health.score_salud === null ? null : Number(health.score_salud);
+  if (blockKey === "publicaciones") return health.score_publicaciones === null ? null : Number(health.score_publicaciones);
+  if (blockKey === "ads") return health.score_ads === null ? null : Number(health.score_ads);
+  if (blockKey === "logistica") return health.score_logistica === null ? null : Number(health.score_logistica);
+  return health.score_stock === null ? null : Number(health.score_stock);
 }

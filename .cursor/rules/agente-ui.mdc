@@ -511,7 +511,7 @@ type DataSourceBadgeProps = {
 - No redefinís tipos que ya existen en `lib/types/` — los importás
 - Los colores de score siempre vienen de `lib/config/design-tokens.ts` — nunca hardcodeados
 - Los benchmarks siempre vienen de `lib/recommendations/benchmarks.ts` — nunca hardcodeados
-- Los scores se calculan con las funciones de `lib/scoring.ts` — nunca en el componente
+- Los scores se calculan con las funciones del módulo `lib/scoring/` — nunca en el componente
 
 ## Imports correctos
 ```typescript
@@ -576,7 +576,7 @@ Si `docs/ux/auditoria-pantallas.md` no existe, auditás vos mismo las pantallas 
 
 # Lo que NO tocás
 - `lib/supabase/` — clientes de Supabase
-- `lib/scoring.ts` — lógica de scoring
+- `lib/scoring/` — lógica de scoring (no duplicar en UI)
 - `lib/recommendations/` — motor de recomendaciones
 - `lib/ml/` — integración con ML
 - `supabase/migrations/` — schema SQL

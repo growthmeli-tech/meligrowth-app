@@ -492,7 +492,7 @@ export async function getClientScrapingJobs(clientId: string, limit = 8): Promis
   const supabase = await createServerSupabaseClient();
   const { data } = await supabase
     .from("scraping_jobs")
-    .select("id, client_id, tipo, estado, error_msg, created_at")
+    .select("id, client_id, ml_account_id, tipo, estado, error_msg, created_at")
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -500,6 +500,7 @@ export async function getClientScrapingJobs(clientId: string, limit = 8): Promis
   return ((data ?? []) as ScrapingJobRow[]).map((row) => ({
     id: row.id,
     clientId: row.client_id,
+    mlAccountId: row.ml_account_id,
     tipo: row.tipo,
     estado: row.estado,
     errorMsg: row.error_msg,

@@ -1,7 +1,7 @@
 ## Scoring global y pesos
 
 - **Estado**: PARCIAL
-- **Evidencia**: `lib/scoring.ts`
+- **Evidencia**: módulo `lib/scoring/` (p. ej. `block-calculations.ts`)
 - **Resultado**:
   - Caso normal: pesos 35/20/20/15/10, suma 100%.
   - Sin Ads: redistribucion 43.75/25/0/18.75/12.5, suma 100%.
@@ -13,7 +13,7 @@
 - **Evidencia**: `lib/recommendations/benchmarks.ts` vs `docs/meligrowth-product-context.md`
 - **Desvios detectados**:
   - `reclamos`: para score 85 el contexto define `<0.5`, el benchmark actual usa tramo hasta `0.8`.
-  - `pubs_activas_pct`: contexto define score 85 para `>65`, pero el score en `lib/scoring.ts` usa umbrales de otra escala (`platinum 95`, `solid 85`).
+  - `pubs_activas_pct`: contexto define score 85 para `>65`, pero el score en `lib/scoring/block-calculations.ts` usa umbrales de otra escala (`platinum 95`, `solid 85`).
   - `roas`: contexto define 100 en `>8x`; scoring usa platinum en `10`.
 - **Impacto**: la cuenta puede tener score de bloque y recomendacion con lectura contradictoria.
 

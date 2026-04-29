@@ -131,7 +131,7 @@ type MLDiagnosticPrefill = {
 En `app/(operator)/operator/clients/[id]/diagnostic/new/actions.ts`:
 - ¿Todos los campos del formulario se mapean a columnas de la tabla `diagnostics`?
 - ¿Los scores de cada bloque se calculan antes de persistir?
-- ¿El `score_global` se calcula con la función de `lib/scoring.ts`?
+- ¿El `score_global` se calcula con las funciones del módulo `lib/scoring/`?
 - ¿El `source` se setea correctamente (`'manual'` si es manual, `'scraping'` si viene del pipeline)?
 - ¿El `data_sources` del prefill se guarda en algún campo para auditoría?
 
@@ -459,7 +459,7 @@ describe('Cadena completa — de ML a recomendaciones', () => {
   describe('Eslabón 3-4: Formulario → Supabase', () => {
     it('el action de diagnóstico calcula score_global antes de persistir', async () => {
       const formData = createMockDiagnostic()
-      // El score_global tiene que ser calculado por lib/scoring.ts
+      // El score_global tiene que ser calculado por el módulo lib/scoring/
       // no puede venir del formulario directamente
       const result = await saveDiagnosticAction(formData)
       if (result.success) {

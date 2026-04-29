@@ -7,7 +7,13 @@ import { getAccountHealthWithDelta, listAccountHealthByAccount } from "@/lib/dat
 import { getCompanyById } from "@/lib/data-v2/companies";
 import { getLatestMetricSnapshotByAccount, listMetricSnapshotsByAccount } from "@/lib/data-v2/metric-snapshots";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
-import { calcAdsScore, calcLogisticaScore, calcPublicacionesScore, calcSaludScore, calcStockScore } from "@/lib/scoring";
+import {
+  calcAdsScoreFromMetricSnapshot,
+  calcLogisticaScoreFromSnapshot,
+  calcPublicacionesScoreFromSnapshot,
+  calcSaludScoreFromSnapshot,
+  calcStockScoreFromSnapshot
+} from "@/lib/scoring";
 import { getScoreLabel } from "@/lib/utils/scores";
 
 const BLOCK_CONFIG = {
@@ -285,42 +291,16 @@ function computeBlockScoreFromSnapshot(
   }
 ) {
   if (block === "salud") {
-    return calcSaludScore({
-      reclamos: Number(snapshot.reclamos ?? 0),
-      mediaciones: Number(snapshot.mediaciones ?? 0),
-      cancelaciones_vendedor: Number(snapshot.cancelaciones_vendedor ?? 0),
-      envios_a_tiempo: Number(snapshot.envios_a_tiempo ?? 0)
-    });
+    return calcSaludScoreFromSnapshot(snapshot);
   }
   if (block === "publicaciones") {
-    return calcPublicacionesScore({
-      pubs_activas_pct: Number(snapshot.pubs_activas_pct ?? 0),
-      pubs_optimizadas_pct: Number(snapshot.pubs_optimizadas_pct ?? 0),
-      ctr: Number(snapshot.ctr ?? 0)
-    });
+    return calcPublicacionesScoreFromSnapshot(snapshot);
   }
   if (block === "ads") {
-    return calcAdsScore({
-      margen_pre_ads: Number(snapshot.margen_pre_ads ?? 0),
-      gasto_ads: Number(snapshot.gasto_ads ?? 0),
-      ventas_ads: Number(snapshot.ventas_ads ?? 0),
-      ventas_totales: Number(snapshot.ventas_totales ?? 0),
-      acos: Number(snapshot.acos ?? 0),
-      roas: Number(snapshot.roas ?? 0),
-      tacos: Number(snapshot.tacos ?? 0)
-    });
+    return calcAdsScoreFromMetricSnapshot(snapshot);
   }
   if (block === "logistica") {
-    return calcLogisticaScore({
-      incidencias_pct: Number(snapshot.incidencias_pct ?? 0),
-      uso_full_flex_pct: Number(snapshot.uso_full_flex_pct ?? 0),
-      cancelaciones_stock_pct: Number(snapshot.cancelaciones_stock_pct ?? 0)
-    });
+    return calcLogisticaScoreFromSnapshot(snapshot);
   }
-  return calcStockScore({
-    skus_sin_stock_pct: Number(snapshot.skus_sin_stock_pct ?? 0),
-    dias_stock: Number(snapshot.dias_stock ?? 0),
-    lead_time_reposicion: Number(snapshot.lead_time_reposicion ?? 0),
-    sistema_reposicion: Number(snapshot.sistema_reposicion ?? 0)
-  });
+  return calcStockScoreFromSnapshot(snapshot);
 }

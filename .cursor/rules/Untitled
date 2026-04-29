@@ -95,7 +95,7 @@ export function validateEnv() {
 ## Dimensión 2 — Integridad de datos de negocio [ALTA PRIORIDAD]
 
 ### 2.1 Lógica de scoring
-El motor de scoring en `lib/scoring.ts` es el corazón del negocio. Verificás:
+El motor de scoring en el módulo `lib/scoring/` es el corazón del negocio. Verificás:
 - Los pesos de los 5 bloques suman exactamente 100%: Salud(35) + Pubs(20) + Ads(20) + Logística(15) + Stock(10) = 100
 - El cap inteligente de Salud funciona: score < 40 → cap 55, score 40-54 → cap 72
 - El score global nunca supera 100 ni baja de 0

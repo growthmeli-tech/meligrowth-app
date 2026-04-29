@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { calcAdsScore, calcLogisticaScore, calcPublicacionesScore, calcSaludScore, calcStockScore } from "@/lib/scoring";
+import {
+  calcAdsScoreFromMetricSnapshot,
+  calcLogisticaScoreFromSnapshot,
+  calcPublicacionesScoreFromSnapshot,
+  calcSaludScoreFromSnapshot,
+  calcStockScoreFromSnapshot,
+  metricSnapshotFromManualFormValues
+} from "@/lib/scoring/metric-snapshot";
 import { getScoreLabel, getScoreTailwind } from "@/lib/utils/scores";
 
 type BlockScoreRealtimeProps = {
@@ -34,52 +41,24 @@ export function BlockScoreRealtime({ bloque, metricas, peso }: BlockScoreRealtim
   );
 }
 
-function safe(metricas: Record<string, number | null>, key: string) {
-  return metricas[key] ?? 0;
-}
-
 function computeBlockScore(bloque: BlockScoreRealtimeProps["bloque"], metricas: Record<string, number | null>) {
+  const snap = metricSnapshotFromManualFormValues(metricas);
+
   if (bloque === "01_salud") {
-    return calcSaludScore({
-      reclamos: safe(metricas, "reclamos"),
-      mediaciones: safe(metricas, "mediaciones"),
-      cancelaciones_vendedor: safe(metricas, "cancelaciones_vendedor"),
-      envios_a_tiempo: safe(metricas, "envios_a_tiempo")
-    });
+    return calcSaludScoreFromSnapshot(snap);
   }
 
   if (bloque === "02_publicaciones") {
-    return calcPublicacionesScore({
-      pubs_activas_pct: safe(metricas, "pubs_activas_pct"),
-      pubs_optimizadas_pct: safe(metricas, "pubs_optimizadas_pct"),
-      ctr: safe(metricas, "ctr")
-    });
+    return calcPublicacionesScoreFromSnapshot(snap);
   }
 
   if (bloque === "03_ads") {
-    return calcAdsScore({
-      margen_pre_ads: safe(metricas, "margen_pre_ads"),
-      gasto_ads: safe(metricas, "gasto_ads"),
-      ventas_ads: safe(metricas, "ventas_ads"),
-      ventas_totales: safe(metricas, "ventas_totales"),
-      acos: safe(metricas, "acos"),
-      roas: safe(metricas, "roas"),
-      tacos: safe(metricas, "tacos")
-    });
+    return calcAdsScoreFromMetricSnapshot(snap);
   }
 
   if (bloque === "04_logistica") {
-    return calcLogisticaScore({
-      incidencias_pct: safe(metricas, "incidencias_pct"),
-      uso_full_flex_pct: safe(metricas, "uso_full_flex_pct"),
-      cancelaciones_stock_pct: safe(metricas, "cancelaciones_stock_pct")
-    });
+    return calcLogisticaScoreFromSnapshot(snap);
   }
 
-  return calcStockScore({
-    skus_sin_stock_pct: safe(metricas, "skus_sin_stock_pct"),
-    dias_stock: safe(metricas, "dias_stock"),
-    lead_time_reposicion: safe(metricas, "lead_time_reposicion"),
-    sistema_reposicion: safe(metricas, "sistema_reposicion")
-  });
+  return calcStockScoreFromSnapshot(snap);
 }

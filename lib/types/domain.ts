@@ -186,7 +186,8 @@ export type PricingTemplateFile = {
 
 export type ScrapingJobSummary = {
   id: string;
-  clientId: string;
+  clientId: string | null;
+  mlAccountId?: string | null;
   tipo: ScrapingType;
   estado: ScrapingJobStatus;
   errorMsg?: string | null;

@@ -23,14 +23,15 @@ export default async function BrandDashboardPage() {
   }
 
   const alertsResult = await listAlertsByAccount(account.id, { audience: "manager", includeResolved: false, limit: 5 });
-  const alerts: Array<{ client_name: string; client_id: string; message: string; priority: "urgente" | "alta" }> = alertsResult.success
-    ? alertsResult.data.map((alert) => ({
-        client_name: account.account_name,
-        client_id: account.company_id,
-        message: alert.titulo,
-        priority: alert.prioridad === "urgente" ? "urgente" : "alta"
-      }))
-    : [];
+  const alerts: Array<{ client_name: string; client_id: string; message: string; priority: "urgente" | "alta" | "media" | "baja" }> =
+    alertsResult.success
+      ? alertsResult.data.map((alert) => ({
+          client_name: account.account_name,
+          client_id: account.company_id,
+          message: alert.titulo,
+          priority: alert.prioridad
+        }))
+      : [];
 
   const { current, delta } = healthResult.data;
 
@@ -46,7 +47,7 @@ export default async function BrandDashboardPage() {
       </section>
 
       <section>
-        <AlertBanner alerts={alerts} />
+        <AlertBanner alerts={alerts} alertsHref={null} linkAlertItems={false} />
       </section>
 
       <Link href="/brand/metrics" className="inline-flex bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">

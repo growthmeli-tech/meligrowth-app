@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { benchmarkToObjective, getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
 import type { RecommendationCategory } from "@/lib/recommendations/types";
 import { calcScore } from "@/lib/scoring";
+import { INCOMPLETE_MANDATORY_METRIC_SCORE, isOptionalManualMetricField } from "@/lib/scoring/metric-semantics";
 import { getScoreLabel } from "@/lib/utils/scores";
 import { DESIGN_TOKENS, type ScoreStatusKey } from "@/lib/config/design-tokens";
 
@@ -51,7 +52,9 @@ export function DiagnosticFieldBenchmark({
   error = null
 }: DiagnosticFieldBenchmarkProps) {
   const [draftValue, setDraftValue] = useState(value === null ? "" : String(value));
-  const [score, setScore] = useState(() => calcScore(metrica, value ?? 0));
+  const [score, setScore] = useState<number | null>(() =>
+    value === null ? null : calcScore(metrica, value)
+  );
   const [showAction, setShowAction] = useState(false);
 
   useEffect(() => {
@@ -61,15 +64,19 @@ export function DiagnosticFieldBenchmark({
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       const parsed = Number(draftValue);
-      const nextValue = draftValue.trim() === "" || Number.isNaN(parsed) ? 0 : parsed;
+      const nextValue = draftValue.trim() === "" || Number.isNaN(parsed) ? null : parsed;
+      if (nextValue === null) {
+        setScore(isOptionalManualMetricField(metrica) ? null : INCOMPLETE_MANDATORY_METRIC_SCORE);
+        return;
+      }
       setScore(calcScore(metrica, nextValue));
     }, 300);
 
     return () => clearTimeout(timeoutId);
   }, [draftValue, metrica]);
 
-  const status = getStatusFromScore(score);
-  const scoreTone = DESIGN_TOKENS.score[status as ScoreStatusKey];
+  const status = score === null ? ("neutral" as const) : getStatusFromScore(score);
+  const scoreTone = score === null ? { color: "#6B6B6B" } : DESIGN_TOKENS.score[status as ScoreStatusKey];
   const category = METRIC_CATEGORY[metrica];
   const benchmark = category ? getBenchmarkDefinition(category, metrica) : null;
   const benchmarkLine = benchmark ? buildBenchmarkText(benchmark.levels) : "Sin benchmark definido";
@@ -112,6 +119,8 @@ export function DiagnosticFieldBenchmark({
 
       {draftValue.trim() === "" ? (
         <p className="text-xs text-[#6B6B6B]">Ingresa un valor para comparar con benchmark</p>
+      ) : score === null ? (
+        <p className="text-xs text-[#6B6B6B]">Sin valor — benchmark cuando cargues dato</p>
       ) : (
         <>
           <p className="text-sm font-medium" style={{ color: scoreTone.color }}>

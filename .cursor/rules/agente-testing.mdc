@@ -951,7 +951,7 @@ coverage: {
 ```
 
 **Umbrales mínimos por archivo crítico:**
-- `lib/scoring.ts` → 95% de cobertura
+- `lib/scoring/**` → 95% de cobertura (módulo completo)
 - `lib/recommendations/engine.ts` → 90% de cobertura
 - `lib/ml/pipeline.ts` → 85% de cobertura
 - `lib/ml/auth.ts` → 85% de cobertura
@@ -995,7 +995,7 @@ Si durante la escritura de tests detectás un bug, lo documentás en `docs/bugs-
 
 1. Todos los archivos de test creados en su lugar correcto
 2. `npm run test` pasa sin errores
-3. Cobertura de `lib/scoring.ts` ≥ 95%
+3. Cobertura del módulo `lib/scoring/` ≥ 95%
 4. Cobertura de `lib/recommendations/engine.ts` ≥ 90%
 5. Cobertura de `lib/ml/pipeline.ts` ≥ 85%
 6. `docs/testing-cambios.md` — lista de archivos creados y propósito

@@ -20,7 +20,7 @@ export default async function OpsAlertsPage({
     : "all";
 
   const accountResult = await getPrimaryAccountForOperator();
-  if (!accountResult.success || !accountResult.data) return <EmptyState context="recomendaciones" />;
+  if (!accountResult.success || !accountResult.data) return <EmptyState context="cuenta" />;
   const account = accountResult.data;
 
   const alertsResult = await listAlertsByAccount(account.id, { audience: "operator", includeResolved: false, limit: 30 });

@@ -4,6 +4,7 @@ import { ACCIONES_POR_METRICA } from "@/lib/recommendations/actions";
 import { analyzeAds } from "@/lib/recommendations/ads-analyzer";
 import { benchmarkToObjective, getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
 import { getPrioridadRecomendacion, sortByPriority } from "@/lib/recommendations/priorities";
+import { buildOperationalRecommendations } from "@/lib/recommendations/operational-signals";
 import { getScoreStatus, getStrategyForScore } from "@/lib/recommendations/score-interpreter";
 import type { DiagnosticRecommendations, MetricInput, Recommendation, RecommendationAudience, RecommendationCategory } from "@/lib/recommendations/types";
 
@@ -39,22 +40,30 @@ export type RecommendationsDiagnosticInput = Pick<
   | "score_stock"
 >;
 
-const METRIC_INPUTS: Array<Omit<MetricInput, "valor"> & { source: keyof RecommendationsDiagnosticInput }> = [
+type MetricInputRow = Omit<MetricInput, "valor"> & {
+  source: keyof RecommendationsDiagnosticInput;
+  /** Zona B (doc producto): null = dato no cargado / no aplica — no castigar. */
+  optionalZonaB?: boolean;
+  /** No interpretar ACOS/ROAS sin gasto o ventas atribuibles a Ads (evita “ACOS 0 = óptimo”). */
+  requiereAdsActividad?: boolean;
+};
+
+const METRIC_INPUTS: MetricInputRow[] = [
   { campo: "reclamos", categoria: "salud", peso: 0.3, source: "reclamos" },
   { campo: "mediaciones", categoria: "salud", peso: 0.25, source: "mediaciones" },
   { campo: "cancelaciones_vendedor", categoria: "salud", peso: 0.25, source: "cancelaciones_vendedor" },
   { campo: "envios_a_tiempo", categoria: "salud", peso: 0.2, source: "envios_a_tiempo" },
   { campo: "pubs_activas_pct", categoria: "publicaciones", peso: 0.4, source: "pubs_activas_pct" },
-  { campo: "pubs_optimizadas_pct", categoria: "publicaciones", peso: 0.35, source: "pubs_optimizadas_pct" },
-  { campo: "ctr", categoria: "publicaciones", peso: 0.25, source: "ctr" },
-  { campo: "acos", categoria: "ads", peso: 0.45, source: "acos" },
-  { campo: "roas", categoria: "ads", peso: 0.3, source: "roas" },
+  { campo: "pubs_optimizadas_pct", categoria: "publicaciones", peso: 0.35, source: "pubs_optimizadas_pct", optionalZonaB: true },
+  { campo: "ctr", categoria: "publicaciones", peso: 0.25, source: "ctr", optionalZonaB: true },
+  { campo: "acos", categoria: "ads", peso: 0.45, source: "acos", requiereAdsActividad: true },
+  { campo: "roas", categoria: "ads", peso: 0.3, source: "roas", requiereAdsActividad: true },
   { campo: "incidencias_pct", categoria: "logistica", peso: 0.4, source: "incidencias_pct" },
   { campo: "uso_full_flex_pct", categoria: "logistica", peso: 0.3, source: "uso_full_flex_pct" },
   { campo: "cancelaciones_stock_pct", categoria: "logistica", peso: 0.3, source: "cancelaciones_stock_pct" },
   { campo: "skus_sin_stock_pct", categoria: "stock", peso: 0.4, source: "skus_sin_stock_pct" },
-  { campo: "dias_stock", categoria: "stock", peso: 0.35, source: "dias_stock" },
-  { campo: "lead_time_reposicion", categoria: "stock", peso: 0.25, source: "lead_time_reposicion" }
+  { campo: "dias_stock", categoria: "stock", peso: 0.35, source: "dias_stock", optionalZonaB: true },
+  { campo: "lead_time_reposicion", categoria: "stock", peso: 0.25, source: "lead_time_reposicion", optionalZonaB: true }
 ];
 
 const BLOQUE_LABEL: Record<RecommendationCategory, string> = {
@@ -113,14 +122,32 @@ function getAudienciaRecomendacion(input: {
   return "all";
 }
 
-export function generateRecommendations(diagnostic: RecommendationsDiagnosticInput): DiagnosticRecommendations {
+export type GenerateRecommendationsOptions = {
+  /** Origen por bloque (p. ej. api vs unavailable) — pipeline v2 */
+  data_sources?: Record<string, string>;
+};
+
+function meaningfulAdsActivity(diagnostic: RecommendationsDiagnosticInput): boolean {
+  return (
+    (typeof diagnostic.gasto_ads === "number" && diagnostic.gasto_ads > 0) ||
+    (typeof diagnostic.ventas_ads === "number" && diagnostic.ventas_ads > 0)
+  );
+}
+
+export function generateRecommendations(
+  diagnostic: RecommendationsDiagnosticInput,
+  options?: GenerateRecommendationsOptions
+): DiagnosticRecommendations {
   const recomendaciones: Recommendation[] = [];
   const globalStatus = getScoreStatus(diagnostic.score_global);
   const estrategia = getStrategyForScore(diagnostic.score_global);
+  const meaningfulAds = meaningfulAdsActivity(diagnostic);
 
   for (const metric of METRIC_INPUTS) {
     const raw = diagnostic[metric.source];
+    if (metric.optionalZonaB && (raw === null || raw === undefined)) continue;
     if (typeof raw !== "number") continue;
+    if (metric.requiereAdsActividad && !meaningfulAds) continue;
 
     const scoreMetrica = calcScore(metric.campo, raw);
     const status = getStatusFromScore(scoreMetrica);
@@ -169,7 +196,11 @@ export function generateRecommendations(diagnostic: RecommendationsDiagnosticInp
       })
     : null;
 
-  if (adsAnalysis && adsAnalysis.estado_salud !== "sin_datos") {
+  if (
+    adsAnalysis &&
+    adsAnalysis.estado_salud !== "sin_datos" &&
+    adsAnalysis.estado_salud !== "sin_campanas"
+  ) {
     const prioridad = adsAnalysis.estado_salud === "critico" ? "urgente" : adsAnalysis.estado_salud === "aceptable" ? "alta" : "media";
     recomendaciones.push({
       id: `${diagnostic.id}-ads-analysis`,
@@ -190,14 +221,34 @@ export function generateRecommendations(diagnostic: RecommendationsDiagnosticInp
     });
   }
 
+  const operativas = buildOperationalRecommendations({
+    diagnostic: {
+      id: diagnostic.id,
+      score_stock: diagnostic.score_stock,
+      score_publicaciones: diagnostic.score_publicaciones,
+      pubs_activas_pct: diagnostic.pubs_activas_pct,
+      pubs_optimizadas_pct: diagnostic.pubs_optimizadas_pct,
+      ctr: diagnostic.ctr,
+      skus_sin_stock_pct: diagnostic.skus_sin_stock_pct,
+      dias_stock: diagnostic.dias_stock,
+      margen_pre_ads: diagnostic.margen_pre_ads,
+      gasto_ads: diagnostic.gasto_ads,
+      ventas_totales: diagnostic.ventas_totales
+    },
+    adsAnalysis,
+    meaningfulAds,
+    data_sources: options?.data_sources
+  });
+
   return {
     client_id: diagnostic.client_id,
     diagnostic_id: diagnostic.id,
     score_global: diagnostic.score_global,
     estado_global: globalStatus,
     estrategia_general: estrategia.accion,
-    recomendacion_ads: adsAnalysis?.recomendacion ?? estrategia.ads,
-    recomendaciones: sortByPriority(recomendaciones),
+    recomendacion_ads:
+      adsAnalysis && adsAnalysis.estado_salud !== "sin_datos" ? adsAnalysis.recomendacion : estrategia.ads,
+    recomendaciones: sortByPriority([...recomendaciones, ...operativas]),
     bloques_criticos: getCriticalBlocks(diagnostic),
     bloques_saludables: getHealthyBlocks(diagnostic),
     generated_at: new Date().toISOString()

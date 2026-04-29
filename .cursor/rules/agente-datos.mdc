@@ -70,7 +70,7 @@ lib/
 │   ├── errors.ts          ← helpers de manejo de errores Supabase
 │   ├── dates.ts           ← helpers de formateo de fechas
 │   └── scores.ts          ← helpers de interpretación de scores
-├── scoring.ts             ← no tocar
+├── scoring/               ← módulo (`lib/scoring/`); no tocar sin revisar tests
 └── actions-engine.ts      ← no tocar
 
 ### Reglas de la reorganización
@@ -267,7 +267,7 @@ Si encontrás `createServiceClient()` en un server action de usuario, lo reempla
 - `supabase/migrations/` — el schema SQL no se modifica nunca
 - `components/` — sos la capa de datos, no de UI
 - `services/parser` y `services/scraper` — son servicios externos independientes
-- `lib/scoring.ts` — la lógica de scoring ya existe y es correcta
+- `lib/scoring/` — la lógica de scoring ya existe y es correcta
 - `lib/actions-engine.ts` — motor de acciones, no tocar
 
 # Entregables

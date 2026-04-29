@@ -17,16 +17,22 @@ vi.mock("@/lib/supabase/config", () => ({
 vi.mock("@/lib/supabase/server", () => ({
   createServerSupabaseClient: vi.fn()
 }));
-vi.mock("@/lib/diagnostics/persist-diagnostic", () => ({
-  persistDiagnostic: vi.fn()
+vi.mock("@/lib/data-v2/metric-snapshots", () => ({
+  createMetricSnapshot: vi.fn()
+}));
+vi.mock("@/lib/recommendations/pipeline-v2", () => ({
+  runRecommendationsPipelineV2: vi.fn()
 }));
 
 import { createDiagnostic } from "@/app/(internal)/internal/clients/[id]/diagnostic/new/actions";
+import { createMockAccountHealth, createMockMetricSnapshot } from "@/tests/helpers/factories";
+import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
+import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
+import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import { getDiagnosticHistory, getDiagnosticWithDelta, getEstadoSimpleParaCliente } from "@/lib/data/diagnostics";
 import { getClientRecommendations } from "@/lib/data/recommendations";
 import { generateRecommendations } from "@/lib/recommendations/engine";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { persistDiagnostic } from "@/lib/diagnostics/persist-diagnostic";
 
 function createFormData() {
   const formData = new FormData();
@@ -84,19 +90,57 @@ describe("Cadena completa de integracion", () => {
   });
 
   describe("Eslabones 2 y 4: Formulario -> Supabase -> Motor", () => {
-    it("createDiagnostic retorna diagnostic y recomendaciones", async () => {
+    it("createDiagnostic retorna diagnostic y recomendaciones (v2)", async () => {
       vi.mocked(createServerSupabaseClient).mockResolvedValue(
         createSupabaseMock({ authUser: { id: "user-operator-1" } }) as never
       );
-      vi.mocked(persistDiagnostic).mockResolvedValue({
-        ok: true,
-        diagnostic: createMockDiagnostic()
-      } as never);
+      vi.mocked(createMetricSnapshot).mockResolvedValue({
+        success: true,
+        data: createMockMetricSnapshot({ id: "snapshot-chain-1", ml_account_id: "ml-account-1" })
+      });
+      const chainRecs: DiagnosticRecommendations = {
+        client_id: "company-1",
+        diagnostic_id: "health-chain-1",
+        score_global: 63,
+        estado_global: "en_riesgo",
+        estrategia_general: "Test",
+        recomendacion_ads: "OK",
+        recomendaciones: [
+          {
+            id: "rec-1",
+            titulo: "T1",
+            descripcion: "D",
+            accion_concreta: "A",
+            prioridad: "alta",
+            categoria: "ads",
+            metrica_afectada: "acos",
+            impacto_estimado: "medio",
+            benchmark_objetivo: "mejorar",
+            audiencia: "operator",
+            bloque: "03 Ads"
+          }
+        ],
+        bloques_criticos: [],
+        bloques_saludables: [],
+        generated_at: new Date().toISOString()
+      };
+      vi.mocked(runRecommendationsPipelineV2).mockResolvedValue({
+        success: true,
+        data: {
+          account_health: createMockAccountHealth({
+            id: "health-chain-1",
+            ml_account_id: "ml-account-1",
+            snapshot_id: "snapshot-chain-1"
+          }),
+          recommendations: chainRecs,
+          persisted_alerts_count: 0
+        }
+      });
 
-      const result = await createDiagnostic("client-1", createFormData());
+      const result = await createDiagnostic("company-1", "ml-account-1", createFormData());
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.diagnostic.client_id).toBe("client-1");
+        expect(result.data.diagnostic.id).toBe("health-chain-1");
         expect(Array.isArray(result.data.recommendations.recomendaciones)).toBe(true);
       }
     });

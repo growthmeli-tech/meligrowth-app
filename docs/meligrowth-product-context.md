@@ -13,7 +13,7 @@ Antes de escribir **cualquier línea de código**, el agente debe:
 2. **Verificar en qué fase está el trabajo** → Sección 15 (Roadmap).
 3. **Para cada función nueva**, verificar:
    - ¿La lógica de negocio pertenece a `lib/`? → Sí → va en `lib/`. Nunca en el frontend.
-   - ¿Involucra scoring? → Solo en `lib/scoring.ts`.
+   - ¿Involucra scoring? → Solo en el módulo `lib/scoring/` (entrada `lib/scoring/index.ts`).
    - ¿Involucra permisos de ruta? → Solo en `middleware.ts`.
    - ¿Involucra constantes del negocio? → Solo en `lib/config/constants.ts`.
 4. **Antes de crear una ruta nueva**, verificar que no existe ya en Sección 9.
@@ -42,7 +42,7 @@ Antes de escribir **cualquier línea de código**, el agente debe:
 
 **Flujo de valor (pipeline unidireccional):**
 ```
-Data Sources → metric_snapshots → scoring (lib/scoring.ts) → account_health → alerts → tasks → Vistas
+Data Sources → metric_snapshots → scoring (`lib/scoring/`) → account_health → alerts → tasks → Vistas
 ```
 Cada flecha es una responsabilidad separada. Nunca saltear pasos.
 
@@ -155,8 +155,9 @@ access_type: 'manager' | 'operator' | 'internal'
 
 ## 5. SISTEMA DE SCORING — MOTOR CENTRAL
 
-> ⛔ **Todo el scoring vive en `lib/scoring.ts`. NUNCA duplicar esta lógica.**  
-> ⛔ **El frontend NUNCA recalcula. Solo consume `account_health`.**
+> ⛔ **Todo el scoring vive en el módulo `lib/scoring/`** (barrel `lib/scoring/index.ts`; núcleo en `block-calculations.ts`, semántica snapshot en `metric-semantics.ts` / `metric-snapshot.ts`). **NUNCA duplicar esta lógica.**  
+> ⛔ **El frontend NUNCA recalcula. Solo consume `account_health`.**  
+> En snapshots, **`null` (ausencia) ≠ `0` (valor numérico)** — ver `docs/estado-actual-ops.md` §8.2.
 
 ### Bloques y pesos exactos
 
@@ -299,6 +300,8 @@ function calculateGlobalScore(blocks: BlockScores): number {
 }
 ```
 
+**Nota:** el pseudocódigo resume pesos y redistribución; la implementación ejecutable y la semántica `null`/`0` en métricas obligatorias vs opcionales están en `lib/scoring/` (`block-calculations`, `metric-semantics`, `metric-snapshot`). Si diverge de esta sección, prevalece el código.
+
 ---
 
 ## 6. CALCULADORA DE PRECIOS ML
@@ -364,7 +367,7 @@ export const ML_CONFIG = {
 [1] EXTRACCIÓN     lib/ml/pipeline.ts — orquesta los 5 bloques
 [2] NORMALIZACIÓN  → metric_snapshots (foto diaria, datos crudos)
 [3] PERSISTENCIA   → account_health (resultado del scoring, separado para poder recalcular)
-[4] SCORING        lib/scoring.ts — NUNCA en el frontend
+[4] SCORING        lib/scoring/ — NUNCA en el frontend
 [5] ALERTAS        lib/recommendations/engine.ts → alerts + tasks
 [6] VISUALIZACIÓN  Las 3 vistas consumen datos ya procesados
 ```
@@ -785,7 +788,7 @@ ML_REDIRECT_URI     # https://dominio.vercel.app/api/ml/auth/callback
 
 ```
 ¿Es lógica de negocio?
-  ├─ Sí → ¿Es scoring?         → lib/scoring.ts
+  ├─ Sí → ¿Es scoring?         → lib/scoring/
   │        ¿Es pricing?         → lib/pricing/calculator.ts
   │        ¿Son alertas?        → lib/recommendations/engine.ts
   │        ¿Son benchmarks?     → lib/recommendations/benchmarks.ts

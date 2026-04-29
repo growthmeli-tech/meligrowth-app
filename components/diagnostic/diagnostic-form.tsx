@@ -9,11 +9,16 @@ import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-rep
 import { ScoreDisplay } from "@/components/score/score-display";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { scoreDiagnostic } from "@/lib/scoring";
 import type { MlDataSource } from "@/lib/ml/mappers/types";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import type { ActionResult } from "@/lib/types/api";
-import type { BlockKey, Diagnostic, DiagnosticInput } from "@/lib/types";
+import type { BlockKey } from "@/lib/types";
+import {
+  hasAdsSnapshotDataForManualForm,
+  metricSnapshotFromManualFormValues,
+  scoreDiagnosticFromMetricSnapshot,
+  type ManualFormMetricKey
+} from "@/lib/scoring/metric-snapshot";
 
 type MetricField = {
   label: string;
@@ -65,81 +70,34 @@ const fields: MetricField[] = [
   { block: "stock", label: "Sistema de reposición", name: "sistema_reposicion", zone: "opcional", hint: "% SKUs con criterio definido." }
 ];
 
-function inputFromDiagnostic(diagnostic: Diagnostic): Record<string, number> {
-  return {
-    reclamos: diagnostic.salud.reclamos,
-    mediaciones: diagnostic.salud.mediaciones,
-    cancelaciones_vendedor: diagnostic.salud.cancelaciones_vendedor,
-    envios_a_tiempo: diagnostic.salud.envios_a_tiempo,
-    pubs_activas_pct: diagnostic.publicaciones.pubs_activas_pct,
-    pubs_optimizadas_pct: diagnostic.publicaciones.pubs_optimizadas_pct,
-    ctr: diagnostic.publicaciones.ctr,
-    margen_pre_ads: diagnostic.ads.margen_pre_ads,
-    gasto_ads: diagnostic.ads.gasto_ads,
-    ventas_ads: diagnostic.ads.ventas_ads,
-    ventas_totales: diagnostic.ads.ventas_totales,
-    acos: diagnostic.ads.acos,
-    roas: diagnostic.ads.roas,
-    tacos: diagnostic.ads.tacos,
-    incidencias_pct: diagnostic.logistica.incidencias_pct,
-    uso_full_flex_pct: diagnostic.logistica.uso_full_flex_pct,
-    cancelaciones_stock_pct: diagnostic.logistica.cancelaciones_stock_pct,
-    skus_sin_stock_pct: diagnostic.stock.skus_sin_stock_pct,
-    dias_stock: diagnostic.stock.dias_stock,
-    lead_time_reposicion: diagnostic.stock.lead_time_reposicion,
-    sistema_reposicion: diagnostic.stock.sistema_reposicion
-  };
-}
-
-function buildInput(values: Record<string, number | null>): DiagnosticInput {
-  return {
-    salud: {
-      reclamos: values.reclamos ?? 0,
-      mediaciones: values.mediaciones ?? 0,
-      cancelaciones_vendedor: values.cancelaciones_vendedor ?? 0,
-      envios_a_tiempo: values.envios_a_tiempo ?? 0
-    },
-    publicaciones: {
-      pubs_activas_pct: values.pubs_activas_pct ?? 0,
-      pubs_optimizadas_pct: values.pubs_optimizadas_pct ?? 0,
-      ctr: values.ctr ?? 0
-    },
-    ads: {
-      margen_pre_ads: values.margen_pre_ads ?? 0,
-      gasto_ads: values.gasto_ads ?? 0,
-      ventas_ads: values.ventas_ads ?? 0,
-      ventas_totales: values.ventas_totales ?? 0,
-      acos: values.acos ?? 0,
-      roas: values.roas ?? 0,
-      tacos: values.tacos ?? 0
-    },
-    logistica: {
-      incidencias_pct: values.incidencias_pct ?? 0,
-      uso_full_flex_pct: values.uso_full_flex_pct ?? 0,
-      cancelaciones_stock_pct: values.cancelaciones_stock_pct ?? 0
-    },
-    stock: {
-      skus_sin_stock_pct: values.skus_sin_stock_pct ?? 0,
-      dias_stock: values.dias_stock ?? 0,
-      lead_time_reposicion: values.lead_time_reposicion ?? 0,
-      sistema_reposicion: values.sistema_reposicion ?? 0
-    }
-  };
-}
-
 function warningsFor(values: Record<string, number | null>) {
   const warnings: string[] = [];
-  const percentageFields = fields.filter((field) => field.name.includes("_pct") || ["envios_a_tiempo", "pubs_activas_pct", "pubs_optimizadas_pct", "margen_pre_ads", "acos", "tacos", "reclamos", "mediaciones", "cancelaciones_vendedor"].includes(field.name));
+  const percentageFields = fields.filter(
+    (field) =>
+      field.name.includes("_pct") ||
+      ["envios_a_tiempo", "pubs_activas_pct", "pubs_optimizadas_pct", "margen_pre_ads", "acos", "tacos", "reclamos", "mediaciones", "cancelaciones_vendedor"].includes(field.name)
+  );
 
   percentageFields.forEach((field) => {
-    const value = values[field.name] ?? 0;
+    const value = values[field.name];
+    if (value === null || value === undefined) return;
     if (value < 0 || value > 100) warnings.push(`${field.label} debería estar entre 0 y 100.`);
   });
 
-  if ((values.envios_a_tiempo ?? 0) < 90) warnings.push("Envíos a tiempo está por debajo de 90%. Revisar SLA logístico.");
-  if ((values.acos ?? 0) > (values.margen_pre_ads ?? 0) * 0.36) warnings.push("ACOS supera el umbral rentable contra margen pre ads.");
-  if ((values.uso_full_flex_pct ?? 0) < 50) warnings.push("Uso Full/Flex menor a 50%. Hay oportunidad logística.");
-  if ((values.skus_sin_stock_pct ?? 0) > 12) warnings.push("SKUs sin stock por encima de 12%. Riesgo de ventas perdidas.");
+  const envios = values.envios_a_tiempo;
+  if (typeof envios === "number" && envios < 90) warnings.push("Envíos a tiempo está por debajo de 90%. Revisar SLA logístico.");
+
+  const acos = values.acos;
+  const margen = values.margen_pre_ads;
+  if (typeof acos === "number" && typeof margen === "number" && acos > margen * 0.36) {
+    warnings.push("ACOS supera el umbral rentable contra margen pre ads.");
+  }
+
+  const uso = values.uso_full_flex_pct;
+  if (typeof uso === "number" && uso < 50) warnings.push("Uso Full/Flex menor a 50%. Hay oportunidad logística.");
+
+  const skus = values.skus_sin_stock_pct;
+  if (typeof skus === "number" && skus > 12) warnings.push("SKUs sin stock por encima de 12%. Riesgo de ventas perdidas.");
 
   return warnings;
 }
@@ -147,33 +105,35 @@ function warningsFor(values: Record<string, number | null>) {
 export function DiagnosticForm({
   mlAccountId,
   companyId,
-  diagnostic,
+  initialValues,
   action
 }: {
   mlAccountId: string;
   companyId: string;
-  diagnostic: Diagnostic;
+  initialValues: Record<ManualFormMetricKey, number | null>;
   action: (formData: FormData) => Promise<ActionResult<SaveDiagnosticPayload>>;
 }) {
   const [activeTab, setActiveTab] = useState<BlockKey>("salud");
-  const [values, setValues] = useState<Record<string, number | null>>(() => inputFromDiagnostic(diagnostic));
+  const [values, setValues] = useState<Record<string, number | null>>(() => ({ ...initialValues }));
   const [expandedOptional, setExpandedOptional] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMlLoading, setIsMlLoading] = useState(false);
   const [mlMessage, setMlMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [savedResult, setSavedResult] = useState<SaveDiagnosticPayload | null>(null);
-  const [sourceByBlock, setSourceByBlock] = useState<Record<BlockKey, MlDataSource>>(() => {
-    const fallback: MlDataSource = diagnostic.source === "manual" ? "manual" : "scraper";
-    return {
-      salud: fallback,
-      publicaciones: fallback,
-      ads: fallback,
-      logistica: fallback,
-      stock: fallback
-    };
+  const [sourceByBlock, setSourceByBlock] = useState<Record<BlockKey, MlDataSource>>({
+    salud: "manual",
+    publicaciones: "manual",
+    ads: "manual",
+    logistica: "manual",
+    stock: "manual"
   });
-  const scored = useMemo(() => scoreDiagnostic(buildInput(values)), [values]);
+
+  const scored = useMemo(() => {
+    const snap = metricSnapshotFromManualFormValues(values);
+    return scoreDiagnosticFromMetricSnapshot(snap, { hasAdsData: hasAdsSnapshotDataForManualForm(values) });
+  }, [values]);
+
   const warnings = useMemo(() => warningsFor(values), [values]);
   const activeFields = fields.filter((field) => field.block === activeTab);
   const submissionSource = useMemo(() => {

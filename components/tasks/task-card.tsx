@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { OPS_BLOCKS } from "@/lib/ops/copy";
 import { getTaskSteps } from "@/lib/ops/task-steps";
 import { cn } from "@/lib/utils";
 
@@ -74,7 +75,12 @@ export function TaskCard({
   return (
     <article className={cn("bg-white rounded-xl shadow-sm border border-[#E8E8E2] p-4 hover:shadow-sm transition-shadow duration-150", statusClassName)}>
       <div className="flex items-start justify-between gap-2">
-        <p className={cn("text-sm font-semibold", titleClassName)}>{task.title}</p>
+        <div className="min-w-0">
+          <p className={cn("text-sm font-semibold", titleClassName)}>{task.title}</p>
+          {task.category ? (
+            <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-[#6B6B6B]">{formatBlockCategory(task.category)}</p>
+          ) : null}
+        </div>
         <div className="flex items-center gap-2">
           <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold uppercase", priorityClassName)}>{task.priority}</span>
           <p className="text-xs font-semibold uppercase text-[#6B6B6B]">{statusLabel}</p>
@@ -150,4 +156,9 @@ function getPriorityClassName(priority: TaskCardTask["priority"]) {
   if (priority === "alta") return "bg-orange-100 text-orange-700";
   if (priority === "media") return "bg-amber-100 text-amber-700";
   return "bg-blue-100 text-blue-700";
+}
+
+function formatBlockCategory(categoria: string) {
+  const block = OPS_BLOCKS.find((b) => b.key === categoria);
+  return block ? `${block.number} ${block.label}` : categoria.replaceAll("_", " ");
 }

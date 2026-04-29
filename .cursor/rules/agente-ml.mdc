@@ -508,7 +508,7 @@ export function mapAdsToDiagnostic(metrics: { spend: number; ventas_ads: number;
     gasto_ads: metrics.spend,
     ventas_ads: metrics.ventas_ads,
     ventas_totales: metrics.ventas_totales,
-    // ACOS, ROAS, TACOS se calculan en lib/scoring.ts — no acá
+    // ACOS, ROAS, TACOS se derivan en el flujo de scoring (`lib/scoring/`) — no acá
   }
 }
 ```
@@ -978,7 +978,7 @@ Copiar .env.example a .env.local y completar:
 
 # Lo que NO tocás
 - `supabase/migrations/` — el schema ya tiene `meli_sessions` correctamente definido
-- `lib/scoring.ts` — el scoring es independiente de la fuente de datos
+- `lib/scoring/` — el scoring es independiente de la fuente de datos
 - `lib/recommendations/` — el motor de recomendaciones consume los datos ya procesados
 - `components/` — sos la capa de integración, no de UI
 

@@ -7,6 +7,23 @@ export function analyzeAds(input: {
   ventas_totales: number;
 }): AdsAnalysis {
   const { margen_pre_ads, gasto_ads, ventas_ads, ventas_totales } = input;
+
+  /** Sin inversión ni ventas atribuibles a Ads en el período; la cuenta puede estar orgánica — no es “ACOS 0 bueno”. */
+  if (gasto_ads <= 0 && ventas_ads <= 0 && ventas_totales > 0) {
+    return {
+      acos: 0,
+      roas: 0,
+      tacos: 0,
+      roas_minimo: margen_pre_ads > 0 ? 1 / (margen_pre_ads / 100) : 0,
+      diferencial_roas: 0,
+      margen_efectivo: margen_pre_ads,
+      contribucion_neta: 0,
+      estado_salud: "sin_campanas",
+      recomendacion:
+        "Sin campañas activas con gasto o ventas atribuibles en el período (la cuenta vende orgánico). No interpretar métricas de Ads como mal desempeño: evaluar activación puntual en SKUs con margen y stock."
+    };
+  }
+
   if (gasto_ads <= 0 || ventas_ads <= 0 || ventas_totales <= 0) {
     return {
       acos: 0,
@@ -17,7 +34,8 @@ export function analyzeAds(input: {
       margen_efectivo: 0,
       contribucion_neta: 0,
       estado_salud: "sin_datos",
-      recomendacion: "Sin datos de ads suficientes. Activar medicion para tomar decisiones de inversion."
+      recomendacion:
+        "Sin datos de ads suficientes (falta margen, gasto o ventas del período). Completar inputs o conectar integración para medir TACOS y ROAS."
     };
   }
 

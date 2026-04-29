@@ -29,7 +29,7 @@ Se alineo el motor de recomendaciones con el contrato del schema v2 para que pue
 - Se creo `lib/recommendations/pipeline-v2.ts` con `runRecommendationsPipelineV2(...)`.
 - Flujo implementado:
   1. Carga `metric_snapshot` por `ml_account_id` + `metric_snapshot_id`
-  2. Calcula scoring con `lib/scoring.ts`
+  2. Calcula scoring con el módulo `lib/scoring/` (imports vía `lib/scoring/index.ts`)
   3. Persiste `account_health`
   4. Genera recomendaciones con `engine.ts`
   5. Persiste alertas urgentes/altas con `persist.ts`

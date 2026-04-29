@@ -1,4 +1,12 @@
-export type EmptyStateContext = "clientes" | "diagnosticos" | "recomendaciones" | "archivos" | "notificaciones" | "historial" | "tareas";
+export type EmptyStateContext =
+  | "clientes"
+  | "cuenta"
+  | "diagnosticos"
+  | "recomendaciones"
+  | "archivos"
+  | "notificaciones"
+  | "historial"
+  | "tareas";
 
 export type EmptyStateProps = {
   context: EmptyStateContext;
@@ -8,6 +16,12 @@ export type EmptyStateProps = {
 };
 
 const EMPTY_STATE_CONFIG: Record<EmptyStateContext, { icon: string; title: string; description: string; cta: string | null }> = {
+  cuenta: {
+    icon: "🔗",
+    title: "No tenés una cuenta operativa asignada",
+    description: "Necesitás acceso a una cuenta de Mercado Libre para ver el panel. Coordiná con el equipo interno.",
+    cta: null
+  },
   diagnosticos: {
     icon: "🩺",
     title: "No hay diagnosticos para esta cuenta todavia",

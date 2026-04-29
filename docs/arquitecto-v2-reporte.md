@@ -1,107 +1,102 @@
 # Reporte Arquitecto V2
 
-## Sección 1 — Resumen ejecutivo
-- La migración `0004_new_model_360.sql` define correctamente el modelo 360/360 Copilot (3 vistas, 4 roles, entidades nuevas y RLS), pero la app productiva sigue operando casi por completo sobre el schema legacy (`clients`, `diagnostics`, `actions`, `notifications`).
-- La vista `internal` existe y tiene mayor madurez funcional, pero su lógica y datos están alineados al modelo viejo (`operator/client`, planes `starter/growth/scale`) y no al modelo `company/ml_account` con `plan_type`.
-- Las vistas nuevas `brand` y `ops` existen solo como placeholder (`dashboard` estático) y no consumen `account_health`, `alerts` ni `tasks` del nuevo schema.
-- La cadena objetivo `API ML → metric_snapshots → account_health → alerts → tasks → UI` no está implementada end-to-end: hay ingestas y scraping, pero consolidan en `diagnostics` legacy y no en tablas v2.
-- Para habilitar el primer cliente real bajo el modelo 360°/Copilot, el principal bloqueo es la migración funcional de acceso a datos y vistas al schema nuevo, no la infraestructura base de Supabase.
+**Última actualización:** abril 2026 (post mejoras OPS, pipeline v2 y QA local).
 
-## Sección 2 — Estado de las 3 vistas
-| Vista | Ruta | Existe | Conectada a nuevo schema | Gaps críticos |
-|---|---|---|---|---|
-| Internal | `/internal/**` | Sí (`app/(internal)/internal/dashboard/page.tsx`, `app/(internal)/internal/clients/[id]/page.tsx`) | No | Consume `clients/diagnostics/actions` legacy vía `lib/data/dashboard.ts` y `lib/data/clients.ts`; navegación y server actions siguen en namespace `/operator/**` (`components/layout/app-shell.tsx`, múltiples imports a `app/(operator)/...`). |
-| Brand | `/brand/**` | Parcial (`app/(brand)/brand/dashboard/page.tsx`) | No | Solo placeholder estático; no existen `/brand/metrics` ni `/brand/notifications`; no consume `account_health` ni alertas estratégicas. |
-| Ops | `/ops/**` | Parcial (`app/(ops)/ops/dashboard/page.tsx`) | No | Solo placeholder estático; no existen `/ops/alerts`, `/ops/tasks`, `/ops/listings`, `/ops/stock`, `/ops/ads`; no usa `alerts/tasks` v2 ni prioridades del día. |
+**Documento operativo complementario:** `docs/estado-actual-ops.md` — estado consolidado, fuentes de verdad, criterios semánticos y riesgos para agentes. Este reporte retiene la **mirada arquitectónica**; el detalle “qué tocar / qué no” vive allí.
+
+---
+
+## Sección 1 — Resumen ejecutivo
+
+- El schema **0004** (`companies`, `ml_accounts`, `metric_snapshots`, `account_health`, `alerts`, `tasks`, `ingestion_runs`, …) **está en uso** por la aplicación: capa `lib/data-v2/*`, pipeline en `lib/ml/pipeline.ts` + `lib/recommendations/pipeline-v2.ts`, y vistas **internal** (detalle de cliente/company), **brand** (dashboard + métricas) y **ops** (dashboard, alertas, tareas, bloques).
+- La cadena objetivo **`API ML → metric_snapshots → account_health → alerts → (tasks) → UI`** está **implementada para el camino v2** cuando el fetch ML corre con `mlAccountId` y persistencia habilitada; coexisten rutas y datos **legacy** (`clients`, `diagnostics`, OAuth por `client_id`) — ver `docs/estado-actual-ops.md` sección 4.
+- El cuello de botella que motivó trabajo reciente (fuente de verdad percibida, permisos, trazabilidad, semántica Ads, coherencia dato–alerta–tarea–UI) está **parcialmente cerrado en código**; quedan **gaps de permisos de ruta** y **E2E** documentados como riesgos.
+
+---
+
+## Sección 2 — Estado de las 3 vistas (real)
+
+| Vista | Ruta base | Conectada a schema v2 | Notas |
+|-------|-----------|----------------------|--------|
+| Internal | `/internal/**` | **Sí** (detalle company/cuenta: health, snapshots, alertas v2) | Alta/onboarding y flujos históricos pueden seguir tocando legacy; redirección `/operator` → `/internal` en `middleware.ts`. |
+| Brand | `/brand/**` | **Sí** (datos v2 en dashboard/metrics según implementación actual) | Verificar rutas concretas en `app/(brand)/brand/` antes de asumir notificaciones si no existen en el tree. |
+| Ops | `/ops/**` | **Sí** | Dashboard, alertas, tareas, bloques consumen `lib/data-v2/*`. **Restricción middleware:** solo `client_operator` con `ops_access_enabled`; ver deuda en `estado-actual-ops.md`. |
+
+---
 
 ## Sección 3 — Estado de la cadena de datos
-- ✅ **API ML (extracción):** existe integración OAuth y fetch de métricas (`app/api/ml/auth/callback/route.ts`, `lib/ml/pipeline.ts`, `lib/ml/endpoints/*`), con fallback scraper por bloque.
-- ❌ **`metric_snapshots` (normalización):** no hay escrituras a `metric_snapshots`; el código app no usa esa tabla (`rg` en código solo muestra uso de `users_v2`).
-- ❌ **`account_health` (scoring persistido):** no hay persistencia en `account_health`; el scoring se guarda en `diagnostics` legacy (`lib/diagnostics/persist-diagnostic.ts`).
-- ❌ **`alerts` (nuevo modelo):** el motor de recomendaciones devuelve estructuras en memoria (`lib/recommendations/engine.ts`), pero no inserta en tabla `alerts` v2; las notificaciones activas usan `notifications` legacy (`lib/data/notifications.ts`).
-- ❌ **`tasks` (nuevo modelo):** la operación diaria usa `actions` legacy (`app/(internal)/internal/clients/[id]/actions.ts`, `lib/data/clients.ts`), no `tasks`.
-- ⚠️ **UI final por rol:** middleware ya enruta por roles v2 (`middleware.ts`), pero las vistas consumen datos legacy y no la salida de la cadena objetivo.
 
-## Sección 4 — Estado del motor de recomendaciones en el nuevo modelo
-- El motor existe y genera recomendaciones (`lib/recommendations/engine.ts`), pero su input es `diagnostics` (schema viejo), no `metric_snapshots/account_health`.
-- El campo de audiencia en el motor usa `operator | client | both` (`lib/recommendations/types.ts`), mientras la migración 0004 y RLS de `alerts` esperan `internal | manager | operator | all` (`supabase/migrations/0004_new_model_360.sql`).
-- No hay separación efectiva por rol nuevo en persistencia porque no se escriben `alerts` v2; hoy la segmentación real en producto se hace vía `notifications` legacy por `user_id`.
-- La vista manager (`/brand`) no consume recomendaciones estratégicas; la vista operator (`/ops`) tampoco consume recomendaciones operativas reales.
-- Conclusión: motor técnicamente útil, pero no acoplado al contrato de datos y audiencias del modelo 360 v2.
+| Eslabón | Estado |
+|---------|--------|
+| API ML / scraper (`lib/ml/pipeline.ts`) | **Activo**; registra `ingestion_runs`, `blocks_fetched` por bloque con `error_kind` / mensaje; cierra con `_meta.ingestion_quality` (`partial` \| `full`). |
+| `metric_snapshots` | **Escritura activa** vía `createMetricSnapshot` (`lib/data-v2/metric-snapshots.ts`) desde pipeline cuando aplica v2. |
+| `account_health` | **Escritura activa** en `runRecommendationsPipelineV2` (`lib/recommendations/pipeline-v2.ts`). |
+| `alerts` | **Escritura activa** vía `persistRecommendationsAsAlerts` (`lib/recommendations/persist.ts`) con filtro de prioridades y señales cruzadas. |
+| `tasks` | **Lectura/escritura** en OPS e internal; políticas RLS `0005`/`0006`. |
+| UI por rol | **Consume** datos procesados en brand/ops/internal para tramos v2; scoring sigue centralizado en el módulo `lib/scoring/` (sin duplicar en frontend). |
 
-## Sección 5 — Gaps críticos ordenados por impacto
-- **[BLOQUEANTE]** Vista afectada: internal/brand/ops  
-  Descripción: La aplicación de negocio sigue acoplada al schema viejo (`clients/diagnostics/actions`) y no usa las tablas de 0004.  
-  Impacto: No hay operación real sobre el modelo 360 (company/ml_account, audiencias y permisos por cuenta).  
-  Archivo: `lib/data/clients.ts`, `lib/data/dashboard.ts`, `lib/diagnostics/persist-diagnostic.ts`, `lib/supabase/database.types.ts`.
+---
 
-- **[BLOQUEANTE]** Vista afectada: brand/ops  
-  Descripción: Las vistas nuevas están incompletas (solo dashboards estáticos).  
-  Impacto: No se cubren los casos de uso clave para `client_manager` y `client_operator` del primer cliente real.  
-  Archivo: `app/(brand)/brand/dashboard/page.tsx`, `app/(ops)/ops/dashboard/page.tsx`, ausencia de rutas en `app/(brand)/brand/*` y `app/(ops)/ops/*`.
+## Sección 4 — Motor de recomendaciones y modelo v2
 
-- **[CRÍTICO]** Vista afectada: internal  
-  Descripción: Namespace y dependencias de rutas inconsistentes (`/internal` en filesystem, `/operator` en links/imports).  
-  Impacto: Alto riesgo de navegación rota y deuda estructural; dificulta estabilizar permisos y mantenibilidad.  
-  Archivo: `components/layout/app-shell.tsx`, `app/(internal)/internal/*` (imports a `@/app/(operator)/operator/...`).
+- El motor (`lib/recommendations/engine.ts`) recibe contexto enriquecido con **señales operativas** (`operational-signals.ts`) y **análisis Ads** (`ads-analyzer.ts`) alineados a audiencias `internal` \| `manager` \| `operator` \| `all` en `lib/recommendations/types.ts`, coherentes con columna `audiencia` en tabla `alerts` (`0004`).
+- Persistencia selectiva de alertas y enriquecimiento opcional de pasos (Claude) en `pipeline-v2.ts`; columnas `steps` en `0007`.
 
-- **[CRÍTICO]** Vista afectada: ops  
-  Descripción: Regla de acceso Copilot no implementada: `internal_operator_meli_growth` no puede entrar a `/ops/**` por middleware.  
-  Impacto: Incumple comportamiento esperado del plan Copilot para operación diaria.  
-  Archivo: `middleware.ts`.
+---
 
-- **[CRÍTICO]** Vista afectada: internal/brand/ops  
-  Descripción: Modelo de plan no migrado (`starter/growth/scale` vs `360/360_copilot`).  
-  Impacto: No se puede diferenciar correctamente operación 360 vs Copilot en filtros, permisos y experiencia.  
-  Archivo: `app/(internal)/internal/dashboard/page.tsx`, `app/(internal)/internal/clients/new/actions.ts`, `lib/types/domain.ts`.
+## Sección 5 — Gaps ordenados por impacto (actualizados)
 
-- **[IMPORTANTE]** Vista afectada: internal/ops  
-  Descripción: Cadena de ingestión/scraping consolida en `diagnostics` y no en `metric_snapshots/account_health/ingestion_runs`.  
-  Impacto: Sin trazabilidad v2 por eslabón, sin recalculo desacoplado y sin observabilidad de fuentes en modelo nuevo.  
-  Archivo: `lib/scraping/daily-dispatch.ts`, `lib/diagnostics/consolidate-scraping.ts`, `lib/diagnostics/persist-diagnostic.ts`.
+| Severidad | Tema | Archivos / notas |
+|-----------|------|------------------|
+| **Alto** | `internal_operator_meli_growth` (y super_admin) **no** cumplen la matriz producto para `/ops/**` con la regla actual de `middleware.ts`. | `middleware.ts`; comparar con `docs/meligrowth-product-context.md`. |
+| **Alto** | E2E Playwright no validado en entorno sandbox del último QA. | Suite bajo `tests/` según repo. |
+| **Medio** | Convivencia legacy/v2 en OAuth y `client_id` — riesgo de doble mantenimiento si se agregan lecturas fuera de `lib/data-v2`. | `lib/ml/pipeline.ts`, rutas internal settings. |
+| **Medio** | Cuenta “primaria” para operador/manager con múltiples `ml_accounts`. | `lib/data-v2/viewer.ts`. |
+| **Menor** | Documentación de producto (rutas middleware en snippet) puede estar desactualizada vs código. | Actualizar `meligrowth-product-context.md` solo con revisión explícita de producto. |
 
-- **[IMPORTANTE]** Vista afectada: brand/ops  
-  Descripción: Contrato de audiencia de recomendaciones no compatible con `alerts` v2 (`client/both` vs `manager/all`).  
-  Impacto: Aunque se migre persistencia, alertas quedarían mal segmentadas por rol.  
-  Archivo: `lib/recommendations/types.ts`, `lib/recommendations/engine.ts`, `supabase/migrations/0004_new_model_360.sql`.
+Los ítems históricos del reporte 2025 (placeholders brand/ops, “no hay lib/data-v2”, “database.types solo legacy”) **ya no aplican**.
 
-- **[MENOR]** Vista afectada: internal  
-  Descripción: Persisten documentos/tests referenciando rutas legacy `(operator)` que ya no existen físicamente.  
-  Impacto: Ruido operativo y riesgo de regresiones en futuras iteraciones.  
-  Archivo: `tests/integration/*`, `docs/arquitecto-reporte.md`, `docs/ui-cambios.md`.
+---
 
 ## Sección 6 — Compatibilidad schema viejo vs nuevo
-- **Usan schema viejo (activo):** `lib/data/*`, `lib/diagnostics/*`, `lib/files/*`, `lib/ml/*` (cuando persiste), server actions en `app/(internal)` y `app/(client)`, servicios Python (`services/scraper/main.py`) y edge functions (`supabase/functions/process-file/index.ts`) operan sobre `clients`, `diagnostics`, `actions`, `notifications`, `scraping_jobs`, `meli_sessions`.
-- **Usan schema nuevo (parcial):** autenticación/enrutamiento por rol v2 en `middleware.ts`, `app/page.tsx`, `app/(auth)/login/actions.ts` (lectura de `users_v2`).
-- **Definición nueva presente pero no consumida por app:** `companies`, `ml_accounts`, `user_account_access`, `metric_snapshots`, `account_health`, `alerts`, `tasks`, `task_events`, `ingestion_runs` (`supabase/migrations/0004_new_model_360.sql`).
-- **`lib/supabase/database.types.ts`** sigue tipando solo schema legacy; esto bloquea adopción segura de tablas 0004 en código TypeScript.
-- **Conclusión de compatibilidad:** hoy la convivencia es asimétrica: nuevo schema existe en DB/migración, pero el runtime funcional sigue en legacy.
 
-## Sección 7 — Roadmap para los otros agentes
-| Agente | Tarea | Por qué importa | Dependencias |
-|---|---|---|---|
-| Agente Datos | Regenerar `lib/supabase/database.types.ts` y crear capa `lib/data-v2/` sobre tablas 0004 | Sin tipos y repositorios v2 no hay migración segura de vistas ni pipeline | 0004 aplicada y validada en entorno activo |
-| Agente Integrador | Migrar flujo de persistencia: `metric_snapshots` + `account_health` + `alerts` + `tasks` (dejar `diagnostics/actions` en compat temporal) | Habilita cadena end-to-end del producto definido | Capa `data-v2` y contrato de scoring/recomendaciones |
-| Agente Recomendaciones | Ajustar audiencias y salida del motor al contrato v2 (`internal/manager/operator/all`) y persistencia en `alerts` | Permite segmentación correcta por rol y vistas brand/ops | Integrador completó escritura en `alerts` |
-| Agente UI | Completar `/brand/metrics`, `/brand/notifications`, `/ops/alerts`, `/ops/tasks`, `/ops/listings`, `/ops/stock`, `/ops/ads` consumiendo v2 | Cierra valor visible para manager/operator en primer cliente real | Datos v2 y recomendaciones persistidas |
-| Agente Seguridad | Alinear middleware + RLS con reglas Copilot/360 (acceso `/ops` para MG en Copilot según `user_account_access`) | Evita errores de autorización y bloqueos de operación | Datos v2 + definición final de regla de acceso Copilot |
-| Agente Testing | Suite E2E de cadena completa por rol y por plan (360 y Copilot) | Reduce riesgo de go live con regresiones en permisos o pipeline | Integrador, UI y Seguridad completados |
+- **Legacy activo:** OAuth, sesiones, parte de naming `clientId` en pipeline ML, posibles diagnósticos y acciones en flujos no migrados.
+- **v2 activo:** tablas `0004`+ en uso por app; tipos en `lib/supabase/database.types.ts` incluyen entidades v2.
+- **Scraping:** `0008` permite jobs por `ml_account_id` sin `client_id`.
 
-## Sección 8 — Checklist Go Live primer cliente
-- [ ] `users_v2`, `companies`, `ml_accounts` y `user_account_access` poblados para al menos una company real.
-- [ ] Middleware y RLS validados para los 4 roles nuevos en rutas `/internal`, `/brand`, `/ops`.
-- [ ] Ingesta diaria escribe en `metric_snapshots` con `data_sources` y `ingestion_runs`.
-- [ ] Scoring persiste en `account_health` sin recálculo en frontend.
-- [ ] Motor genera y persiste `alerts` con audiencia correcta (`manager` vs `operator` vs `internal`).
-- [ ] Flujo operativo persiste `tasks` y `task_events` con estados y responsables.
-- [ ] `/brand/**` y `/ops/**` completadas con datos reales (no placeholders).
-- [ ] Diferenciación de plan (`360` vs `360_copilot`) visible en permisos y operación diaria.
-- [ ] OAuth ML y storage de tokens cifrados validados en cuenta real.
-- [ ] Monitoreo mínimo activo (health endpoint + alertas de corrida fallida + trazabilidad de ingestion).
+---
 
-## Sección 9 — Preguntas abiertas
-- ¿En plan Copilot, `internal_operator_meli_growth` debe operar exclusivamente en `/internal/**` o también en `/ops/**` con UX de operador?
-- ¿Se mantiene una tabla puente temporal de compatibilidad (`diagnostics/actions`) durante migración, o se corta de forma directa al modelo 0004?
-- ¿El `client_manager` debe ver agregación por `company` (múltiples `ml_accounts`) en `/brand/dashboard` desde el primer release?
-- ¿Cuál es la regla final para asignación de `client_operator` cuando una company tiene múltiples cuentas (`1 operador por cuenta` vs `pool`)?
-- ¿Se requiere backfill histórico desde `diagnostics` legacy hacia `metric_snapshots/account_health` para no perder evolución al migrar?
+## Sección 7 — Roadmap para otros agentes (resumido)
+
+1. **Cerrar gap Copilot `/ops`:** alinear `middleware.ts` y `user_account_access` con reglas de negocio aprobadas.
+2. **E2E por rol:** cuando el entorno permita binarios Playwright, cubrir `/internal`, `/brand`, `/ops`.
+3. **Reducir dualidad legacy/v2:** plan de corte o capa única de entrada para “cuenta activa” y tokens ML.
+4. **Multi-cuenta:** UX y queries explícitas por `ml_account_id` seleccionado.
+
+Detalle de “qué está resuelto / qué no” → `docs/estado-actual-ops.md`.
+
+---
+
+## Sección 8 — Checklist Go Live (ajustado)
+
+- [x] Pipeline que escribe `metric_snapshots` + `account_health` + alertas v2 en flujo ML v2.
+- [x] Trazabilidad `ingestion_runs` con bloques y calidad de corrida en metadata.
+- [x] UI OPS con bloques, null seguro en Ads, badges de fuente.
+- [ ] Middleware y RLS validados para **todos** los casos producto (incl. Copilot en `/ops`).
+- [ ] E2E estable en CI.
+- [ ] Población real `users_v2` / `user_account_access` en producción validada con UAT.
+- [ ] Monitoreo de corridas fallidas en entorno productivo (fuera del alcance de este doc).
+
+---
+
+## Sección 9 — Preguntas abiertas (heredadas; no resueltas en código)
+
+- Regla final de acceso **Copilot** a `/ops` vs solo `/internal`.
+- Mantener o retirar compatibilidad **diagnostics/actions** como fuente paralela.
+- Agregación **multi `ml_account`** en brand desde primer release.
+- Pool de operadores vs **1 operador por cuenta**.
+- **Backfill** histórico legacy → v2 (si se necesita continuidad de series).
+
+---
+
+*Fin del reporte. Para tablas exactas y nombres de columnas, la migración fuente sigue siendo `supabase/migrations/0004_new_model_360.sql` y migraciones posteriores numeradas.*

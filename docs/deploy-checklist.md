@@ -21,7 +21,7 @@
 ## DATOS Y NEGOCIO
 
 - ✅ Pesos de scoring suman 100 en caso normal.
-- ✅ Redistribucion sin Ads implementada en `lib/scoring.ts`.
+- ✅ Redistribucion sin Ads implementada en `lib/scoring/` (`block-calculations`, consumido por pipeline v2).
 - ❌ Benchmarks de `lib/recommendations/benchmarks.ts` no coinciden plenamente con el contexto de producto.
 - ❌ Flujo productivo sigue escribiendo en `diagnostics` legacy; pipeline v2 (`metric_snapshots`/`account_health`) no esta cableado end-to-end.
 - ⚠️ Audiencias de alerta v2 implementadas, pero se persisten solo `urgente/alta`.

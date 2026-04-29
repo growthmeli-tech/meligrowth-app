@@ -153,7 +153,7 @@ Extracción (API ML / scraper / manual)
 ↓
 Normalización (metric_snapshots)
 ↓
-Scoring (account_health via lib/scoring.ts)
+Scoring (account_health vía módulo `lib/scoring/`)
 ↓
 Motor de recomendaciones (lib/recommendations/engine.ts)
 ↓
@@ -169,7 +169,7 @@ Visualización según rol y audiencia
 # El núcleo técnico que NO cambia
 
 Estos módulos son agnósticos del modelo de negocio y siguen intactos:
-- `lib/scoring.ts` — motor de scoring de los 5 bloques
+- `lib/scoring/` — motor modular de scoring de los 5 bloques (entrada `lib/scoring/index.ts`)
 - `lib/recommendations/` — motor de recomendaciones con benchmarks
 - `lib/ml/` — integración con la API oficial de ML
 - `supabase/migrations/0001-0003` — schema base de diagnósticos

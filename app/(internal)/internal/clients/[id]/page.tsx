@@ -270,7 +270,7 @@ async function buildReportData(
     estado_global: String(health.estado_global ?? "critico"),
     score_salud: Number(health.score_salud ?? 0),
     score_publicaciones: Number(health.score_publicaciones ?? 0),
-    score_ads: Number(health.score_ads ?? 0),
+    score_ads: health.score_ads != null ? Number(health.score_ads) : null,
     score_logistica: Number(health.score_logistica ?? 0),
     score_stock: Number(health.score_stock ?? 0),
     alertas: top3.map((alert) => ({
@@ -303,7 +303,7 @@ function emptyReportData(companyName: string, plan: string): DiagnosticReportDat
     estado_global: "sin_diagnostico",
     score_salud: 0,
     score_publicaciones: 0,
-    score_ads: 0,
+    score_ads: null,
     score_logistica: 0,
     score_stock: 0,
     alertas: [],

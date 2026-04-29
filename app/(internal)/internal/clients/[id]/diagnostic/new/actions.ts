@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
 import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import type { DiagnosticReportData } from "@/lib/reports/generate-diagnostic-report";
+import { parseManualNumericInput } from "@/lib/scoring/metric-semantics";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/lib/types/api";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 
 function numberFromForm(formData: FormData, key: string) {
-  const value = Number(formData.get(key));
-  return Number.isFinite(value) ? value : 0;
+  return parseManualNumericInput(formData.get(key));
 }
 
 export async function createDiagnostic(
@@ -106,7 +106,7 @@ export async function createDiagnostic(
     estado_global: String(pipelineResult.data.account_health.estado_global ?? "critico"),
     score_salud: Number(pipelineResult.data.account_health.score_salud ?? 0),
     score_publicaciones: Number(pipelineResult.data.account_health.score_publicaciones ?? 0),
-    score_ads: Number(pipelineResult.data.account_health.score_ads ?? 0),
+    score_ads: pipelineResult.data.account_health.score_ads != null ? Number(pipelineResult.data.account_health.score_ads) : null,
     score_logistica: Number(pipelineResult.data.account_health.score_logistica ?? 0),
     score_stock: Number(pipelineResult.data.account_health.score_stock ?? 0),
     alertas: topRecommendations.map((recommendation) => ({

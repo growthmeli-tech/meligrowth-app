@@ -4,7 +4,7 @@ import { DiagnosticForm } from "@/components/diagnostic/diagnostic-form";
 import { getCompanyById } from "@/lib/data-v2/companies";
 import { getLatestMetricSnapshotByAccount } from "@/lib/data-v2/metric-snapshots";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
-import type { Diagnostic } from "@/lib/types";
+import { initialManualFormValuesFromSnapshot } from "@/lib/scoring/metric-snapshot";
 
 export default async function NewDiagnosticPage({
   params,
@@ -54,7 +54,7 @@ export default async function NewDiagnosticPage({
     mlAccountId: mlAccount.id,
     hasSellerId: Boolean(mlAccount.seller_id)
   });
-  const diagnostic = buildInitialDiagnostic(mlAccount.company_id, latestSnapshotResult.success ? latestSnapshotResult.data : null);
+  const initialFormValues = initialManualFormValuesFromSnapshot(latestSnapshotResult.success ? latestSnapshotResult.data : null);
   const saveAction = createDiagnostic.bind(null, mlAccount.company_id, mlAccount.id);
 
   return (
@@ -71,7 +71,7 @@ export default async function NewDiagnosticPage({
             : "No se pudo guardar el diagnóstico. Revisá permisos RLS y que la cuenta pertenezca al operador."}
         </div>
       ) : null}
-      <DiagnosticForm mlAccountId={mlAccount.id} companyId={mlAccount.company_id} diagnostic={diagnostic} action={saveAction} />
+      <DiagnosticForm mlAccountId={mlAccount.id} companyId={mlAccount.company_id} initialValues={initialFormValues} action={saveAction} />
     </main>
   );
 }
@@ -82,49 +82,4 @@ function pickPreferredMlAccount<T extends { id: string; seller_id: string | null
   if (connected) return connected;
   const active = accounts.find((account) => account.active === true);
   return active ?? accounts[0];
-}
-
-function buildInitialDiagnostic(companyId: string, snapshot: Record<string, unknown> | null): Diagnostic {
-  const num = (value: unknown) => (typeof value === "number" ? value : 0);
-
-  return {
-    id: "new",
-    clientId: companyId,
-    date: new Date().toISOString().slice(0, 10),
-    salud: {
-      reclamos: num(snapshot?.["reclamos"]),
-      mediaciones: num(snapshot?.["mediaciones"]),
-      cancelaciones_vendedor: num(snapshot?.["cancelaciones_vendedor"]),
-      envios_a_tiempo: num(snapshot?.["envios_a_tiempo"])
-    },
-    publicaciones: {
-      pubs_activas_pct: num(snapshot?.["pubs_activas_pct"]),
-      pubs_optimizadas_pct: num(snapshot?.["pubs_optimizadas_pct"]),
-      ctr: num(snapshot?.["ctr"])
-    },
-    ads: {
-      margen_pre_ads: num(snapshot?.["margen_pre_ads"]),
-      gasto_ads: num(snapshot?.["gasto_ads"]),
-      ventas_ads: num(snapshot?.["ventas_ads"]),
-      ventas_totales: num(snapshot?.["ventas_totales"]),
-      acos: num(snapshot?.["acos"]),
-      roas: num(snapshot?.["roas"]),
-      tacos: num(snapshot?.["tacos"])
-    },
-    logistica: {
-      incidencias_pct: num(snapshot?.["incidencias_pct"]),
-      uso_full_flex_pct: num(snapshot?.["uso_full_flex_pct"]),
-      cancelaciones_stock_pct: num(snapshot?.["cancelaciones_stock_pct"])
-    },
-    stock: {
-      skus_sin_stock_pct: num(snapshot?.["skus_sin_stock_pct"]),
-      dias_stock: num(snapshot?.["dias_stock"]),
-      lead_time_reposicion: num(snapshot?.["lead_time_reposicion"]),
-      sistema_reposicion: num(snapshot?.["sistema_reposicion"])
-    },
-    scoreGlobal: 0,
-    estadoGlobal: "critico",
-    scores: { salud: 0, publicaciones: 0, ads: 0, logistica: 0, stock: 0 },
-    source: "manual"
-  };
 }

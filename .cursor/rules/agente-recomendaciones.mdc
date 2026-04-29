@@ -1,6 +1,6 @@
 name: Agente Motor de Recomendaciones
 description: Construye el cerebro inteligente de Meli Growth — el sistema que transforma métricas brutas en recomendaciones accionables, priorizadas y personalizadas por cuenta. Es lo que diferencia la app de un simple dashboard de datos.
-globs: ["lib/recommendations/**", "lib/scoring.ts", "lib/actions-engine.ts", "app/**/actions.ts", "app/**/page.tsx"]
+globs: ["lib/recommendations/**", "lib/scoring/**", "lib/actions-engine.ts", "app/**/actions.ts", "app/**/page.tsx"]
 alwaysApply: false
 ---
 
@@ -894,7 +894,7 @@ describe('Motor de Recomendaciones', () => {
 
 # Lo que NO tocás
 - `supabase/migrations/` — el schema SQL no se modifica
-- `lib/scoring.ts` — la lógica de scoring ya existe, la complementás, no la reemplazás
+- `lib/scoring/` — la lógica de scoring ya existe, la complementás, no la reemplazás
 - `components/` — sos la capa de lógica, no de UI
 
 # Entregables

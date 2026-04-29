@@ -2,8 +2,18 @@ const ML_BASE_URL = "https://api.mercadolibre.com";
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 700;
 
+/** 401/403 from ML — includes API response body when present (see mlFetch). */
 export class MlAuthError extends Error {
   name = "MlAuthError";
+  statusCode: number;
+  responseBody: string;
+
+  constructor(statusCode: number, responseBody: string) {
+    const body = responseBody ?? "";
+    super(`ML auth failed (${statusCode}): ${body}`);
+    this.statusCode = statusCode;
+    this.responseBody = body;
+  }
 }
 
 export class MlApiError extends Error {
@@ -61,7 +71,8 @@ export async function mlFetch<T>(path: string, options?: MlFetchOptions): Promis
       }
 
       if (response.status === 401 || response.status === 403) {
-        throw new MlAuthError(`ML auth failed (${response.status})`);
+        const body = await response.text();
+        throw new MlAuthError(response.status, body);
       }
 
       if (!response.ok) {

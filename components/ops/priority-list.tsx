@@ -52,10 +52,11 @@ export function PriorityList({ items, activeId = null, onSelect, loading = false
   if (empty || items.length === 0) {
     return (
       <div>
-        <p className="text-sm text-[#6B6B6B]">No hay prioridades urgentes hoy</p>
-        <button type="button" className="mt-2 bg-[#FFD600] text-[#1A1A1A] font-semibold rounded-lg px-4 py-2">
-          Ver backlog de tareas
-        </button>
+        <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">HOY HACES ESTO</p>
+        <p className="mt-2 text-sm text-[#6B6B6B]">No hay alertas que priorizar hoy.</p>
+        <Link href="/ops/tasks" className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-xs font-semibold text-[#1A1A1A] hover:brightness-95">
+          Ver tareas y backlog →
+        </Link>
       </div>
     );
   }
@@ -64,33 +65,50 @@ export function PriorityList({ items, activeId = null, onSelect, loading = false
     <section>
       <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">HOY HACES ESTO</p>
       <div className="mt-2">
-        {items.map((item, index) => (
-          <div
-            key={item.id}
-            className={cn("group w-full py-3 border-b border-[#E8E8E2] text-left hover:bg-gray-50 transition-colors duration-150", activeId === item.id && "bg-yellow-50")}
-          >
-            <div className="flex items-start justify-between gap-2 px-1">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[#1A1A1A] line-clamp-2">
-                  <span className="mr-2 text-2xl font-black font-mono tabular-nums">{index + 1}</span>
-                  <span className="mr-1">{EMOJI_PRIORITY[item.priority]}</span>
-                  {item.title}
-                </p>
-                <p className="text-xs text-[#6B6B6B] line-clamp-2">{item.subtitle}</p>
+        {items.map((item, index) => {
+          const rowInner = (
+            <>
+              <div className="flex items-start justify-between gap-2 px-1">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#1A1A1A] line-clamp-2">
+                    <span className="mr-2 text-2xl font-black font-mono tabular-nums">{index + 1}</span>
+                    <span className="mr-1">{EMOJI_PRIORITY[item.priority]}</span>
+                    {item.title}
+                  </p>
+                  <p className="text-xs text-[#6B6B6B] line-clamp-2">{item.subtitle}</p>
+                </div>
+                <span className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">→</span>
               </div>
-              <span className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">→</span>
-            </div>
-            {item.href ? (
-              <Link href={item.href} className="mt-2 inline-flex items-center text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">
-                Ver detalle →
-              </Link>
-            ) : (
-              <button type="button" onClick={() => onSelect?.(item)} className="mt-2 text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">
-                Ver detalle →
+            </>
+          );
+
+          return item.href ? (
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cn(
+                "group block w-full border-b border-[#E8E8E2] py-3 text-left transition-colors duration-150 hover:bg-gray-50",
+                activeId === item.id && "bg-yellow-50"
+              )}
+            >
+              {rowInner}
+              <span className="mt-2 inline-flex px-1 text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">Abrir bloque →</span>
+            </Link>
+          ) : (
+            <div
+              key={item.id}
+              className={cn(
+                "group w-full border-b border-[#E8E8E2] text-left transition-colors duration-150 hover:bg-gray-50",
+                activeId === item.id && "bg-yellow-50"
+              )}
+            >
+              <button type="button" onClick={() => onSelect?.(item)} className="w-full py-3 text-left">
+                {rowInner}
+                <span className="mt-2 inline-flex px-1 text-xs font-semibold text-[#1A1A1A] underline underline-offset-2">Ver detalle →</span>
               </button>
-            )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </section>
   );

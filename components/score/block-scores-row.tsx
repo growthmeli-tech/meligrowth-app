@@ -74,6 +74,7 @@ export function BlockScoresRow({
         const baseClass = cn(
           "h-14 w-14 rounded-lg border border-[#E8E8E2] bg-white flex flex-col items-center justify-center md:h-16 md:w-16",
           "transition-all duration-150",
+          value === null && key === "ads" && "border-dashed border-slate-300 bg-slate-50/50",
           interactive && "cursor-pointer hover:scale-105 hover:ring-2 hover:ring-[#FFD600]",
           isWorst && "ring-2 ring-offset-1 shadow-sm",
           isActive && "ring-2 ring-[#FFD600]"

@@ -1,3 +1,4 @@
+import { MlApiError, MlAuthError } from "@/lib/ml/client";
 import { getValidAccessToken } from "@/lib/ml/auth";
 import { getAdvertiserId, getAdsMetrics, mapAdsToDiagnostic } from "@/lib/ml/endpoints/ads";
 import { getListingsOptimizationRate, getListingsStats, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
@@ -6,6 +7,7 @@ import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoin
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
 import type { MlDataSource, MlDiagnosticPrefill } from "@/lib/ml/mappers/types";
+import { createIngestionRunPipeline, finishIngestionRunPipeline, type IngestionBlockEntry } from "@/lib/data-v2/ingestion-runs";
 import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
 import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -13,8 +15,72 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 type PipelineResult = { success: true; data: MlDiagnosticPrefill } | { success: false; error: string };
 type ScraperTipo = "salud" | "publicaciones" | "ads" | "stock";
 
+const BLOCK_KEYS = ["salud", "publicaciones", "ads", "logistica", "stock"] as const;
+type BlockKey = (typeof BLOCK_KEYS)[number];
+
 function logPipelineError(scope: string, error: unknown, context?: Record<string, unknown>) {
   console.error(`[ml-pipeline:${scope}]`, { error, ...(context ?? {}) });
+}
+
+/**
+ * Logs ML fetch failures with HTTP status and response body when available.
+ * Use this for API block failures so Vercel/server logs show the exact ML error (not only Error{}).
+ */
+function logPipelineMlApiFailure(scope: string, error: unknown, context: Record<string, unknown>) {
+  if (error instanceof MlApiError) {
+    console.error(`[ml-pipeline:${scope}]`, {
+      ...context,
+      mlError: "MlApiError",
+      httpStatus: error.statusCode,
+      detail: error.message
+    });
+    return;
+  }
+  if (error instanceof MlAuthError) {
+    console.error(`[ml-pipeline:${scope}]`, {
+      ...context,
+      mlError: "MlAuthError",
+      httpStatus: error.statusCode,
+      detail: error.message,
+      responseBody: error.responseBody
+    });
+    return;
+  }
+  logPipelineError(scope, error, context);
+}
+
+function classifyFetchError(error: unknown): { kind: string; message: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  if (lower.includes("401") || lower.includes("403") || message.includes("MlAuthError")) {
+    return { kind: "auth_forbidden", message };
+  }
+  if (lower.includes("429") || lower.includes("rate")) {
+    return { kind: "rate_limit", message };
+  }
+  if (lower.includes("404")) {
+    return { kind: "not_found", message };
+  }
+  return { kind: "api_error", message };
+}
+
+function blockEntry(
+  source: MlDataSource,
+  ok: boolean,
+  error?: unknown,
+  extra?: Partial<IngestionBlockEntry>
+): IngestionBlockEntry {
+  if (!error) {
+    return { source, ok, ...extra };
+  }
+  const { kind, message } = classifyFetchError(error);
+  return {
+    source,
+    ok,
+    error_kind: kind,
+    message: message.slice(0, 500),
+    ...extra
+  };
 }
 
 async function callScraperJob(jobId: string) {
@@ -39,17 +105,18 @@ async function callScraperJob(jobId: string) {
   return response.json() as Promise<{ result?: { metrics?: Record<string, unknown> } }>;
 }
 
-async function triggerScrapeJob(clientId: string, tipo: ScraperTipo) {
+type ScrapeJobContext =
+  | { mode: "legacy"; clientId: string }
+  | { mode: "v2"; mlAccountId: string };
+
+async function triggerScrapeJob(tipo: ScraperTipo, ctx: ScrapeJobContext) {
   const supabase = await createServerSupabaseClient();
-  const { data: job, error: insertError } = await supabase
-    .from("scraping_jobs")
-    .insert({
-      client_id: clientId,
-      tipo,
-      estado: "pending"
-    })
-    .select("id")
-    .single();
+  const insertPayload =
+    ctx.mode === "v2"
+      ? { ml_account_id: ctx.mlAccountId, client_id: null as string | null, tipo, estado: "pending" as const }
+      : { client_id: ctx.clientId, ml_account_id: null as string | null, tipo, estado: "pending" as const };
+
+  const { data: job, error: insertError } = await supabase.from("scraping_jobs").insert(insertPayload).select("id").single();
 
   if (insertError || !job) {
     throw new Error(insertError?.message ?? `Could not create scraping job for ${tipo}`);
@@ -75,6 +142,24 @@ export async function fetchMLDiagnosticData(
     };
   }
 
+  const scrapeCtx: ScrapeJobContext = options?.mlAccountId
+    ? { mode: "v2", mlAccountId: options.mlAccountId }
+    : { mode: "legacy", clientId };
+
+  let ingestionRunId: string | null = null;
+  if (options?.mlAccountId) {
+    const started = await createIngestionRunPipeline({
+      ml_account_id: options.mlAccountId,
+      source: "api",
+      blocks_fetched: { _meta: { pipeline: "ml_fetch", version: 1 } }
+    });
+    if (started.success) {
+      ingestionRunId = started.data.id;
+    } else {
+      logPipelineError("ingestion_run_start", started.error, { clientId, mlAccountId: options.mlAccountId });
+    }
+  }
+
   const prefill: Partial<MlDiagnosticPrefill> = {
     seller_id: sellerId,
     synced_at: new Date().toISOString()
@@ -88,11 +173,15 @@ export async function fetchMLDiagnosticData(
     stock: "unavailable"
   };
 
+  const blocksFetched: Record<string, IngestionBlockEntry | Record<string, unknown>> = {
+    _meta: { pipeline: "ml_fetch", version: 1, seller_id: sellerId }
+  };
+
   const scraperCache = new Map<ScraperTipo, Record<string, unknown> | null>();
   const readScraper = async (tipo: ScraperTipo) => {
     if (scraperCache.has(tipo)) return scraperCache.get(tipo) ?? null;
     try {
-      const metrics = await triggerScrapeJob(clientId, tipo);
+      const metrics = await triggerScrapeJob(tipo, scrapeCtx);
       scraperCache.set(tipo, metrics);
       return metrics;
     } catch (error) {
@@ -106,12 +195,17 @@ export async function fetchMLDiagnosticData(
     const reputation = await getSellerReputation(sellerId, accessToken);
     Object.assign(prefill, mapReputationToDiagnostic(reputation));
     dataSources.salud = "api";
+    blocksFetched.salud = blockEntry("api", true);
   } catch (error) {
-    logPipelineError("salud_api", error, { sellerId });
+    logPipelineMlApiFailure("salud_api", error, { sellerId });
+    blocksFetched.salud = blockEntry("api", false, error);
     const scraperMetrics = await readScraper("salud");
     if (scraperMetrics) {
       Object.assign(prefill, mapScraperMetricsToPrefill(scraperMetrics));
       dataSources.salud = "scraper";
+      blocksFetched.salud = { ...blockEntry("scraper", true), note: "api_failed_scraper_ok" };
+    } else {
+      blocksFetched.salud = { ...blockEntry("unavailable", false, error), scraper: "failed_or_skipped" };
     }
   }
 
@@ -122,12 +216,17 @@ export async function fetchMLDiagnosticData(
     ]);
     Object.assign(prefill, mapListingsToDiagnostic(stats, optimizationRate));
     dataSources.publicaciones = "api";
+    blocksFetched.publicaciones = blockEntry("api", true);
   } catch (error) {
-    logPipelineError("publicaciones_api", error, { sellerId });
+    logPipelineMlApiFailure("publicaciones_api", error, { sellerId });
+    blocksFetched.publicaciones = blockEntry("api", false, error);
     const scraperMetrics = await readScraper("publicaciones");
     if (scraperMetrics) {
       Object.assign(prefill, mapScraperMetricsToPrefill(scraperMetrics));
       dataSources.publicaciones = "scraper";
+      blocksFetched.publicaciones = { ...blockEntry("scraper", true), note: "api_failed_scraper_ok" };
+    } else {
+      blocksFetched.publicaciones = { ...blockEntry("unavailable", false, error), scraper: "failed_or_skipped" };
     }
   }
 
@@ -146,15 +245,27 @@ export async function fetchMLDiagnosticData(
       );
       Object.assign(prefill, mapAdsToDiagnostic(adsMetrics));
       dataSources.ads = "api";
+      blocksFetched.ads = blockEntry("api", true);
     } else {
       Object.assign(prefill, mapAdsToDiagnostic(null));
+      dataSources.ads = "api";
+      blocksFetched.ads = {
+        source: "api",
+        ok: true,
+        error_kind: "no_advertiser",
+        message: "No PADS advertiser — sin campañas product ads o permisos de advertising"
+      };
     }
   } catch (error) {
-    logPipelineError("ads_api", error, { sellerId });
+    logPipelineMlApiFailure("ads_api", error, { sellerId });
+    blocksFetched.ads = blockEntry("api", false, error);
     const scraperMetrics = await readScraper("ads");
     if (scraperMetrics) {
       Object.assign(prefill, mapScraperMetricsToPrefill(scraperMetrics));
       dataSources.ads = "scraper";
+      blocksFetched.ads = { ...blockEntry("scraper", true), note: "api_failed_scraper_ok" };
+    } else {
+      blocksFetched.ads = { ...blockEntry("unavailable", false, error), scraper: "failed_or_skipped" };
     }
   }
 
@@ -162,8 +273,10 @@ export async function fetchMLDiagnosticData(
     const logistics = await getLogisticsMetrics(sellerId, accessToken);
     Object.assign(prefill, logistics);
     dataSources.logistica = "api";
+    blocksFetched.logistica = blockEntry("api", true);
   } catch (error) {
-    logPipelineError("logistica_api", error, { sellerId });
+    logPipelineMlApiFailure("logistica_api", error, { sellerId });
+    blocksFetched.logistica = blockEntry("api", false, error);
     const scraperMetrics = await readScraper("stock");
     if (scraperMetrics) {
       const mapped = mapScraperMetricsToPrefill(scraperMetrics);
@@ -173,6 +286,9 @@ export async function fetchMLDiagnosticData(
         cancelaciones_stock_pct: mapped.cancelaciones_stock_pct
       });
       dataSources.logistica = "scraper";
+      blocksFetched.logistica = { ...blockEntry("scraper", true), note: "api_failed_scraper_used_stock_job" };
+    } else {
+      blocksFetched.logistica = { ...blockEntry("unavailable", false, error), scraper: "failed_or_skipped" };
     }
   }
 
@@ -180,12 +296,17 @@ export async function fetchMLDiagnosticData(
     const stock = await getStockMetrics(sellerId, accessToken);
     Object.assign(prefill, stock);
     dataSources.stock = "api";
+    blocksFetched.stock = blockEntry("api", true);
   } catch (error) {
-    logPipelineError("stock_api", error, { sellerId });
+    logPipelineMlApiFailure("stock_api", error, { sellerId });
+    blocksFetched.stock = blockEntry("api", false, error);
     const scraperMetrics = await readScraper("stock");
     if (scraperMetrics) {
       Object.assign(prefill, mapScraperMetricsToPrefill(scraperMetrics));
       dataSources.stock = "scraper";
+      blocksFetched.stock = { ...blockEntry("scraper", true), note: "api_failed_scraper_ok" };
+    } else {
+      blocksFetched.stock = { ...blockEntry("unavailable", false, error), scraper: "failed_or_skipped" };
     }
   }
 
@@ -231,7 +352,12 @@ export async function fetchMLDiagnosticData(
           sellerId,
           mlAccountId: options.mlAccountId
         });
+        blocksFetched.v2_persist = {
+          snapshot_ok: false,
+          error: snapshotResult.error
+        };
       } else {
+        blocksFetched.v2_persist = { snapshot_ok: true, metric_snapshot_id: snapshotResult.data.id };
         const recommendationsResult = await runRecommendationsPipelineV2({
           ml_account_id: options.mlAccountId,
           metric_snapshot_id: snapshotResult.data.id
@@ -243,12 +369,50 @@ export async function fetchMLDiagnosticData(
             mlAccountId: options.mlAccountId,
             metricSnapshotId: snapshotResult.data.id
           });
+          blocksFetched.v2_persist = {
+            ...blocksFetched.v2_persist,
+            recommendations_ok: false,
+            recommendations_error: recommendationsResult.error
+          };
+        } else {
+          blocksFetched.v2_persist = {
+            ...blocksFetched.v2_persist,
+            recommendations_ok: true,
+            alerts_persisted: recommendationsResult.data.persisted_alerts_count
+          };
         }
       }
     } catch (error) {
       // Keep legacy pipeline alive while v2 is being rolled out.
       logPipelineError("v2_pipeline", error, { clientId, sellerId, mlAccountId: options.mlAccountId });
+      blocksFetched.v2_persist = {
+        snapshot_ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
     }
+  }
+
+  if (ingestionRunId) {
+    const unavailableBlocks = (["salud", "publicaciones", "ads", "logistica", "stock"] as const).filter(
+      (k) => dataSources[k] === "unavailable"
+    );
+    const meta = (blocksFetched._meta && typeof blocksFetched._meta === "object" ? blocksFetched._meta : {}) as Record<
+      string,
+      unknown
+    >;
+    await finishIngestionRunPipeline(ingestionRunId, {
+      status: "success",
+      blocks_fetched: {
+        ...blocksFetched,
+        data_sources_summary: dataSources,
+        _meta: {
+          ...meta,
+          ingestion_quality: unavailableBlocks.length ? "partial" : "full",
+          unavailable_blocks: unavailableBlocks
+        }
+      },
+      error_msg: null
+    });
   }
 
   return {

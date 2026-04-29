@@ -2,14 +2,13 @@ import type {
   AdsData,
   BloqueScores,
   BlockKey,
-  Decision,
   DiagnosticInput,
-  Estado,
   LogisticaData,
   PublicacionesData,
   SaludData,
   StockData
 } from "@/lib/types";
+import { capWhenCritical, weightedAverage } from "@/lib/scoring/metric-semantics";
 
 type Direction = "higher" | "lower" | "range";
 
@@ -57,6 +56,10 @@ function interpolate(value: number, points: Array<[number, number]>) {
   return clamp(points[points.length - 1][1]);
 }
 
+/**
+ * Mapea un valor numérico conocido a score 0–100 según benchmarks.
+ * No usar `null` aquí: ausencia de dato se resuelve en `metric-snapshot.ts` / `metric-semantics.ts`.
+ */
 export function calcScore(metrica: string, valor: number): number {
   const benchmark = benchmarks[metrica];
   if (!benchmark || Number.isNaN(valor)) return 0;
@@ -92,15 +95,6 @@ export function calcScore(metrica: string, valor: number): number {
   if (valor >= idealMin && valor <= idealMax) return 100;
   const distance = valor < idealMin ? idealMin - valor : valor - idealMax;
   return clamp(Math.round(100 - distance * 3));
-}
-
-function weightedAverage(parts: Array<[number, number]>) {
-  const totalWeight = parts.reduce((sum, [, weight]) => sum + weight, 0);
-  return Math.round(parts.reduce((sum, [score, weight]) => sum + score * weight, 0) / totalWeight);
-}
-
-function capWhenCritical(score: number, metricScores: number[]) {
-  return metricScores.some((metricScore) => metricScore < 45) ? Math.min(score, 55) : score;
 }
 
 export function getGlobalScoreWeights(hasAdsData = true) {
@@ -196,44 +190,4 @@ export function calcScoreGlobal(bloques: BloqueScores, options?: { hasAdsData?: 
     [bloques.logistica, weights.logistica],
     [bloques.stock, weights.stock]
   ]);
-}
-
-export function getEstado(score: number): Estado {
-  if (score >= 95) return "platinum";
-  if (score >= 85) return "solido";
-  if (score >= 70) return "desarrollo";
-  if (score >= 55) return "riesgo";
-  return "critico";
-}
-
-export function getDecision(estado: Estado, bloques: BloqueScores): Decision {
-  const entries = Object.entries(bloques) as Array<[BlockKey, number]>;
-  const [block, score] = entries.sort((a, b) => a[1] - b[1])[0];
-  const priority = estado === "critico" || score < 55 ? "urgente" : estado === "riesgo" ? "alta" : "media";
-
-  const titles: Record<BlockKey, string> = {
-    salud: "Proteger reputación y SLA",
-    publicaciones: "Recuperar calidad de publicaciones",
-    ads: "Ajustar inversión publicitaria",
-    logistica: "Reducir fricción logística",
-    stock: "Asegurar disponibilidad rentable"
-  };
-
-  return {
-    title: titles[block],
-    description: `El bloque más débil es ${block} con ${score} puntos. Priorizar acciones de impacto semanal antes de abrir iniciativas nuevas.`,
-    priority,
-    block
-  };
-}
-
-export function scoreDiagnostic(input: DiagnosticInput, options?: { hasAdsData?: boolean }) {
-  const scores = calcBloqueScores(input);
-  const scoreGlobal = calcScoreGlobal(scores, options);
-  return {
-    scores,
-    scoreGlobal,
-    estadoGlobal: getEstado(scoreGlobal),
-    decision: getDecision(getEstado(scoreGlobal), scores)
-  };
 }

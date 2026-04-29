@@ -50,7 +50,14 @@ export type AdsAnalysis = {
   diferencial_roas: number;
   margen_efectivo: number;
   contribucion_neta: number;
-  estado_salud: "critico" | "aceptable" | "saludable" | "escalable" | "sin_datos";
+  estado_salud:
+    | "critico"
+    | "aceptable"
+    | "saludable"
+    | "escalable"
+    | "sin_datos"
+    /** Gasto y ventas atribuibles a Ads en cero pero sí hay ventas totales — no penaliza como mal performance */
+    | "sin_campanas";
   recomendacion: string;
 };
 

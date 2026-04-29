@@ -6,7 +6,7 @@ export type DiagnosticReportData = {
   estado_global: string;
   score_salud: number;
   score_publicaciones: number;
-  score_ads: number;
+  score_ads: number | null;
   score_logistica: number;
   score_stock: number;
   alertas: Array<{
@@ -87,7 +87,7 @@ function buildExecutiveSummary(data: DiagnosticReportData, criticalAreas: number
 
 function getCriticalAreasCount(data: DiagnosticReportData): number {
   const scores = [data.score_salud, data.score_publicaciones, data.score_ads, data.score_logistica, data.score_stock];
-  return scores.filter((score) => score < 55).length;
+  return scores.filter((score) => typeof score === "number" && score < 55).length;
 }
 
 function getScoreColor(score: number): string {

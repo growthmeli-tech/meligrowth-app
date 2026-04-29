@@ -7,7 +7,7 @@
 - `components/recommendations/recommendations-panel.tsx`: nuevo panel con estrategia general, orden por prioridad y empty/error state; implementa specs de `vista-cuenta.md` y `panel-recomendaciones.md`. Depende de `lib/data/recommendations.ts`.
 - `components/alerts/alert-banner.tsx`: nuevo banner para alertas nivel 1/2 con CTA y enlaces a cuenta; implementa specs de `dashboard-operator.md` y `sistema-notificaciones.md`.
 - `components/diagnostic/diagnostic-field-benchmark.tsx`: nuevo campo de diagnóstico con benchmark inline en tiempo real, estado semáforo y badge de fuente; implementa specs de `formulario-diagnostico.md`.
-- `components/diagnostic/block-score-realtime.tsx`: nuevo bloque de score en tiempo real con debounce y barra de progreso; implementa specs de `formulario-diagnostico.md`. Depende de `lib/scoring.ts`.
+- `components/diagnostic/block-score-realtime.tsx`: nuevo bloque de score en tiempo real con debounce y barra de progreso; implementa specs de `formulario-diagnostico.md`. Depende de `@/lib/scoring` (módulo `lib/scoring/`).
 - `components/diagnostic/diagnostic-result-screen.tsx`: nueva pantalla post-guardado con score final, recomendaciones y CTAs; implementa specs de `formulario-diagnostico.md`.
 - `components/client/client-score-hero.tsx`: nuevo hero de cliente con lenguaje simple, delta y fondo contextual; implementa specs de `dashboard-client.md`.
 - `components/ui/empty-state.tsx`: nuevo estado vacío reusable con CTA por contexto; implementa reglas de `agente-ui.mdc` y `auditoria-pantallas.md`.

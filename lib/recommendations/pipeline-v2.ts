@@ -1,12 +1,12 @@
+import { hasMeaningfulAdsActivity } from "@/lib/ops/meaningful-ads";
 import { enrichRecommendationsWithClaude, type EnrichedRecommendation } from "@/lib/recommendations/ai-enricher";
 import { generateRecommendations, type RecommendationsDiagnosticInput } from "@/lib/recommendations/engine";
 import { persistRecommendationsAsAlerts } from "@/lib/recommendations/persist";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
-import { scoreDiagnostic } from "@/lib/scoring";
+import { deriveAdsDerivedMetrics, scoreDiagnosticFromMetricSnapshot } from "@/lib/scoring";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
-import type { DiagnosticInput } from "@/lib/types/domain";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 type MetricSnapshotRow = Database["public"]["Tables"]["metric_snapshots"]["Row"];
@@ -43,8 +43,8 @@ export async function runRecommendationsPipelineV2(input: {
     };
   }
 
-  const scoringInput = snapshotToDiagnosticInput(snapshot);
-  const scored = scoreDiagnostic(scoringInput, { hasAdsData: hasAdsSnapshotData(snapshot) });
+  const meaningfulAds = hasMeaningfulAdsActivity(snapshot);
+  const scored = scoreDiagnosticFromMetricSnapshot(snapshot, { hasAdsData: hasAdsSnapshotData(snapshot) });
   const estadoGlobal = getEstadoGlobalLabel(scored.scoreGlobal);
 
   const { data: accountHealth, error: healthError } = await supabase
@@ -57,7 +57,7 @@ export async function runRecommendationsPipelineV2(input: {
       estado_global: estadoGlobal,
       score_salud: scored.scores.salud,
       score_publicaciones: scored.scores.publicaciones,
-      score_ads: scored.scores.ads,
+      score_ads: meaningfulAds ? scored.scores.ads : null,
       score_logistica: scored.scores.logistica,
       score_stock: scored.scores.stock
     })
@@ -87,7 +87,8 @@ export async function runRecommendationsPipelineV2(input: {
   const shouldEnrich = (existingAlertsCount ?? 0) === 0;
 
   const recommendationsInput = snapshotToRecommendationsInput(snapshot, accountHealth);
-  const baseRecommendations = generateRecommendations(recommendationsInput);
+  const dataSources = ((snapshot.data_sources as Record<string, string> | null) ?? {}) as Record<string, string>;
+  const baseRecommendations = generateRecommendations(recommendationsInput, { data_sources: dataSources });
 
   const enrichedRecs: EnrichedRecommendation[] = shouldEnrich
     ? await enrichRecommendationsWithClaude(baseRecommendations.recomendaciones, snapshot)
@@ -118,50 +119,12 @@ export async function runRecommendationsPipelineV2(input: {
   };
 }
 
-function snapshotToDiagnosticInput(snapshot: MetricSnapshotRow): DiagnosticInput {
-  const adsMetrics = deriveAdsMetrics(snapshot);
-
-  return {
-    salud: {
-      reclamos: asNumber(snapshot.reclamos),
-      mediaciones: asNumber(snapshot.mediaciones),
-      cancelaciones_vendedor: asNumber(snapshot.cancelaciones_vendedor),
-      envios_a_tiempo: asNumber(snapshot.envios_a_tiempo)
-    },
-    publicaciones: {
-      pubs_activas_pct: asNumber(snapshot.pubs_activas_pct),
-      pubs_optimizadas_pct: asNumber(snapshot.pubs_optimizadas_pct),
-      ctr: asNumber(snapshot.ctr)
-    },
-    ads: {
-      margen_pre_ads: asNumber(snapshot.margen_pre_ads),
-      gasto_ads: asNumber(snapshot.gasto_ads),
-      ventas_ads: asNumber(snapshot.ventas_ads),
-      ventas_totales: asNumber(snapshot.ventas_totales),
-      acos: adsMetrics.acos,
-      roas: adsMetrics.roas,
-      tacos: adsMetrics.tacos
-    },
-    logistica: {
-      incidencias_pct: asNumber(snapshot.incidencias_pct),
-      uso_full_flex_pct: asNumber(snapshot.uso_full_flex_pct),
-      cancelaciones_stock_pct: asNumber(snapshot.cancelaciones_stock_pct)
-    },
-    stock: {
-      skus_sin_stock_pct: asNumber(snapshot.skus_sin_stock_pct),
-      dias_stock: asNumber(snapshot.dias_stock),
-      lead_time_reposicion: asNumber(snapshot.lead_time_reposicion),
-      // Neutral baseline when the client has not completed this manual field yet.
-      sistema_reposicion: snapshot.sistema_reposicion ?? 50
-    }
-  };
-}
-
 function snapshotToRecommendationsInput(
   snapshot: MetricSnapshotRow,
   accountHealth: AccountHealthRow
 ): RecommendationsDiagnosticInput {
-  const adsMetrics = deriveAdsMetrics(snapshot);
+  const adsMetrics = deriveAdsDerivedMetrics(snapshot);
+  const meaningful = hasMeaningfulAdsActivity(snapshot);
 
   return {
     id: accountHealth.id,
@@ -174,8 +137,8 @@ function snapshotToRecommendationsInput(
     pubs_activas_pct: snapshot.pubs_activas_pct,
     pubs_optimizadas_pct: snapshot.pubs_optimizadas_pct,
     ctr: snapshot.ctr,
-    acos: snapshot.acos ?? adsMetrics.acos,
-    roas: snapshot.roas ?? adsMetrics.roas,
+    acos: meaningful ? (snapshot.acos ?? adsMetrics.acos) : null,
+    roas: meaningful ? (snapshot.roas ?? adsMetrics.roas) : null,
     incidencias_pct: snapshot.incidencias_pct,
     uso_full_flex_pct: snapshot.uso_full_flex_pct,
     cancelaciones_stock_pct: snapshot.cancelaciones_stock_pct,
@@ -194,24 +157,13 @@ function snapshotToRecommendationsInput(
   };
 }
 
-function asNumber(value: number | null): number {
-  return typeof value === "number" ? value : 0;
-}
-
-function deriveAdsMetrics(snapshot: MetricSnapshotRow): { acos: number; roas: number; tacos: number } {
-  const gastoAds = asNumber(snapshot.gasto_ads);
-  const ventasAds = asNumber(snapshot.ventas_ads);
-  const ventasTotales = asNumber(snapshot.ventas_totales);
-
-  return {
-    acos: snapshot.acos ?? (ventasAds > 0 ? (gastoAds / ventasAds) * 100 : 0),
-    roas: snapshot.roas ?? (gastoAds > 0 ? ventasAds / gastoAds : 0),
-    tacos: snapshot.tacos ?? (ventasTotales > 0 ? (gastoAds / ventasTotales) * 100 : 0)
-  };
-}
-
+/** Pesos globales: solo si hay actividad medible en Ads y base para TACOS */
 function hasAdsSnapshotData(snapshot: MetricSnapshotRow): boolean {
-  return snapshot.gasto_ads !== null && snapshot.ventas_ads !== null && snapshot.ventas_totales !== null;
+  return (
+    hasMeaningfulAdsActivity(snapshot) &&
+    snapshot.ventas_totales !== null &&
+    snapshot.ventas_totales !== undefined
+  );
 }
 
 function getEstadoGlobalLabel(score: number) {
