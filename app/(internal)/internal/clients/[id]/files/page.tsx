@@ -31,7 +31,7 @@ const templateDefs = [
     key: "margenes_costos" as const,
     title: "Planilla 2: Márgenes y Costos",
     description: "Necesaria para validar rentabilidad y decisiones de Ads.",
-    columns: ["sku", "producto", "costo", "logistica", "margen_pct"],
+    columns: ["sku", "producto", "costo", "peso_kg", "logistica", "reputacion", "publicidad_pct", "margen_pct", "notas"],
     href: "/templates/margenes-costos.csv"
   },
   {

@@ -12,9 +12,31 @@ describe("parseMargenesCostosRows", () => {
     expect(r.valid).toHaveLength(1);
     expect(r.valid[0]?.publicidad_pct).toBeCloseTo(0.15);
     expect(r.valid[0]?.margen_pct).toBeCloseTo(0.2);
+    expect(r.valid[0]?.selling).toBeDefined();
+    expect(r.valid[0]?.selling?.converged).toBe(true);
   });
-  it("errors si falta producto", () => {
-    const r = parseMargenesCostosRows([{ producto: "", costo: 10 }], get);
+
+  it("usa defaults cuando faltan columnas opcionales", () => {
+    const r = parseMargenesCostosRows([{ producto: "X", costo: 5000 }], get);
+    expect(r.errors).toHaveLength(0);
+    expect(r.valid).toHaveLength(1);
+    expect(r.valid[0]?.logistica).toBe("Flex");
+    expect(r.valid[0]?.reputacion).toBe("Verde / MercadoLíder");
+    expect(r.valid[0]?.publicidad_pct).toBeCloseTo(0.1);
+    expect(r.valid[0]?.margen_pct).toBeCloseTo(0.15);
+    expect(r.valid[0]?.peso_kg).toBeNull();
+    expect(r.valid[0]?.selling).toBeDefined();
+  });
+
+  it("acepta solo sku (producto derivado del sku)", () => {
+    const r = parseMargenesCostosRows([{ sku: "MLA-1", costo: 8000 }], get);
+    expect(r.errors).toHaveLength(0);
+    expect(r.valid[0]?.producto).toBe("MLA-1");
+    expect(r.valid[0]?.sku).toBe("MLA-1");
+  });
+
+  it("errors si faltan sku y producto", () => {
+    const r = parseMargenesCostosRows([{ producto: "", sku: "", costo: 10 }], get);
     expect(r.valid).toHaveLength(0);
     expect(r.errors.some((e) => e.field === "producto")).toBe(true);
   });

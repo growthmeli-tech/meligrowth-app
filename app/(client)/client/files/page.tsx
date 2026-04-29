@@ -19,13 +19,13 @@ const templates = [
   {
     title: "Planilla 1: SKUs y Stock",
     description: "Usala para informar disponibilidad actual por producto.",
-    columns: ["sku", "stock"],
+    columns: ["sku", "producto", "stock", "dias_stock"],
     href: "/templates/skus-stock.csv"
   },
   {
     title: "Planilla 2: Márgenes y Costos",
     description: "Permite validar rentabilidad antes de tomar decisiones de publicidad.",
-    columns: ["sku", "costo", "precio", "margen"],
+    columns: ["sku", "producto", "costo", "peso_kg", "logistica", "reputacion", "publicidad_pct", "margen_pct", "notas"],
     href: "/templates/margenes-costos.csv"
   },
   {

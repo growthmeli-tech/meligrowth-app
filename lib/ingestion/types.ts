@@ -1,4 +1,5 @@
 import type { Json } from "@/lib/supabase/database.types";
+import type { SellingPriceResult } from "@/lib/pricing/calculator";
 
 export type TemplateType = "skus_stock" | "margenes_costos" | "ficha_tecnica" | "pricing_comercial" | "unknown";
 
@@ -38,6 +39,9 @@ export interface MargenesRow {
   reputacion: "Verde / MercadoLíder" | "Naranja o Roja";
   publicidad_pct: number;
   margen_pct: number | null;
+  notas?: string | null;
+  /** Set by parseMargenesCostosRows via calcSellingPrice */
+  selling?: SellingPriceResult;
 }
 
 export interface FichaTecnicaRow {

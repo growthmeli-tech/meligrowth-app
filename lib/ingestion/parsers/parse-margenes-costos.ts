@@ -1,4 +1,5 @@
 import type { ParseErrorEntry, ParseResult, MargenesRow } from "@/lib/ingestion/types";
+import { calcSellingPrice } from "@/lib/pricing/calculator";
 
 type RawRow = Record<string, unknown>;
 
@@ -19,7 +20,12 @@ function num(v: unknown): number | null {
 /**
  * 0-1 or 0-100 → 0-1; empty → default
  */
-function toUnitInterval(raw: unknown, defaultValue: number, field: string, rowNum: number): { value: number } | { error: ParseErrorEntry } {
+function toUnitInterval(
+  raw: unknown,
+  defaultValue: number,
+  field: string,
+  rowNum: number
+): { value: number } | { error: ParseErrorEntry } {
   if (raw === null || raw === undefined || (typeof raw === "string" && str(raw) === "")) {
     return { value: defaultValue };
   }
@@ -47,6 +53,9 @@ function parseReputacion(v: unknown): MargenesRow["reputacion"] {
   return "Verde / MercadoLíder";
 }
 
+const DEF_PUBLICIDAD = 0.1;
+const DEF_MARGEN = 0.15;
+
 export function parseMargenesCostosRows(
   rows: RawRow[],
   getCell: (row: RawRow, field: string) => unknown
@@ -58,35 +67,49 @@ export function parseMargenesCostosRows(
     const row = rows[i];
     const rowNum = i + 2;
 
-    const producto = str(getCell(row, "producto"));
-    const costoN = num(getCell(row, "costo"));
-    const sku = str(getCell(row, "sku")) || null;
-    const pesoN = num(getCell(row, "peso_kg"));
+    const skuRaw = str(getCell(row, "sku"));
+    const productoRaw = str(getCell(row, "producto"));
+    const producto = productoRaw || skuRaw;
+    const sku = skuRaw || null;
 
-    if (!producto) errors.push({ row: rowNum, field: "producto", message: "Requerido" });
+    const costoN = num(getCell(row, "costo"));
+    const pesoN = num(getCell(row, "peso_kg"));
+    const notasRaw = getCell(row, "notas");
+    const notas =
+      notasRaw === null || notasRaw === undefined || str(notasRaw) === "" ? null : str(notasRaw);
+
+    if (!producto) errors.push({ row: rowNum, field: "producto", message: "Requerido (o sku)" });
     if (costoN === null || costoN <= 0) errors.push({ row: rowNum, field: "costo", message: "Requerido y > 0" });
-    if (producto && costoN! > 0) {
-      const pPub = toUnitInterval(getCell(row, "publicidad_pct"), 0, "publicidad_pct", rowNum);
-      if ("error" in pPub) {
-        errors.push(pPub.error);
-        continue;
-      }
-      const pMar = toUnitInterval(getCell(row, "margen_pct"), 0.15, "margen_pct", rowNum);
-      if ("error" in pMar) {
-        errors.push(pMar.error);
-        continue;
-      }
-      valid.push({
-        sku,
-        producto,
-        costo: costoN!,
-        peso_kg: pesoN,
-        logistica: parseLogistica(getCell(row, "logistica")),
-        reputacion: parseReputacion(getCell(row, "reputacion")),
-        publicidad_pct: pPub.value,
-        margen_pct: pMar.value
-      });
+
+    if (!producto || costoN === null || costoN <= 0) {
+      continue;
     }
+
+    const pPub = toUnitInterval(getCell(row, "publicidad_pct"), DEF_PUBLICIDAD, "publicidad_pct", rowNum);
+    if ("error" in pPub) {
+      errors.push(pPub.error);
+      continue;
+    }
+    const pMar = toUnitInterval(getCell(row, "margen_pct"), DEF_MARGEN, "margen_pct", rowNum);
+    if ("error" in pMar) {
+      errors.push(pMar.error);
+      continue;
+    }
+
+    const base: MargenesRow = {
+      sku,
+      producto,
+      costo: costoN,
+      peso_kg: pesoN,
+      logistica: parseLogistica(getCell(row, "logistica")),
+      reputacion: parseReputacion(getCell(row, "reputacion")),
+      publicidad_pct: pPub.value,
+      margen_pct: pMar.value,
+      notas
+    };
+
+    const selling = calcSellingPrice(base);
+    valid.push({ ...base, selling });
   }
 
   return { valid, errors };

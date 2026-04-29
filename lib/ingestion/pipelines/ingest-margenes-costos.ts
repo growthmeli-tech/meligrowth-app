@@ -20,7 +20,7 @@ type SkuIns = Database["public"]["Tables"]["pricing_skus"]["Insert"];
 function weightedMarginPct(rows: MargenesRow[]) {
   const w = rows.reduce((s, r) => s + r.costo, 0);
   if (w <= 0) return null;
-  return rows.reduce((s, r) => s + (r.margen_pct as number) * r.costo, 0) / w;
+  return rows.reduce((s, r) => s + (r.margen_pct ?? 0.15) * r.costo, 0) / w;
 }
 
 export async function ingestMargenesCostos(
@@ -55,7 +55,7 @@ export async function ingestMargenesCostos(
   const marginPctHundred = weighted == null ? null : weighted * 100;
 
   const skus: SkuIns[] = p.valid.map((row) => {
-    const price = calcSellingPrice(row);
+    const price = row.selling ?? calcSellingPrice(row);
     return {
       ml_account_id: mlAccountId,
       sku: row.sku,
@@ -146,7 +146,7 @@ export async function ingestMargenesCostos(
     producto: r.producto,
     costo: r.costo,
     margen_pct: r.margen_pct,
-    result: calcSellingPrice(r)
+    result: r.selling ?? calcSellingPrice(r)
   }));
   const alertPayload = detectPricingRisks(pipe.data.account_health.id, mlAccountId, comp);
   let extra = 0;

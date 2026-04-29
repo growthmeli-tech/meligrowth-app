@@ -12,6 +12,9 @@ function normalizeHeader(value: string) {
 /**
  * Detects which template type a file is based on its column headers.
  * Runs client-side after SheetJS parses the first row.
+ *
+ * Uses minimum required columns per template (normalized). Order matters:
+ * pricing → stock → ficha → márgenes (so overlapping headers resolve predictably).
  */
 export function detectTemplateType(headers: string[]): TemplateType {
   const norm = headers.map((h) => normalizeHeader(String(h ?? "")));
@@ -19,24 +22,31 @@ export function detectTemplateType(headers: string[]): TemplateType {
 
   const has = (name: string) => set.has(name);
 
-  // Pricing comercial: unique business columns
-  if (has("plan") && has("current_revenue") && has("projected_revenue") && has("gross_margin_pct") && has("delivery_cost") && has("months")) {
+  // Plan 4 — pricing comercial (columns required by parser; setup_fee optional in data)
+  if (
+    has("plan") &&
+    has("current_revenue") &&
+    has("projected_revenue") &&
+    has("gross_margin_pct") &&
+    has("delivery_cost") &&
+    has("months")
+  ) {
     return "pricing_comercial";
   }
 
-  // SKUs y stock
+  // Plan 1 — SKUs y stock
   if (has("sku") && has("producto") && has("stock")) {
     return "skus_stock";
   }
 
-  // Márgenes: costo + producto, not a stock template
-  if (has("producto") && has("costo") && !has("stock")) {
-    return "margenes_costos";
-  }
-
-  // Ficha técnica
+  // Plan 3 — ficha técnica (titulo is distinctive; exclude sheets that are clearly stock)
   if (has("sku") && has("titulo") && !has("stock")) {
     return "ficha_tecnica";
+  }
+
+  // Plan 2 — márgenes / calculadora: costo + identificador (sku o producto)
+  if (has("costo") && (has("sku") || has("producto"))) {
+    return "margenes_costos";
   }
 
   return "unknown";

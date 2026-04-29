@@ -10,9 +10,18 @@ describe("detectTemplateType", () => {
     const h = ["sku", "producto", "stock", "dias_stock"];
     expect(detectTemplateType(h)).toBe("skus_stock");
   });
-  it("detecta márgenes", () => {
+  it("detecta márgenes con producto + costo", () => {
     const h = ["producto", "costo", "publicidad"];
     expect(detectTemplateType(h)).toBe("margenes_costos");
+  });
+  it("detecta márgenes con sku | costo | precio | margen", () => {
+    expect(detectTemplateType(["sku", "costo", "precio", "margen"])).toBe("margenes_costos");
+  });
+  it("detecta márgenes con sku + costo mínimo", () => {
+    expect(detectTemplateType(["sku", "costo"])).toBe("margenes_costos");
+  });
+  it("detecta márgenes con producto + costo + logística", () => {
+    expect(detectTemplateType(["producto", "costo", "logistica"])).toBe("margenes_costos");
   });
   it("detecta ficha técnica (titulo, sin stock)", () => {
     const h = ["sku", "titulo", "descripcion"];
