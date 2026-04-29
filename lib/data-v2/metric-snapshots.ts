@@ -59,7 +59,11 @@ export async function getLatestMetricSnapshotByAccount(mlAccountId: string): Pro
 
 export async function createMetricSnapshot(payload: MetricSnapshotInsert): Promise<ActionResult<MetricSnapshotRow>> {
   const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase.from("metric_snapshots").insert(payload).select(METRIC_SNAPSHOT_SELECT).single();
+  const { data, error } = await supabase
+    .from("metric_snapshots")
+    .upsert(payload, { onConflict: "ml_account_id,snapshot_date" })
+    .select(METRIC_SNAPSHOT_SELECT)
+    .single();
 
   if (error || !data) {
     logServerError("data-v2.createMetricSnapshot", error ?? "snapshot_not_created", { mlAccountId: payload.ml_account_id });
