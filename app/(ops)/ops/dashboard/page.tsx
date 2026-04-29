@@ -5,9 +5,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getLatestAccountHealthByAccount } from "@/lib/data-v2/account-health";
 import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getLatestIngestionRunByAccount } from "@/lib/data-v2/ingestion-runs";
+import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { listTasksByAccount } from "@/lib/data-v2/tasks";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 import { getOperationalPriorityCopy } from "@/lib/ops/copy";
+import { countPricingRiskAlerts } from "@/lib/pricing/pricing-sku-computed";
 import { getScoreLabel } from "@/lib/utils/scores";
 
 export default async function OpsDashboardPage() {
@@ -16,12 +18,13 @@ export default async function OpsDashboardPage() {
     return <EmptyState context="cuenta" />;
   }
 
-  const [healthResult, alertsResult, pendingTasks, inProgressTasks, ingestionResult] = await Promise.all([
+  const [healthResult, alertsResult, pendingTasks, inProgressTasks, ingestionResult, pricingSkusResult] = await Promise.all([
     getLatestAccountHealthByAccount(accountResult.data.id),
     listAlertsByAccount(accountResult.data.id, { audience: "operator", includeResolved: false, limit: 10 }),
     listTasksByAccount(accountResult.data.id, { status: "pendiente" }),
     listTasksByAccount(accountResult.data.id, { status: "en_curso" }),
-    getLatestIngestionRunByAccount(accountResult.data.id)
+    getLatestIngestionRunByAccount(accountResult.data.id),
+    listPricingSkus(accountResult.data.id)
   ]);
 
   if (!healthResult.success || !healthResult.data) {
@@ -55,6 +58,11 @@ export default async function OpsDashboardPage() {
       : ingestion
         ? "Última ingesta: OK."
         : null;
+
+  const pricingRiskCount =
+    pricingSkusResult.success && health
+      ? countPricingRiskAlerts(health.id, accountResult.data.id, pricingSkusResult.data)
+      : 0;
 
   return (
     <main className="space-y-4">
@@ -112,6 +120,17 @@ export default async function OpsDashboardPage() {
           />
         </div>
       </section>
+
+      {pricingRiskCount > 0 ? (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+          <Link href="/ops/pricing" className="flex items-center justify-between gap-2 text-sm font-semibold text-amber-950">
+            <span>
+              {pricingRiskCount} SKU{pricingRiskCount === 1 ? "" : "s"} con riesgo de margen
+            </span>
+            <span className="shrink-0 underline-offset-2">Ver motor de precios →</span>
+          </Link>
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
         <div className="flex items-center justify-between gap-2">

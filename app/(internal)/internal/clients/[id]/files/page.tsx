@@ -25,21 +25,21 @@ const templateDefs = [
     title: "Planilla 1: SKUs y Stock",
     description: "Modelo base para que el cliente informe disponibilidad por SKU.",
     columns: ["sku", "producto", "stock", "dias_stock"],
-    href: "/templates/skus-stock.csv"
+    href: "/templates/skus-stock.xlsx"
   },
   {
     key: "margenes_costos" as const,
     title: "Planilla 2: Márgenes y Costos",
     description: "Necesaria para validar rentabilidad y decisiones de Ads.",
     columns: ["sku", "producto", "costo", "peso_kg", "logistica", "reputacion", "publicidad_pct", "margen_pct", "notas"],
-    href: "/templates/margenes-costos.csv"
+    href: "/templates/margenes-costos.xlsx"
   },
   {
     key: "ficha_tecnica" as const,
     title: "Planilla 3: Ficha Técnica",
     description: "Sirve para enriquecer títulos, descripciones y atributos.",
     columns: ["sku", "titulo", "descripcion", "atributos"],
-    href: "/templates/ficha-tecnica.csv"
+    href: "/templates/ficha-tecnica.xlsx"
   },
   {
     key: "pricing_comercial" as const,

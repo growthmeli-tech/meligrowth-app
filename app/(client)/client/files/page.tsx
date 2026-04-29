@@ -20,19 +20,19 @@ const templates = [
     title: "Planilla 1: SKUs y Stock",
     description: "Usala para informar disponibilidad actual por producto.",
     columns: ["sku", "producto", "stock", "dias_stock"],
-    href: "/templates/skus-stock.csv"
+    href: "/templates/skus-stock.xlsx"
   },
   {
     title: "Planilla 2: Márgenes y Costos",
     description: "Permite validar rentabilidad antes de tomar decisiones de publicidad.",
     columns: ["sku", "producto", "costo", "peso_kg", "logistica", "reputacion", "publicidad_pct", "margen_pct", "notas"],
-    href: "/templates/margenes-costos.csv"
+    href: "/templates/margenes-costos.xlsx"
   },
   {
     title: "Planilla 3: Ficha Técnica",
     description: "Ayuda a detectar oportunidades de mejora en publicaciones.",
     columns: ["sku", "titulo", "descripcion", "atributos"],
-    href: "/templates/ficha-tecnica.csv"
+    href: "/templates/ficha-tecnica.xlsx"
   },
   {
     title: "Planilla 4: Pricing Comercial",

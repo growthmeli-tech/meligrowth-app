@@ -41,3 +41,19 @@ export async function bulkReplacePricingSkusForFile(
   const withFile = rows.map((r) => ({ ...r, source_file: sourceFile, ml_account_id: mlAccountId } as Insert));
   return insertPricingSkusBatch(withFile);
 }
+
+export async function listPricingSkus(mlAccountId: string): Promise<ActionResult<Row[]>> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("pricing_skus")
+    .select("*")
+    .eq("ml_account_id", mlAccountId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    logServerError("pricing-skus.list", error, { mlAccountId });
+    return { success: false, error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo cargar pricing_skus", code: error.code };
+  }
+
+  return { success: true, data: (data ?? []) as Row[] };
+}

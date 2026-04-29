@@ -35,3 +35,19 @@ export async function insertPricingScenariosBatch(rows: Insert[]): Promise<Actio
   }
   return { success: true, data: (data ?? []) as Row[] };
 }
+
+export async function listPricingScenarios(mlAccountId: string): Promise<ActionResult<Row[]>> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("pricing_scenarios")
+    .select("*")
+    .eq("ml_account_id", mlAccountId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logServerError("pricing-scenarios.list", error, { mlAccountId });
+    return { success: false, error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron cargar escenarios", code: error.code };
+  }
+
+  return { success: true, data: (data ?? []) as Row[] };
+}

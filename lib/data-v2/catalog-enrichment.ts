@@ -36,3 +36,19 @@ export async function upsertCatalogEnrichmentBatch(rows: CatalogEnrichmentInput)
   }
   return { success: true, data: (data?.length ?? 0) };
 }
+
+export async function listCatalogEnrichment(mlAccountId: string): Promise<ActionResult<Row[]>> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("catalog_enrichment")
+    .select("*")
+    .eq("ml_account_id", mlAccountId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    logServerError("catalog-enrichment.list", error, { mlAccountId });
+    return { success: false, error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo cargar catalog_enrichment", code: error.code };
+  }
+
+  return { success: true, data: (data ?? []) as Row[] };
+}

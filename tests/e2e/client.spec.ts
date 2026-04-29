@@ -13,9 +13,9 @@ test("client can view dashboard and upload a supported template in demo mode", a
   await expect(page.getByText("Planilla 2: Márgenes y Costos")).toBeVisible();
   await expect(page.getByText("Planilla 3: Ficha Técnica")).toBeVisible();
   await expect(page.getByText("Planilla 4: Pricing Comercial")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Descargar SKUs y Stock" })).toHaveAttribute("href", "/templates/skus-stock.csv");
-  await expect(page.getByRole("link", { name: "Descargar Márgenes y Costos" })).toHaveAttribute("href", "/templates/margenes-costos.csv");
-  await expect(page.getByRole("link", { name: "Descargar Ficha Técnica" })).toHaveAttribute("href", "/templates/ficha-tecnica.csv");
+  await expect(page.getByRole("link", { name: "Descargar SKUs y Stock" })).toHaveAttribute("href", "/templates/skus-stock.xlsx");
+  await expect(page.getByRole("link", { name: "Descargar Márgenes y Costos" })).toHaveAttribute("href", "/templates/margenes-costos.xlsx");
+  await expect(page.getByRole("link", { name: "Descargar Ficha Técnica" })).toHaveAttribute("href", "/templates/ficha-tecnica.xlsx");
   await expect(page.getByRole("link", { name: "Descargar Pricing Comercial" })).toHaveAttribute("href", "/templates/pricing-calculadora.xlsx");
 
   await page.setInputFiles('input[name="file"]', path.join(process.cwd(), "tests", "fixtures", "skus_stock.csv"));

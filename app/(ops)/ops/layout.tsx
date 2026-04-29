@@ -41,7 +41,7 @@ export default async function OpsLayout({ children }: { children: React.ReactNod
     (inProgressTasksResult && inProgressTasksResult.success ? inProgressTasksResult.data.length : 0);
 
   return (
-    <div className="min-h-screen bg-[#F5F5F0] pb-20 md:grid md:grid-cols-[220px_1fr] md:pb-0">
+    <div className="min-h-screen bg-[#F5F5F0] pb-28 md:grid md:grid-cols-[220px_1fr] md:pb-0">
       <aside className="hidden border-r border-[#E8E8E2] bg-white p-4 md:flex md:flex-col">
         <p className="text-sm font-black text-[#1A1A1A]">MELIGROWTH OPS</p>
         <div className="mt-4 rounded-xl border border-[#E8E8E2] bg-[#F5F5F0] p-3">
