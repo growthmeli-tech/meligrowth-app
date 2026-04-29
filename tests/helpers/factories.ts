@@ -199,6 +199,14 @@ export function createMockMetricSnapshot(overrides: Partial<MetricSnapshotRow> =
       stock: "manual"
     },
     created_at: "2026-04-24T10:00:00.000Z",
+    nivel_vendedor: null,
+    ventas_completadas_60d: null,
+    periodo_reputacion: null,
+    listings_quota: null,
+    listings_total_items: null,
+    reputacion_protegida: null,
+    reputacion_real_level: null,
+    reputacion_level_id: null,
     ...overrides
   };
 }

@@ -1,3 +1,13 @@
+/**
+ * COMPLIANCE: This is the ONLY file authorized to make HTTP requests to MercadoLibre.
+ * All ML data must flow through this client. No exceptions.
+ * Web scraping of MercadoLibre is prohibited by their Terms of Service and
+ * will result in account suspension and DPP rejection.
+ * Reference: https://developers.mercadolibre.com.ar/es_ar/buenas-practicas-para-uso-de-la-plataforma
+ *
+ * OAuth token exchange (authorization_code / refresh_token) uses POST to the token endpoint
+ * from `lib/ml/auth.ts` per ML OAuth2 — all resource calls must use `mlFetch` below.
+ */
 const ML_BASE_URL = "https://api.mercadolibre.com";
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 700;
@@ -23,6 +33,23 @@ export class MlApiError extends Error {
     super(message);
     this.statusCode = statusCode;
     this.name = "MlApiError";
+  }
+}
+
+export class MlRateLimitError extends Error {
+  name = "MlRateLimitError";
+  endpoint: string;
+  retryAfter: number;
+  attempt: number;
+
+  constructor(
+    message: string,
+    context: { endpoint: string; retryAfter: number; attempt: number }
+  ) {
+    super(message);
+    this.endpoint = context.endpoint;
+    this.retryAfter = context.retryAfter;
+    this.attempt = context.attempt;
   }
 }
 
@@ -65,8 +92,21 @@ export async function mlFetch<T>(path: string, options?: MlFetchOptions): Promis
 
       if (response.status === 429) {
         const retryAfterHeader = response.headers.get("Retry-After");
-        const retryAfterSeconds = Number.parseInt(retryAfterHeader ?? "2", 10);
-        const retryMs = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 2000;
+        const retryAfterRaw = Number.parseInt(retryAfterHeader ?? "2", 10);
+        const retryAfterSeconds = Number.isFinite(retryAfterRaw) && retryAfterRaw > 0 ? retryAfterRaw : 2;
+        const retryMs = retryAfterSeconds * 1000;
+        console.error("[ml-client:rate_limited]", {
+          endpoint: path,
+          retryAfter: retryAfterSeconds,
+          attempt: attempt + 1
+        });
+        if (attempt >= MAX_RETRIES - 1) {
+          throw new MlRateLimitError("ML API rate limit exceeded after maximum retries", {
+            endpoint: path,
+            retryAfter: retryAfterSeconds,
+            attempt: attempt + 1
+          });
+        }
         await sleep(retryMs);
         continue;
       }
@@ -84,6 +124,7 @@ export async function mlFetch<T>(path: string, options?: MlFetchOptions): Promis
       return (await response.json()) as T;
     } catch (error) {
       if (error instanceof MlAuthError) throw error;
+      if (error instanceof MlRateLimitError) throw error;
       lastError = error instanceof Error ? error : new Error("Unknown ML request error");
 
       if (attempt < MAX_RETRIES - 1) {

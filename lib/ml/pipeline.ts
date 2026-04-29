@@ -1,7 +1,7 @@
-import { MlApiError, MlAuthError } from "@/lib/ml/client";
+import { MlApiError, MlAuthError, MlRateLimitError } from "@/lib/ml/client";
 import { getValidAccessToken } from "@/lib/ml/auth";
 import { getAdvertiserId, getAdsMetrics, mapAdsToDiagnostic } from "@/lib/ml/endpoints/ads";
-import { getListingsOptimizationRate, getListingsStats, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
+import { getListingsOptimizationRate, getListingsStats, getMarketplaceListingsCap, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
 import { getLogisticsMetrics } from "@/lib/ml/endpoints/logistics";
 import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
@@ -46,6 +46,16 @@ function logPipelineMlApiFailure(scope: string, error: unknown, context: Record<
     });
     return;
   }
+  if (error instanceof MlRateLimitError) {
+    console.error(`[ml-pipeline:${scope}]`, {
+      ...context,
+      mlError: "MlRateLimitError",
+      endpoint: error.endpoint,
+      retryAfter: error.retryAfter,
+      attempt: error.attempt
+    });
+    return;
+  }
   logPipelineError(scope, error, context);
 }
 
@@ -55,7 +65,7 @@ function classifyFetchError(error: unknown): { kind: string; message: string } {
   if (lower.includes("401") || lower.includes("403") || message.includes("MlAuthError")) {
     return { kind: "auth_forbidden", message };
   }
-  if (lower.includes("429") || lower.includes("rate")) {
+  if (error instanceof MlRateLimitError || lower.includes("mllratelimiterror")) {
     return { kind: "rate_limit", message };
   }
   if (lower.includes("404")) {
@@ -215,6 +225,13 @@ export async function fetchMLDiagnosticData(
       getListingsOptimizationRate(sellerId, accessToken)
     ]);
     Object.assign(prefill, mapListingsToDiagnostic(stats, optimizationRate));
+    try {
+      const cap = await getMarketplaceListingsCap(sellerId, accessToken);
+      if (cap.quota !== null) prefill.listings_quota = cap.quota;
+      if (cap.total_items !== null) prefill.listings_total_items = cap.total_items;
+    } catch (capError) {
+      logPipelineMlApiFailure("listings_cap_api", capError, { sellerId });
+    }
     dataSources.publicaciones = "api";
     blocksFetched.publicaciones = blockEntry("api", true);
   } catch (error) {
@@ -325,6 +342,14 @@ export async function fetchMLDiagnosticData(
         mediaciones: prefill.mediaciones ?? null,
         cancelaciones_vendedor: prefill.cancelaciones_vendedor ?? null,
         envios_a_tiempo: prefill.envios_a_tiempo ?? null,
+        nivel_vendedor: prefill.nivel_vendedor ?? null,
+        ventas_completadas_60d: prefill.ventas_completadas_60d ?? null,
+        periodo_reputacion: prefill.periodo_reputacion ?? null,
+        reputacion_protegida: prefill.reputacion_protegida ?? null,
+        reputacion_real_level: prefill.reputacion_real_level ?? null,
+        reputacion_level_id: prefill.reputacion_level_id ?? null,
+        listings_quota: prefill.listings_quota ?? null,
+        listings_total_items: prefill.listings_total_items ?? null,
         pubs_activas_pct: prefill.pubs_activas_pct ?? null,
         pubs_optimizadas_pct: prefill.pubs_optimizadas_pct ?? null,
         ctr: prefill.ctr ?? null,

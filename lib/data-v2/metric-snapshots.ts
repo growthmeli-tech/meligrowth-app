@@ -7,7 +7,7 @@ type MetricSnapshotRow = Database["public"]["Tables"]["metric_snapshots"]["Row"]
 type MetricSnapshotInsert = Database["public"]["Tables"]["metric_snapshots"]["Insert"];
 
 const METRIC_SNAPSHOT_SELECT =
-  "id, ml_account_id, snapshot_date, source, reclamos, mediaciones, cancelaciones_vendedor, envios_a_tiempo, pubs_activas_pct, pubs_optimizadas_pct, ctr, margen_pre_ads, gasto_ads, ventas_ads, ventas_totales, acos, roas, tacos, incidencias_pct, uso_full_flex_pct, cancelaciones_stock_pct, skus_sin_stock_pct, dias_stock, lead_time_reposicion, sistema_reposicion, data_sources, created_at";
+  "id, ml_account_id, snapshot_date, source, reclamos, mediaciones, cancelaciones_vendedor, envios_a_tiempo, pubs_activas_pct, pubs_optimizadas_pct, ctr, margen_pre_ads, gasto_ads, ventas_ads, ventas_totales, acos, roas, tacos, incidencias_pct, uso_full_flex_pct, cancelaciones_stock_pct, skus_sin_stock_pct, dias_stock, lead_time_reposicion, sistema_reposicion, data_sources, created_at, nivel_vendedor, ventas_completadas_60d, periodo_reputacion, listings_quota, listings_total_items, reputacion_protegida, reputacion_real_level, reputacion_level_id";
 
 export async function listMetricSnapshotsByAccount(
   mlAccountId: string,

@@ -5,6 +5,16 @@ export type MlDiagnosticPrefill = {
   mediaciones?: number | null;
   cancelaciones_vendedor?: number | null;
   envios_a_tiempo?: number | null;
+  nivel_vendedor?: string | null;
+  ventas_completadas_60d?: number | null;
+  periodo_reputacion?: string | null;
+  reputacion_protegida?: boolean | null;
+  reputacion_real_level?: string | null;
+  reputacion_level_id?: string | null;
+  vendedor_protegido_reclamos?: boolean | null;
+  reclamos_nota?: string | null;
+  listings_quota?: number | null;
+  listings_total_items?: number | null;
   pubs_activas_pct?: number | null;
   pubs_optimizadas_pct?: number | null;
   ctr?: number | null;
@@ -42,6 +52,8 @@ export type MlStoredTokens = {
 
 export type MlSellerReputationResponse = {
   level_id: string | null;
+  /** When present and differs from displayed tier, seller may be under reputation protection. */
+  real_level?: string | null;
   power_seller_status: string | null;
   transactions?: {
     period?: string;
@@ -55,7 +67,12 @@ export type MlSellerReputationResponse = {
   };
   metrics?: {
     sales?: { period?: string; completed?: number; declined?: number };
-    claims?: { period?: string; rate?: number; value?: number };
+    claims?: {
+      period?: string;
+      rate?: number;
+      value?: number;
+      excluded?: { real_rate?: number };
+    };
     delayed_handling_time?: { period?: string; rate?: number; value?: number };
     cancellations?: { period?: string; rate?: number; value?: number };
   };

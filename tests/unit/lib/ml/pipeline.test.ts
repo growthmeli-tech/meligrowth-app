@@ -10,6 +10,7 @@ vi.mock("@/lib/ml/endpoints/reputation", () => ({
 vi.mock("@/lib/ml/endpoints/listings", () => ({
   getListingsStats: vi.fn(),
   getListingsOptimizationRate: vi.fn(),
+  getMarketplaceListingsCap: vi.fn(),
   mapListingsToDiagnostic: vi.fn()
 }));
 vi.mock("@/lib/ml/endpoints/ads", () => ({
@@ -27,7 +28,7 @@ vi.mock("@/lib/ml/endpoints/stock", () => ({
 import { fetchMLDiagnosticData } from "@/lib/ml/pipeline";
 import { getValidAccessToken } from "@/lib/ml/auth";
 import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
-import { getListingsOptimizationRate, getListingsStats, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
+import { getListingsOptimizationRate, getListingsStats, getMarketplaceListingsCap, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
 import { getAdvertiserId, getAdsMetrics, mapAdsToDiagnostic } from "@/lib/ml/endpoints/ads";
 import { getLogisticsMetrics } from "@/lib/ml/endpoints/logistics";
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
@@ -41,10 +42,19 @@ describe("ML pipeline", () => {
       reclamos: 0.6,
       mediaciones: 0.2,
       cancelaciones_vendedor: 0.3,
-      envios_a_tiempo: 90
+      envios_a_tiempo: 90,
+      nivel_vendedor: null,
+      ventas_completadas_60d: null,
+      periodo_reputacion: null,
+      reputacion_protegida: false,
+      reputacion_real_level: null,
+      reputacion_level_id: null,
+      vendedor_protegido_reclamos: false,
+      reclamos_nota: null
     });
     vi.mocked(getListingsStats).mockResolvedValue({ total: 100, active: 70, paused: 30 });
     vi.mocked(getListingsOptimizationRate).mockResolvedValue(65);
+    vi.mocked(getMarketplaceListingsCap).mockResolvedValue({ quota: null, total_items: null });
     vi.mocked(mapListingsToDiagnostic).mockReturnValue({
       pubs_activas_pct: 70,
       pubs_optimizadas_pct: 65,

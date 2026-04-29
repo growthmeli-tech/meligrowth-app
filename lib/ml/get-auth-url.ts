@@ -1,17 +1,14 @@
+import { getAuthorizationUrl } from "@/lib/ml/auth";
 import { getServerEnv } from "@/lib/config/env";
+import { createMlOAuthState } from "@/lib/ml/oauth-state";
 
-export function getMLAuthorizationUrl(mlAccountId: string): string {
+/** Builds ML OAuth URL with a cryptographically random `state` stored short-lived in DB (CSRF). */
+export async function getMLAuthorizationUrl(mlAccountId: string): Promise<string> {
   const { ml } = getServerEnv();
   if (!ml.clientId || !ml.redirectUri) {
     throw new Error("ML credentials not configured");
   }
 
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: ml.clientId,
-    redirect_uri: ml.redirectUri,
-    state: mlAccountId
-  });
-
-  return `https://auth.mercadolibre.com.ar/authorization?${params.toString()}`;
+  const state = await createMlOAuthState(mlAccountId);
+  return getAuthorizationUrl(state);
 }

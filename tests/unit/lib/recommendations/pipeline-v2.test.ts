@@ -42,11 +42,41 @@ function createPipelineSupabaseMock(snapshot: MetricSnapshotRow, healthOverride:
     }))
   };
 
-  const accountHealthQuery = {
+  const accountHealthSelectExisting = {
+    eq: vi.fn(function eqFn(this: typeof accountHealthSelectExisting) {
+      return accountHealthSelectExisting;
+    }),
+    order: vi.fn(function orderFn(this: typeof accountHealthSelectExisting) {
+      return accountHealthSelectExisting;
+    }),
+    limit: vi.fn(function limitFn(this: typeof accountHealthSelectExisting) {
+      return accountHealthSelectExisting;
+    }),
+    maybeSingle: vi.fn(async () => ({ data: null, error: null }))
+  };
+
+  const accountHealthUpdateChain = {
+    eq: vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: {
+            ...createMockAccountHealth(),
+            ...insertedHealth,
+            ...healthOverride
+          },
+          error: null
+        }))
+      }))
+    }))
+  };
+
+  const accountHealthApi = {
     insert: vi.fn((payload: Partial<AccountHealthRow>) => {
       insertedHealth = payload;
       return healthInsertQuery;
-    })
+    }),
+    select: vi.fn(() => accountHealthSelectExisting),
+    update: vi.fn(() => accountHealthUpdateChain)
   };
 
   const alertsCountQuery = {
@@ -59,7 +89,7 @@ function createPipelineSupabaseMock(snapshot: MetricSnapshotRow, healthOverride:
   const client = {
     from: vi.fn((table: string) => {
       if (table === "metric_snapshots") return metricSnapshotQuery;
-      if (table === "account_health") return accountHealthQuery;
+      if (table === "account_health") return accountHealthApi;
       if (table === "alerts") return alertsCountQuery;
       throw new Error(`Tabla no mockeada: ${table}`);
     })

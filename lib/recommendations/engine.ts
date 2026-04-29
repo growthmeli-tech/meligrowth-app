@@ -4,6 +4,7 @@ import { ACCIONES_POR_METRICA } from "@/lib/recommendations/actions";
 import { analyzeAds } from "@/lib/recommendations/ads-analyzer";
 import { benchmarkToObjective, getBenchmarkDefinition, getStatusFromScore } from "@/lib/recommendations/benchmarks";
 import { getPrioridadRecomendacion, sortByPriority } from "@/lib/recommendations/priorities";
+import { buildMlNativeSignals } from "@/lib/recommendations/ml-native-signals";
 import { buildOperationalRecommendations } from "@/lib/recommendations/operational-signals";
 import { getScoreStatus, getStrategyForScore } from "@/lib/recommendations/score-interpreter";
 import type { DiagnosticRecommendations, MetricInput, Recommendation, RecommendationAudience, RecommendationCategory } from "@/lib/recommendations/types";
@@ -122,9 +123,30 @@ function getAudienciaRecomendacion(input: {
   return "all";
 }
 
+export type MlSnapshotForRecommendations = {
+  nivel_vendedor: string | null;
+  ventas_completadas_60d: number | null;
+  periodo_reputacion: string | null;
+  reputacion_real_level: string | null;
+  reputacion_level_id: string | null;
+  listings_quota: number | null;
+  listings_total_items: number | null;
+  uso_full_flex_pct: number | null;
+  acos: number | null;
+  roas: number | null;
+  margen_pre_ads: number | null;
+  dias_stock: number | null;
+  skus_sin_stock_pct: number | null;
+  ventas_totales: number | null;
+  gasto_ads: number | null;
+  ventas_ads: number | null;
+};
+
 export type GenerateRecommendationsOptions = {
   /** Origen por bloque (p. ej. api vs unavailable) — pipeline v2 */
   data_sources?: Record<string, string>;
+  /** Campos extra del snapshot v2 / API ML para señales nativas */
+  ml_snapshot?: MlSnapshotForRecommendations | null;
 };
 
 function meaningfulAdsActivity(diagnostic: RecommendationsDiagnosticInput): boolean {
@@ -240,6 +262,33 @@ export function generateRecommendations(
     data_sources: options?.data_sources
   });
 
+  let mlNative: Recommendation[] = [];
+  if (options?.ml_snapshot) {
+    const snap = options.ml_snapshot;
+    const adsOk =
+      meaningfulAds ||
+      (typeof snap.gasto_ads === "number" && snap.gasto_ads > 0) ||
+      (typeof snap.ventas_ads === "number" && snap.ventas_ads > 0);
+    const acosForMl = adsOk ? snap.acos : null;
+    const roasForMl = adsOk ? snap.roas : null;
+    mlNative = buildMlNativeSignals({
+      diagnosticId: diagnostic.id,
+      nivel_vendedor: snap.nivel_vendedor,
+      ventas_completadas_60d: snap.ventas_completadas_60d,
+      reputacion_real_level: snap.reputacion_real_level,
+      reputacion_level_id: snap.reputacion_level_id,
+      listings_quota: snap.listings_quota,
+      listings_total_items: snap.listings_total_items,
+      uso_full_flex_pct: snap.uso_full_flex_pct,
+      acos: acosForMl,
+      roas: roasForMl,
+      margen_pre_ads: snap.margen_pre_ads,
+      dias_stock: snap.dias_stock,
+      skus_sin_stock_pct: snap.skus_sin_stock_pct,
+      ventas_totales: snap.ventas_totales
+    });
+  }
+
   return {
     client_id: diagnostic.client_id,
     diagnostic_id: diagnostic.id,
@@ -248,7 +297,7 @@ export function generateRecommendations(
     estrategia_general: estrategia.accion,
     recomendacion_ads:
       adsAnalysis && adsAnalysis.estado_salud !== "sin_datos" ? adsAnalysis.recomendacion : estrategia.ads,
-    recomendaciones: sortByPriority([...recomendaciones, ...operativas]),
+    recomendaciones: sortByPriority([...recomendaciones, ...operativas, ...mlNative]),
     bloques_criticos: getCriticalBlocks(diagnostic),
     bloques_saludables: getHealthyBlocks(diagnostic),
     generated_at: new Date().toISOString()

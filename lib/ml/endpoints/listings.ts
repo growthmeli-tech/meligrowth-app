@@ -64,6 +64,42 @@ export async function getListingsOptimizationRate(sellerId: string, accessToken:
   return (optimized / itemIds.length) * 100;
 }
 
+function parseMarketplaceCapPayload(payload: unknown): { quota: number | null; total_items: number | null } {
+  if (payload == null) return { quota: null, total_items: null };
+
+  if (Array.isArray(payload) && payload.length > 0 && typeof payload[0] === "object" && payload[0] !== null) {
+    const o = payload[0] as Record<string, unknown>;
+    const quota = typeof o.quota === "number" ? o.quota : null;
+    const total_items = typeof o.total_items === "number" ? o.total_items : null;
+    if (quota !== null || total_items !== null) return { quota, total_items };
+  }
+
+  if (typeof payload === "object" && !Array.isArray(payload)) {
+    const o = payload as Record<string, unknown>;
+    if (typeof o.quota === "number" && typeof o.total_items === "number") {
+      return { quota: o.quota, total_items: o.total_items };
+    }
+    const sites = o.sites;
+    if (Array.isArray(sites) && sites[0] && typeof sites[0] === "object" && sites[0] !== null) {
+      const s = sites[0] as Record<string, unknown>;
+      const quota = typeof s.quota === "number" ? s.quota : null;
+      const total_items = typeof s.total_items === "number" ? s.total_items : null;
+      if (quota !== null || total_items !== null) return { quota, total_items };
+    }
+  }
+
+  return { quota: null, total_items: null };
+}
+
+/** GET /marketplace/users/cap — listing quota vs usage (DPP / seller limits). */
+export async function getMarketplaceListingsCap(sellerId: string, accessToken: string) {
+  const raw = await mlFetch<unknown>(`/marketplace/users/cap`, {
+    token: accessToken,
+    query: { user_id: sellerId }
+  });
+  return parseMarketplaceCapPayload(raw);
+}
+
 export function mapListingsToDiagnostic(
   stats: { total: number; active: number },
   optimizationRate: number

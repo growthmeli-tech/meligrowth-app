@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { exchangeCodeForTokens, saveSessionTokens } from "@/lib/ml/auth";
+import { deleteMlOAuthState, peekMlOAuthState } from "@/lib/ml/oauth-state";
 import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,8 +24,11 @@ export async function GET(request: Request) {
   });
 
   if (!state || !UUID_V4_REGEX.test(state)) {
-    console.error(`${callbackTag} invalid_state`, { state });
-    return internalClientsRedirect(request, "ml_error=invalid_state");
+    console.error("[ml-auth:state_mismatch]", { reason: "invalid_or_missing", hasState: Boolean(state) });
+    return new NextResponse(JSON.stringify({ error: "invalid_state" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
   if (oauthError) {
@@ -34,7 +38,19 @@ export async function GET(request: Request) {
 
   if (!code) {
     console.error(`${callbackTag} missing_code`, { state });
-    return internalClientsRedirect(request, "ml_error=missing_code");
+    return new NextResponse(JSON.stringify({ error: "missing_code" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  const mlAccountIdFromState = await peekMlOAuthState(state);
+  if (!mlAccountIdFromState) {
+    console.error("[ml-auth:state_mismatch]", { state, reason: "not_found_or_expired" });
+    return new NextResponse(JSON.stringify({ error: "invalid_state" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
   try {
@@ -54,10 +70,13 @@ export async function GET(request: Request) {
     const { data: mlAccount, error: mlAccountError } = await supabase
       .from("ml_accounts")
       .select("id, company_id")
-      .eq("id", state)
+      .eq("id", mlAccountIdFromState)
       .maybeSingle();
     if (mlAccountError || !mlAccount) {
-      console.error(`${callbackTag} ml_account_lookup_failed`, { state, error: mlAccountError?.message });
+      console.error(`${callbackTag} ml_account_lookup_failed`, {
+        mlAccountId: mlAccountIdFromState,
+        error: mlAccountError?.message
+      });
       throw new Error("Invalid callback state");
     }
     console.info(`${callbackTag} ml_account_lookup_ok`, {
@@ -66,16 +85,17 @@ export async function GET(request: Request) {
     });
     const mlAccountId = mlAccount.id;
 
-    const storagePath = `${state}/session.json`;
+    const storagePath = `${mlAccountIdFromState}/session.json`;
     const tokenPayload = {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_at: Math.floor(Date.now() / 1000) + tokens.expires_in
     };
 
-    console.info(`${callbackTag} saving_tokens`, { storagePath, mlAccountId: state });
+    console.info(`${callbackTag} saving_tokens`, { storagePath, mlAccountId: mlAccountIdFromState });
     await saveSessionTokens(storagePath, tokenPayload);
-    console.info(`${callbackTag} tokens_saved`, { storagePath, mlAccountId: state });
+    console.info(`${callbackTag} tokens_saved`, { storagePath, mlAccountId: mlAccountIdFromState });
+    await deleteMlOAuthState(state);
 
     console.log("[ml-auth-callback] attempting_update", { mlAccountId, sellerId: tokens.user_id });
     try {

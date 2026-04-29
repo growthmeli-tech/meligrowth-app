@@ -153,7 +153,17 @@ export async function getValidAccessToken(clientId: string, mlAccountId?: string
       expires_at: now + refreshed.expires_in
     };
 
-    await saveSessionTokens(storagePath, mergedTokens);
+    try {
+      await saveSessionTokens(storagePath, mergedTokens);
+    } catch (err) {
+      console.error("[ml-auth:refresh_lost]", {
+        mlAccountId,
+        storagePath,
+        mode: "ml_account",
+        error: err instanceof Error ? err.message : String(err)
+      });
+      throw err;
+    }
     return mergedTokens.access_token;
   }
 
@@ -185,7 +195,17 @@ export async function getValidAccessToken(clientId: string, mlAccountId?: string
     expires_at: now + refreshed.expires_in
   };
 
-  await saveSessionTokens(session.storage_path, mergedTokens);
+  try {
+    await saveSessionTokens(session.storage_path, mergedTokens);
+  } catch (err) {
+    console.error("[ml-auth:refresh_lost]", {
+      storagePath: session.storage_path,
+      mode: "legacy_client",
+      meliSessionId: session.id,
+      error: err instanceof Error ? err.message : String(err)
+    });
+    throw err;
+  }
   await supabase
     .from("meli_sessions")
     .update({

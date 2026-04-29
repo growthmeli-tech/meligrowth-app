@@ -45,7 +45,7 @@ export default async function ClientSettingsPage({
   let oauthUrl: string | null = null;
   if (ml.isConfigured) {
     try {
-      oauthUrl = getMLAuthorizationUrl(account.id);
+      oauthUrl = await getMLAuthorizationUrl(account.id);
       const parsedOAuthUrl = new URL(oauthUrl);
       console.info("[ml-settings] oauth_url_generated", {
         companyId: id,

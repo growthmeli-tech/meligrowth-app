@@ -432,11 +432,35 @@ export type Database = {
           sistema_reposicion: number | null;
           data_sources: Json;
           created_at: string;
+          nivel_vendedor: string | null;
+          ventas_completadas_60d: number | null;
+          periodo_reputacion: string | null;
+          listings_quota: number | null;
+          listings_total_items: number | null;
+          reputacion_protegida: boolean | null;
+          reputacion_real_level: string | null;
+          reputacion_level_id: string | null;
         };
         Insert: Partial<Database["public"]["Tables"]["metric_snapshots"]["Row"]> & {
           ml_account_id: string;
         };
         Update: Partial<Database["public"]["Tables"]["metric_snapshots"]["Row"]>;
+        Relationships: [];
+      };
+      ml_oauth_states: {
+        Row: {
+          state: string;
+          ml_account_id: string;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          state: string;
+          ml_account_id: string;
+          expires_at: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_oauth_states"]["Row"]>;
         Relationships: [];
       };
       account_health: {

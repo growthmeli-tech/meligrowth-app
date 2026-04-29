@@ -132,7 +132,27 @@ export async function runRecommendationsPipelineV2(input: {
 
   const recommendationsInput = snapshotToRecommendationsInput(snapshot, accountHealth);
   const dataSources = ((snapshot.data_sources as Record<string, string> | null) ?? {}) as Record<string, string>;
-  const baseRecommendations = generateRecommendations(recommendationsInput, { data_sources: dataSources });
+  const baseRecommendations = generateRecommendations(recommendationsInput, {
+    data_sources: dataSources,
+    ml_snapshot: {
+      nivel_vendedor: snapshot.nivel_vendedor,
+      ventas_completadas_60d: snapshot.ventas_completadas_60d,
+      periodo_reputacion: snapshot.periodo_reputacion,
+      reputacion_real_level: snapshot.reputacion_real_level,
+      reputacion_level_id: snapshot.reputacion_level_id,
+      listings_quota: snapshot.listings_quota,
+      listings_total_items: snapshot.listings_total_items,
+      uso_full_flex_pct: snapshot.uso_full_flex_pct,
+      acos: snapshot.acos,
+      roas: snapshot.roas,
+      margen_pre_ads: snapshot.margen_pre_ads,
+      dias_stock: snapshot.dias_stock,
+      skus_sin_stock_pct: snapshot.skus_sin_stock_pct,
+      ventas_totales: snapshot.ventas_totales,
+      gasto_ads: snapshot.gasto_ads,
+      ventas_ads: snapshot.ventas_ads
+    }
+  });
 
   const enrichedRecs: EnrichedRecommendation[] = shouldEnrich
     ? await enrichRecommendationsWithClaude(baseRecommendations.recomendaciones, snapshot)

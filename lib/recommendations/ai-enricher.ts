@@ -106,10 +106,31 @@ function buildSystemPrompt(): string {
   return `Sos un analista operativo experto en vendedores de MercadoLibre Argentina.
 Generás contenido accionable para operadores que gestionan cuentas de vendedores.
 Usás los números reales del vendedor en cada texto que generás.
+
+Contexto de negocio MercadoLibre Argentina:
+- La reputación se calcula sobre reclamos, cancelaciones y demoras en envíos.
+- El período de medición es 60 días (vendedores con >50 ventas) o 365 días.
+- Mercado Líderes tienen umbrales más estrictos en mediaciones.
+- Full/Flex mejora posicionamiento en búsquedas directamente.
+- ACOS break-even = 1 / margen_pre_ads (cuando margen_pre_ads está como porcentaje). Si ACOS > break-even, la campaña destruye margen.
+
+Contexto operativo MercadoLibre Argentina (siempre aplicar):
+- La reputación se mide sobre: reclamos, cancelaciones por vendedor, y demoras en envíos
+- Período de medición: últimos 60 días (si >50 ventas) o últimos 365 días
+- Mercado Líderes tienen umbrales más estrictos: mediaciones también afectan su reputación
+- Full/Flex impacta directamente el posicionamiento en resultados de búsqueda
+- ACOS break-even = 100 / margen_pre_ads. ACOS por encima = destrucción de margen
+- Una venta con ACOS sobre break-even es peor negocio que no invertir en ads
+- ventas_completadas_60d > 50 con métricas limpias = elegible para Mercado Líder
+
 Respondés ÚNICAMENTE con JSON válido. Sin texto antes ni después, sin backticks.`;
 }
 
 function buildUserPrompt(recommendations: Recommendation[], snapshot: MetricSnapshotRow): string {
+  const margen = snapshot.margen_pre_ads;
+  const breakeven_roas =
+    typeof margen === "number" && margen > 0 ? Math.round((1 / (margen / 100)) * 100) / 100 : null;
+
   const metrics = {
     ventas_totales: snapshot.ventas_totales,
     gasto_ads: snapshot.gasto_ads,
@@ -130,7 +151,13 @@ function buildUserPrompt(recommendations: Recommendation[], snapshot: MetricSnap
     cancelaciones_stock_pct: snapshot.cancelaciones_stock_pct,
     skus_sin_stock_pct: snapshot.skus_sin_stock_pct,
     dias_stock: snapshot.dias_stock,
-    lead_time_reposicion: snapshot.lead_time_reposicion
+    lead_time_reposicion: snapshot.lead_time_reposicion,
+    nivel_vendedor: snapshot.nivel_vendedor ?? null,
+    ventas_completadas_60d: snapshot.ventas_completadas_60d ?? null,
+    periodo_reputacion: snapshot.periodo_reputacion ?? null,
+    breakeven_acos:
+      typeof margen === "number" && margen > 0 ? Math.round((100 / margen) * 100) / 100 : null,
+    breakeven_roas
   };
 
   const recsPayload = recommendations.map((r) => ({
