@@ -554,6 +554,110 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["task_events"]["Row"]>;
         Relationships: [];
       };
+      file_ingestion_log: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          company_id: string;
+          template_type: "skus_stock" | "margenes_costos" | "ficha_tecnica" | "pricing_comercial" | "unknown";
+          filename: string;
+          storage_path: string | null;
+          rows_total: number | null;
+          rows_valid: number | null;
+          rows_error: number | null;
+          status: "pending" | "processing" | "success" | "error";
+          error_summary: Json | null;
+          metrics_updated: Json | null;
+          alerts_generated: number | null;
+          processed_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["file_ingestion_log"]["Row"]> & {
+          ml_account_id: string;
+          company_id: string;
+          template_type: "skus_stock" | "margenes_costos" | "ficha_tecnica" | "pricing_comercial" | "unknown";
+          filename: string;
+          status: "pending" | "processing" | "success" | "error";
+        };
+        Update: Partial<Database["public"]["Tables"]["file_ingestion_log"]["Row"]>;
+        Relationships: [];
+      };
+      catalog_enrichment: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          sku: string;
+          titulo: string;
+          descripcion: string | null;
+          atributos: Json | null;
+          source_file: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["catalog_enrichment"]["Row"]> & {
+          ml_account_id: string;
+          sku: string;
+          titulo: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["catalog_enrichment"]["Row"]>;
+        Relationships: [];
+      };
+      pricing_scenarios: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          plan: string;
+          current_revenue: number;
+          projected_revenue: number;
+          gross_margin_pct: number;
+          delivery_cost: number;
+          setup_fee: number;
+          months: number;
+          net_margin_pct: number | null;
+          monthly_profit: number | null;
+          total_projected_profit: number | null;
+          source_file: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["pricing_scenarios"]["Row"]> & {
+          ml_account_id: string;
+          plan: string;
+          current_revenue: number;
+          projected_revenue: number;
+          gross_margin_pct: number;
+          delivery_cost: number;
+          months: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["pricing_scenarios"]["Row"]>;
+        Relationships: [];
+      };
+      pricing_skus: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          sku: string | null;
+          producto: string;
+          costo: number;
+          peso_kg: number | null;
+          logistica: "Full" | "Flex" | "Retiro domicilio";
+          reputacion: string | null;
+          publicidad_pct: number | null;
+          margen_pct: number | null;
+          precio_venta: number | null;
+          ganancia_unit: number | null;
+          roi: number | null;
+          source_file: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["pricing_skus"]["Row"]> & {
+          ml_account_id: string;
+          producto: string;
+          costo: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["pricing_skus"]["Row"]>;
+        Relationships: [];
+      };
       ingestion_runs: {
         Row: {
           id: string;

@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { FileText, UploadCloud } from "lucide-react";
+import { FileIngestionPanel } from "@/components/files/file-ingestion-panel";
+import { TemplateCard } from "@/components/files/template-card";
 import { uploadCompanyFolderFile } from "@/app/(internal)/internal/clients/[id]/files/actions";
 import { FileUploader } from "@/components/files/file-uploader";
-import { TemplateCard } from "@/components/files/template-card";
 import { createClientFileSignedUrl, listCompanyClientFiles } from "@/lib/data-v2/company-storage-files";
 import { getCompanyById } from "@/lib/data-v2/companies";
+import { listIngestionLogsByAccount, getLastSuccessIngestionByTemplate } from "@/lib/data-v2/file-ingestion-log";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
+import type { TemplateType } from "@/lib/ingestion/types";
 
 const errorMessages: Record<string, string> = {
   missing_upload: "Seleccioná un archivo antes de subir.",
@@ -16,32 +19,64 @@ const errorMessages: Record<string, string> = {
   forbidden: "No tenés permiso para subir archivos."
 };
 
-const templates = [
+const templateDefs = [
   {
+    key: "skus_stock" as const,
     title: "Planilla 1: SKUs y Stock",
     description: "Modelo base para que el cliente informe disponibilidad por SKU.",
-    columns: ["sku", "stock"],
+    columns: ["sku", "producto", "stock", "dias_stock"],
     href: "/templates/skus-stock.csv"
   },
   {
+    key: "margenes_costos" as const,
     title: "Planilla 2: Márgenes y Costos",
     description: "Necesaria para validar rentabilidad y decisiones de Ads.",
-    columns: ["sku", "costo", "precio", "margen"],
+    columns: ["sku", "producto", "costo", "logistica", "margen_pct"],
     href: "/templates/margenes-costos.csv"
   },
   {
+    key: "ficha_tecnica" as const,
     title: "Planilla 3: Ficha Técnica",
     description: "Sirve para enriquecer títulos, descripciones y atributos.",
     columns: ["sku", "titulo", "descripcion", "atributos"],
     href: "/templates/ficha-tecnica.csv"
   },
   {
+    key: "pricing_comercial" as const,
     title: "Planilla 4: Pricing Comercial",
-    description: "Permite importar el escenario comercial directamente en la calculadora.",
+    description: "Escenarios comerciales (ingresos, márgenes, costo operativo).",
     columns: ["plan", "current_revenue", "projected_revenue", "gross_margin_pct", "delivery_cost", "setup_fee", "months"],
     href: "/templates/pricing-calculadora.xlsx"
   }
 ];
+
+function quickStatsForTemplate(
+  t: TemplateType,
+  metrics: unknown
+): string | null {
+  if (!metrics || typeof metrics !== "object") return null;
+  const o = metrics as Record<string, unknown>;
+  if (t === "skus_stock") {
+    if (o.skus_sin_stock_pct == null) return null;
+    const d = o.dias_stock;
+    return `SKUs sin stock ${Number(o.skus_sin_stock_pct).toFixed(1)}%${typeof d === "number" ? ` · días stock promedio ${d.toFixed(0)}` : ""}`;
+  }
+  if (t === "margenes_costos") {
+    if (o.margen_pre_ads_pct == null && o.skus == null) return null;
+    if (typeof o.margen_pre_ads_pct === "number") {
+      return `Margen pre-ads ponderado ${o.margen_pre_ads_pct.toFixed(1)}%${typeof o.skus === "number" ? ` · ${o.skus} SKUs` : ""}`;
+    }
+    if (typeof o.skus === "number") return `${o.skus} SKUs importados`;
+  }
+  if (t === "ficha_tecnica") {
+    if (o.filas == null) return null;
+    return `${o.filas} publicaciones en catálogo local`;
+  }
+  if (t === "pricing_comercial") {
+    if (o.mejor_plan) return `Mejor escenario: ${o.mejor_plan}${o.net_margin != null ? ` (neto ${(Number(o.net_margin) * 100).toFixed(1)}%)` : ""}`;
+  }
+  return null;
+}
 
 export default async function InternalClientFilesPage({
   params,
@@ -64,6 +99,36 @@ export default async function InternalClientFilesPage({
 
   const accountsResult = await listMlAccountsByCompany(id, { activeOnly: true });
   const primaryAccount = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
+  const mlId = primaryAccount?.id ?? "";
+
+  const lastBy = async (k: (typeof templateDefs)[number]["key"]) => {
+    if (!mlId) return null;
+    const r = await getLastSuccessIngestionByTemplate(mlId, k);
+    return r.success ? r.data : null;
+  };
+  const [a, b, c, d] = await Promise.all([lastBy("skus_stock"), lastBy("margenes_costos"), lastBy("ficha_tecnica"), lastBy("pricing_comercial")]);
+  const lastMap: Record<string, typeof a> = {
+    skus_stock: a,
+    margenes_costos: b,
+    ficha_tecnica: c,
+    pricing_comercial: d
+  };
+
+  const logsRes = mlId ? await listIngestionLogsByAccount(mlId, 50) : { success: true as const, data: [] };
+  const historyRows =
+    logsRes.success && Array.isArray(logsRes.data)
+      ? logsRes.data.map((r) => ({
+          id: r.id,
+          filename: r.filename,
+          template_type: r.template_type,
+          rows_valid: r.rows_valid,
+          rows_error: r.rows_error,
+          status: r.status,
+          processed_at: r.processed_at,
+          metrics_updated: r.metrics_updated,
+          alerts_generated: r.alerts_generated
+        }))
+      : [];
 
   const filesResult = await listCompanyClientFiles(id);
   const rawFiles = filesResult.success ? filesResult.data : [];
@@ -87,14 +152,14 @@ export default async function InternalClientFilesPage({
           </Link>
           <h1 className="mt-1 text-xl font-bold text-[#1A1A1A]">Archivos</h1>
           <p className="text-sm text-[#6B6B6B]">
-            Planillas y cargas en Storage para la empresa. Cuenta ML: {primaryAccount?.account_name ?? primaryAccount?.seller_id ?? "pendiente"}
+            Planillas e ingesta operativa. Cuenta ML: {primaryAccount?.account_name ?? primaryAccount?.seller_id ?? "pendiente"}
           </p>
         </div>
       </header>
 
       {resolvedSearchParams.uploaded ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-          Archivo subido correctamente.
+          Archivo subido correctamente (Storage).
         </div>
       ) : null}
       {resolvedSearchParams.error ? (
@@ -104,18 +169,40 @@ export default async function InternalClientFilesPage({
       ) : null}
 
       <section className="grid gap-4 xl:grid-cols-4">
-        {templates.map((template) => (
-          <TemplateCard key={template.title} {...template} />
-        ))}
+        {templateDefs.map((template) => {
+          const last = lastMap[template.key];
+          const m = last?.metrics_updated;
+          return (
+            <TemplateCard
+              key={template.title}
+              title={template.title}
+              description={template.description}
+              columns={template.columns}
+              href={template.href}
+              lastImportAt={last?.processed_at}
+              lastRowsValid={last?.rows_valid}
+              quickStats={quickStatsForTemplate(template.key, m)}
+              statusMode={last?.processed_at ? "ok" : "empty"}
+            />
+          );
+        })}
       </section>
+
+      {mlId ? (
+        <FileIngestionPanel companyId={id} mlAccountId={mlId} ingestionHistory={historyRows} />
+      ) : (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Aún no hay una cuenta ML asociada. Creá o vinculá una cuenta para importar planillas.
+        </div>
+      )}
 
       <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
         <FileUploader action={uploadCompanyFolderFile.bind(null, id)} />
         <div className="rounded-xl border border-[#E8E8E2] bg-white p-4">
-          <h2 className="text-lg font-bold text-[#1A1A1A]">Carga interna</h2>
+          <h2 className="text-lg font-bold text-[#1A1A1A]">Carga a Storage (sin pipeline)</h2>
           <div className="mt-4 space-y-3 text-sm text-[#6B6B6B]">
-            <p>Los archivos se guardan en el bucket <span className="font-mono text-xs">client-files</span> bajo la carpeta de esta company.</p>
-            <p>Formatos: CSV, XLSX u ODS. Máximo 10 MB.</p>
+            <p>Sube archivos al bucket <span className="font-mono text-xs">client-files</span> bajo la carpeta de esta company, sin validación ni actualización de métricas.</p>
+            <p>Para actualizar snapshot, alertas y tablas, usá el uploader con preview arriba.</p>
           </div>
           <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-[#1A1A1A]">
             <UploadCloud className="h-4 w-4" />
