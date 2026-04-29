@@ -98,7 +98,8 @@ export default async function InternalClientBlockDetailPage({
     label: metric.label,
     benchmarkKey: `${config.category}.${metric.benchmarkMetric}`,
     valor: metric.valor,
-    column: metric.column
+    column: metric.column,
+    ...(metric.valueUnit ? { valueUnit: metric.valueUnit } : {})
   }));
   const sourceByBlock = extractBlockSource(latestSnapshot.data_sources, bloque);
 
@@ -142,13 +143,7 @@ export default async function InternalClientBlockDetailPage({
         </div>
       </header>
 
-      <BlockMetricsEditor
-        mlAccountId={account.id}
-        block={bloque as InternalBlockSlug}
-        rows={editorRows}
-        blockSource={sourceByBlock}
-        ventasTotales={latestSnapshot.ventas_totales}
-      />
+      <BlockMetricsEditor mlAccountId={account.id} block={bloque as InternalBlockSlug} rows={editorRows} blockSource={sourceByBlock} />
 
       <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
         <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Recomendaciones de este bloque</p>
@@ -233,6 +228,7 @@ function buildBlockMetrics(
   label: string;
   valor: number | null;
   column: MetricColumn;
+  valueUnit?: "pct" | "x" | "dias" | "nivel" | "plain";
 }> {
   if (block === "salud") {
     return [
@@ -269,15 +265,39 @@ function buildBlockMetrics(
   }
   if (block === "ads") {
     return [
-      { metrica: "acos", benchmarkMetric: "acos", label: "ACOS", valor: snapshot.acos, column: "acos" },
-      { metrica: "roas", benchmarkMetric: "roas", label: "ROAS", valor: snapshot.roas, column: "roas" },
+      {
+        metrica: "ventas_totales",
+        benchmarkMetric: "ventas_totales",
+        label: "Ventas totales",
+        valor: snapshot.ventas_totales,
+        column: "ventas_totales",
+        valueUnit: "plain"
+      },
+      {
+        metrica: "gasto_ads",
+        benchmarkMetric: "gasto_ads",
+        label: "Gasto en Ads",
+        valor: snapshot.gasto_ads,
+        column: "gasto_ads",
+        valueUnit: "plain"
+      },
+      {
+        metrica: "ventas_ads",
+        benchmarkMetric: "ventas_ads",
+        label: "Ventas por Ads",
+        valor: snapshot.ventas_ads,
+        column: "ventas_ads",
+        valueUnit: "plain"
+      },
       {
         metrica: "ventas_ads_pct",
         benchmarkMetric: "ventas_ads_pct",
         label: "% ventas por ads",
         valor: toAdsSalesPct(snapshot),
         column: "ventas_ads_pct"
-      }
+      },
+      { metrica: "acos", benchmarkMetric: "acos", label: "ACOS", valor: snapshot.acos, column: "acos" },
+      { metrica: "roas", benchmarkMetric: "roas", label: "ROAS", valor: snapshot.roas, column: "roas" }
     ];
   }
   if (block === "logistica") {

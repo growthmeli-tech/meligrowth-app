@@ -9,7 +9,7 @@ type MetricColumn = keyof MetricSnapshotInsert;
 export const BLOCK_METRIC_COLUMNS: Record<InternalBlockSlug, MetricColumn[]> = {
   salud: ["reclamos", "mediaciones", "cancelaciones_vendedor", "envios_a_tiempo"],
   publicaciones: ["pubs_activas_pct", "pubs_optimizadas_pct", "ctr"],
-  ads: ["margen_pre_ads", "gasto_ads", "ventas_ads", "ventas_totales", "acos", "roas", "tacos"],
+  ads: ["ventas_totales", "gasto_ads", "ventas_ads", "margen_pre_ads", "acos", "roas", "tacos"],
   logistica: ["incidencias_pct", "uso_full_flex_pct", "cancelaciones_stock_pct"],
   stock: ["skus_sin_stock_pct", "dias_stock", "lead_time_reposicion"]
 };
