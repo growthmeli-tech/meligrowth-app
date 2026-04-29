@@ -2,11 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { persistRecommendationsAsAlerts } from "@/lib/recommendations/persist";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import { createMockAlert } from "@/tests/helpers/factories";
-import { createAlertsBulk, listAlertsByHealthId } from "@/lib/data-v2/alerts";
+import {
+  countUnresolvedAlertsForAccountSinceUtcStartOfDay,
+  createAlertsBulk,
+  listUnresolvedAlertsForAccountSinceUtcStartOfDay
+} from "@/lib/data-v2/alerts";
 
 vi.mock("@/lib/data-v2/alerts", () => ({
   createAlertsBulk: vi.fn(),
-  listAlertsByHealthId: vi.fn()
+  countUnresolvedAlertsForAccountSinceUtcStartOfDay: vi.fn(),
+  listUnresolvedAlertsForAccountSinceUtcStartOfDay: vi.fn()
 }));
 
 function createRecommendationsFixture(): DiagnosticRecommendations {
@@ -80,15 +85,17 @@ function createRecommendationsFixture(): DiagnosticRecommendations {
 describe("persistRecommendationsAsAlerts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listAlertsByHealthId).mockResolvedValue({ success: true, data: [] });
+    vi.mocked(countUnresolvedAlertsForAccountSinceUtcStartOfDay).mockResolvedValue({ success: true, data: 0 });
+    vi.mocked(listUnresolvedAlertsForAccountSinceUtcStartOfDay).mockResolvedValue({ success: true, data: [] });
   });
 
-  it("si ya hay alertas para el health_id, no inserta y devuelve las existentes", async () => {
+  it("si ya hay alertas sin resolver hoy (UTC) para la cuenta, no inserta y devuelve las existentes", async () => {
     const existing = [
       createMockAlert("internal", { id: "existing-1", health_id: "health-1" }),
       createMockAlert("manager", { id: "existing-2", prioridad: "alta", audiencia: "manager", health_id: "health-1" })
     ];
-    vi.mocked(listAlertsByHealthId).mockResolvedValue({ success: true, data: existing });
+    vi.mocked(countUnresolvedAlertsForAccountSinceUtcStartOfDay).mockResolvedValue({ success: true, data: 2 });
+    vi.mocked(listUnresolvedAlertsForAccountSinceUtcStartOfDay).mockResolvedValue({ success: true, data: existing });
 
     const result = await persistRecommendationsAsAlerts({
       ml_account_id: "ml-account-1",
@@ -96,7 +103,8 @@ describe("persistRecommendationsAsAlerts", () => {
       recommendations: createRecommendationsFixture()
     });
 
-    expect(listAlertsByHealthId).toHaveBeenCalledWith("health-1", { mlAccountId: "ml-account-1" });
+    expect(countUnresolvedAlertsForAccountSinceUtcStartOfDay).toHaveBeenCalledWith("ml-account-1");
+    expect(listUnresolvedAlertsForAccountSinceUtcStartOfDay).toHaveBeenCalledWith("ml-account-1");
     expect(createAlertsBulk).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
     if (result.success) {

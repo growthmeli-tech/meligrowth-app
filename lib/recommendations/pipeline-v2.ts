@@ -8,6 +8,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
+import { utcStartOfTodayIso } from "@/lib/data-v2/alerts";
 
 type MetricSnapshotRow = Database["public"]["Tables"]["metric_snapshots"]["Row"];
 type AccountHealthRow = Database["public"]["Tables"]["account_health"]["Row"];
@@ -47,41 +48,84 @@ export async function runRecommendationsPipelineV2(input: {
   const scored = scoreDiagnosticFromMetricSnapshot(snapshot, { hasAdsData: hasAdsSnapshotData(snapshot) });
   const estadoGlobal = getEstadoGlobalLabel(scored.scoreGlobal);
 
-  const { data: accountHealth, error: healthError } = await supabase
-    .from("account_health")
-    .insert({
-      ml_account_id: input.ml_account_id,
-      snapshot_id: snapshot.id,
-      snapshot_date: snapshot.snapshot_date,
-      score_global: scored.scoreGlobal,
-      estado_global: estadoGlobal,
-      score_salud: scored.scores.salud,
-      score_publicaciones: scored.scores.publicaciones,
-      score_ads: meaningfulAds ? scored.scores.ads : null,
-      score_logistica: scored.scores.logistica,
-      score_stock: scored.scores.stock
-    })
-    .select("*")
-    .single();
+  const healthInsertPayload = {
+    ml_account_id: input.ml_account_id,
+    snapshot_id: snapshot.id,
+    snapshot_date: snapshot.snapshot_date,
+    score_global: scored.scoreGlobal,
+    estado_global: estadoGlobal,
+    score_salud: scored.scores.salud,
+    score_publicaciones: scored.scores.publicaciones,
+    score_ads: meaningfulAds ? scored.scores.ads : null,
+    score_logistica: scored.scores.logistica,
+    score_stock: scored.scores.stock
+  };
 
-  if (healthError || !accountHealth) {
-    logServerError("recommendations.pipeline-v2.account-health", healthError ?? "health_not_created", input);
-    return {
-      success: false,
-      error: healthError && isPostgresError(healthError) ? formatSupabaseError(healthError) : "No se pudo persistir account_health",
-      code: healthError?.code
-    };
+  const { data: existingHealth } = await supabase
+    .from("account_health")
+    .select("*")
+    .eq("ml_account_id", input.ml_account_id)
+    .eq("snapshot_date", snapshot.snapshot_date)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let accountHealth: AccountHealthRow;
+
+  if (existingHealth) {
+    const { data: updatedHealth, error: updateError } = await supabase
+      .from("account_health")
+      .update({
+        snapshot_id: healthInsertPayload.snapshot_id,
+        score_global: healthInsertPayload.score_global,
+        estado_global: healthInsertPayload.estado_global,
+        score_salud: healthInsertPayload.score_salud,
+        score_publicaciones: healthInsertPayload.score_publicaciones,
+        score_ads: healthInsertPayload.score_ads,
+        score_logistica: healthInsertPayload.score_logistica,
+        score_stock: healthInsertPayload.score_stock
+      })
+      .eq("id", existingHealth.id)
+      .select("*")
+      .single();
+
+    if (updateError || !updatedHealth) {
+      logServerError("recommendations.pipeline-v2.account-health-update", updateError ?? "health_not_updated", input);
+      return {
+        success: false,
+        error:
+          updateError && isPostgresError(updateError) ? formatSupabaseError(updateError) : "No se pudo actualizar account_health",
+        code: updateError?.code
+      };
+    }
+    accountHealth = updatedHealth as AccountHealthRow;
+  } else {
+    const { data: insertedHealth, error: healthError } = await supabase
+      .from("account_health")
+      .insert(healthInsertPayload)
+      .select("*")
+      .single();
+
+    if (healthError || !insertedHealth) {
+      logServerError("recommendations.pipeline-v2.account-health", healthError ?? "health_not_created", input);
+      return {
+        success: false,
+        error: healthError && isPostgresError(healthError) ? formatSupabaseError(healthError) : "No se pudo persistir account_health",
+        code: healthError?.code
+      };
+    }
+    accountHealth = insertedHealth as AccountHealthRow;
   }
 
   // Cache: evitar llamadas duplicadas a Claude en el mismo día
-  const today = new Date().toISOString().slice(0, 10);
+  const todayStartUtc = utcStartOfTodayIso();
 
   const { count: existingAlertsCount } = await supabase
     .from("alerts")
     .select("id", { count: "exact", head: true })
     .eq("ml_account_id", input.ml_account_id)
     .eq("resuelta", false)
-    .gte("created_at", `${today}T00:00:00.000Z`)
+    .gte("created_at", todayStartUtc)
     .not("steps", "eq", "[]");
 
   const shouldEnrich = (existingAlertsCount ?? 0) === 0;

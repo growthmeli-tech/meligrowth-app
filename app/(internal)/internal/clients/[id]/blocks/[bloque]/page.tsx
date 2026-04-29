@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { BlockMetricsEditor, type BlockMetricRowModel } from "@/components/blocks/block-metrics-editor";
 import { RecommendationsPanel } from "@/components/recommendations/recommendations-panel";
 import { ScoreEvolutionChart } from "@/components/charts/score-evolution-chart";
-import { MetricDetailRow } from "@/components/blocks/metric-detail-row";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getAccountHealthWithDelta, listAccountHealthByAccount } from "@/lib/data-v2/account-health";
 import { getCompanyById } from "@/lib/data-v2/companies";
@@ -14,7 +14,11 @@ import {
   calcSaludScoreFromSnapshot,
   calcStockScoreFromSnapshot
 } from "@/lib/scoring";
+import type { InternalBlockSlug } from "@/lib/internal/block-metrics-scope";
+import type { Database } from "@/lib/supabase/database.types";
 import { getScoreLabel } from "@/lib/utils/scores";
+
+type MetricColumn = keyof Database["public"]["Tables"]["metric_snapshots"]["Insert"] | "ventas_ads_pct";
 
 const BLOCK_CONFIG = {
   salud: {
@@ -89,6 +93,13 @@ export default async function InternalClientBlockDetailPage({
   const config = BLOCK_CONFIG[bloque];
   const blockScore = getBlockScoreFromHealth(health, bloque);
   const blockMetrics = buildBlockMetrics(bloque, latestSnapshot);
+  const editorRows: BlockMetricRowModel[] = blockMetrics.map((metric) => ({
+    metrica: metric.metrica,
+    label: metric.label,
+    benchmarkKey: `${config.category}.${metric.benchmarkMetric}`,
+    valor: metric.valor,
+    column: metric.column
+  }));
   const sourceByBlock = extractBlockSource(latestSnapshot.data_sources, bloque);
 
   const chartData = snapshotsResult.success
@@ -131,19 +142,13 @@ export default async function InternalClientBlockDetailPage({
         </div>
       </header>
 
-      <section className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Métricas detalladas</p>
-        {blockMetrics.map((metric) => (
-          <MetricDetailRow
-            key={metric.metrica}
-            metrica={metric.metrica}
-            label={metric.label}
-            valor={metric.valor}
-            source={sourceByBlock}
-            benchmarkKey={`${config.category}.${metric.benchmarkMetric}`}
-          />
-        ))}
-      </section>
+      <BlockMetricsEditor
+        mlAccountId={account.id}
+        block={bloque as InternalBlockSlug}
+        rows={editorRows}
+        blockSource={sourceByBlock}
+        ventasTotales={latestSnapshot.ventas_totales}
+      />
 
       <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
         <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Recomendaciones de este bloque</p>
@@ -222,40 +227,100 @@ function buildBlockMetrics(
     dias_stock: number | null;
     lead_time_reposicion: number | null;
   }
-) {
+): Array<{
+  metrica: string;
+  benchmarkMetric: string;
+  label: string;
+  valor: number | null;
+  column: MetricColumn;
+}> {
   if (block === "salud") {
     return [
-      { metrica: "reclamos", benchmarkMetric: "reclamos", label: "Reclamos", valor: snapshot.reclamos },
-      { metrica: "mediaciones", benchmarkMetric: "mediaciones", label: "Mediaciones", valor: snapshot.mediaciones },
-      { metrica: "cancelaciones_vendedor", benchmarkMetric: "cancelaciones_vendedor", label: "Cancelaciones vendedor", valor: snapshot.cancelaciones_vendedor },
-      { metrica: "envios_a_tiempo", benchmarkMetric: "envios_a_tiempo", label: "Envíos a tiempo", valor: snapshot.envios_a_tiempo }
+      { metrica: "reclamos", benchmarkMetric: "reclamos", label: "Reclamos", valor: snapshot.reclamos, column: "reclamos" },
+      { metrica: "mediaciones", benchmarkMetric: "mediaciones", label: "Mediaciones", valor: snapshot.mediaciones, column: "mediaciones" },
+      {
+        metrica: "cancelaciones_vendedor",
+        benchmarkMetric: "cancelaciones_vendedor",
+        label: "Cancelaciones vendedor",
+        valor: snapshot.cancelaciones_vendedor,
+        column: "cancelaciones_vendedor"
+      },
+      { metrica: "envios_a_tiempo", benchmarkMetric: "envios_a_tiempo", label: "Envíos a tiempo", valor: snapshot.envios_a_tiempo, column: "envios_a_tiempo" }
     ];
   }
   if (block === "publicaciones") {
     return [
-      { metrica: "pubs_activas_pct", benchmarkMetric: "pubs_activas_pct", label: "Publicaciones activas", valor: snapshot.pubs_activas_pct },
-      { metrica: "pubs_optimizadas_pct", benchmarkMetric: "pubs_optimizadas_pct", label: "Publicaciones optimizadas", valor: snapshot.pubs_optimizadas_pct },
-      { metrica: "ctr", benchmarkMetric: "ctr", label: "CTR", valor: snapshot.ctr }
+      {
+        metrica: "pubs_activas_pct",
+        benchmarkMetric: "pubs_activas_pct",
+        label: "Publicaciones activas",
+        valor: snapshot.pubs_activas_pct,
+        column: "pubs_activas_pct"
+      },
+      {
+        metrica: "pubs_optimizadas_pct",
+        benchmarkMetric: "pubs_optimizadas_pct",
+        label: "Publicaciones optimizadas",
+        valor: snapshot.pubs_optimizadas_pct,
+        column: "pubs_optimizadas_pct"
+      },
+      { metrica: "ctr", benchmarkMetric: "ctr", label: "CTR", valor: snapshot.ctr, column: "ctr" }
     ];
   }
   if (block === "ads") {
     return [
-      { metrica: "acos", benchmarkMetric: "acos", label: "ACOS", valor: snapshot.acos },
-      { metrica: "roas", benchmarkMetric: "roas", label: "ROAS", valor: snapshot.roas },
-      { metrica: "ventas_ads_pct", benchmarkMetric: "ventas_ads_pct", label: "% ventas por ads", valor: toAdsSalesPct(snapshot) }
+      { metrica: "acos", benchmarkMetric: "acos", label: "ACOS", valor: snapshot.acos, column: "acos" },
+      { metrica: "roas", benchmarkMetric: "roas", label: "ROAS", valor: snapshot.roas, column: "roas" },
+      {
+        metrica: "ventas_ads_pct",
+        benchmarkMetric: "ventas_ads_pct",
+        label: "% ventas por ads",
+        valor: toAdsSalesPct(snapshot),
+        column: "ventas_ads_pct"
+      }
     ];
   }
   if (block === "logistica") {
     return [
-      { metrica: "incidencias_pct", benchmarkMetric: "incidencias_pct", label: "Incidencias", valor: snapshot.incidencias_pct },
-      { metrica: "uso_full_flex_pct", benchmarkMetric: "uso_full_flex_pct", label: "Uso Full/Flex", valor: snapshot.uso_full_flex_pct },
-      { metrica: "cancelaciones_stock_pct", benchmarkMetric: "cancelaciones_stock_pct", label: "Cancelaciones por stock", valor: snapshot.cancelaciones_stock_pct }
+      {
+        metrica: "incidencias_pct",
+        benchmarkMetric: "incidencias_pct",
+        label: "Incidencias",
+        valor: snapshot.incidencias_pct,
+        column: "incidencias_pct"
+      },
+      {
+        metrica: "uso_full_flex_pct",
+        benchmarkMetric: "uso_full_flex_pct",
+        label: "Uso Full/Flex",
+        valor: snapshot.uso_full_flex_pct,
+        column: "uso_full_flex_pct"
+      },
+      {
+        metrica: "cancelaciones_stock_pct",
+        benchmarkMetric: "cancelaciones_stock_pct",
+        label: "Cancelaciones por stock",
+        valor: snapshot.cancelaciones_stock_pct,
+        column: "cancelaciones_stock_pct"
+      }
     ];
   }
   return [
-    { metrica: "skus_sin_stock_pct", benchmarkMetric: "skus_sin_stock_pct", label: "SKUs sin stock", valor: snapshot.skus_sin_stock_pct },
-    { metrica: "dias_stock", benchmarkMetric: "dias_stock", label: "Días de stock", valor: snapshot.dias_stock },
-    { metrica: "lead_time_reposicion", benchmarkMetric: "lead_time_reposicion", label: "Lead time reposición", valor: snapshot.lead_time_reposicion }
+    {
+      metrica: "skus_sin_stock_pct",
+      benchmarkMetric: "skus_sin_stock_pct",
+      label: "SKUs sin stock",
+      valor: snapshot.skus_sin_stock_pct,
+      column: "skus_sin_stock_pct"
+    },
+    { metrica: "dias_stock", benchmarkMetric: "dias_stock", label: "Días de stock", valor: snapshot.dias_stock, column: "dias_stock" },
+    {
+      metrica: "lead_time_reposicion",
+      benchmarkMetric: "lead_time_reposicion",
+      label: "Lead time reposición",
+      valor: snapshot.lead_time_reposicion,
+      column: "lead_time_reposicion"
+    }
   ];
 }
 

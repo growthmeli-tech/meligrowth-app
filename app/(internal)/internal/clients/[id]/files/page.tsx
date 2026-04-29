@@ -1,22 +1,19 @@
-import { RefreshCw, UploadCloud } from "lucide-react";
-import { reprocessClientFile, uploadOperatorClientFile } from "@/app/(internal)/internal/clients/[id]/files/actions";
+import Link from "next/link";
+import { FileText, UploadCloud } from "lucide-react";
+import { uploadCompanyFolderFile } from "@/app/(internal)/internal/clients/[id]/files/actions";
 import { FileUploader } from "@/components/files/file-uploader";
-import { FileStatusBadge } from "@/components/files/file-status-badge";
 import { TemplateCard } from "@/components/files/template-card";
-import { AppShell } from "@/components/layout/app-shell";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { getOperatorClientBundle, getParsedDataPreview } from "@/lib/data";
+import { createClientFileSignedUrl, listCompanyClientFiles } from "@/lib/data-v2/company-storage-files";
+import { getCompanyById } from "@/lib/data-v2/companies";
+import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
 
 const errorMessages: Record<string, string> = {
-  missing: "No encontramos ese archivo para este cliente.",
-  config: "Falta configurar SUPABASE_SERVICE_ROLE_KEY, PARSER_SERVICE_URL o PARSER_SERVICE_SECRET.",
   missing_upload: "Seleccioná un archivo antes de subir.",
   size: "El archivo supera el máximo de 10 MB.",
   format: "Formato no soportado. Usá CSV, XLSX u ODS.",
-  client: "No encontramos el cliente para registrar el archivo.",
+  company: "No encontramos la empresa.",
   storage: "No se pudo subir el archivo a Storage.",
-  record: "El archivo subió, pero no se pudo registrar en el historial."
+  forbidden: "No tenés permiso para subir archivos."
 };
 
 const templates = [
@@ -46,138 +43,124 @@ const templates = [
   }
 ];
 
-export default async function OperatorFilesPage({
+export default async function InternalClientFilesPage({
   params,
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ error?: string; processed?: string; uploaded?: string }>;
+  searchParams?: Promise<{ error?: string; uploaded?: string }>;
 }) {
-  const resolvedParams = await params;
+  const { id } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const { client, files } = await getOperatorClientBundle(resolvedParams.id);
-  const preview = await getParsedDataPreview(client.id);
-  return (
-    <AppShell mode="operator">
-      <div className="space-y-6">
-        <div>
-          <div className="text-sm font-semibold text-brand-dark">{client.name}</div>
-          <h1 className="text-3xl font-bold">Archivos del cliente</h1>
-        </div>
-        {resolvedSearchParams.processed ? (
-          <div className={`rounded-card border p-4 text-sm font-semibold ${resolvedSearchParams.processed === "1" ? "border-[#639922]/30 bg-[#EAF3DE] text-[#27500A]" : "border-[#E24B4A]/30 bg-[#FCEBEB] text-[#791F1F]"}`}>
-            {resolvedSearchParams.processed === "1" ? "Archivo reprocesado correctamente." : "No se pudo procesar el archivo. Revisá el detalle de error."}
-          </div>
-        ) : null}
-        {resolvedSearchParams.uploaded ? (
-          <div className="rounded-card border border-[#639922]/30 bg-[#EAF3DE] p-4 text-sm font-semibold text-[#27500A]">
-            {resolvedSearchParams.uploaded === "processed"
-              ? "Archivo subido y procesado correctamente."
-              : resolvedSearchParams.uploaded === "processing_error"
-                ? "Archivo subido. No se pudo procesar automáticamente; revisá el detalle."
-                : "Archivo subido. Quedó pendiente de procesamiento."}
-          </div>
-        ) : null}
-        {resolvedSearchParams.error ? (
-          <div className="rounded-card border border-[#E24B4A]/30 bg-[#FCEBEB] p-4 text-sm font-semibold text-[#791F1F]">
-            {errorMessages[resolvedSearchParams.error] ?? "No se pudo reprocesar el archivo."}
-          </div>
-        ) : null}
-        <section className="grid gap-4 xl:grid-cols-4">
-          {templates.map((template) => (
-            <TemplateCard key={template.title} {...template} />
-          ))}
-        </section>
-        <section className="grid gap-5 xl:grid-cols-[1fr_420px]">
-          <FileUploader action={uploadOperatorClientFile.bind(null, client.id)} />
-          <Card>
-            <h2 className="text-lg font-bold">Carga asistida por operador</h2>
-            <div className="mt-4 space-y-3 text-sm text-zinc-600">
-              <p>Podés subir plantillas en nombre del cliente desde esta vista.</p>
-              <p>Si el parser está configurado, el archivo se procesa automáticamente y actualiza las vistas de operador y cliente.</p>
-              <p>La planilla de pricing también se puede reutilizar después desde la calculadora comercial.</p>
-            </div>
-            <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-brand-dark">
-              <UploadCloud className="h-4 w-4" />
-              Flujo unificado con Storage y Supabase
-            </div>
-          </Card>
-        </section>
-        <Card>
-          <div className="divide-y divide-black/10">
-            {files.map((file) => (
-              <div key={file.id} className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <div className="font-semibold">{file.filename}</div>
-                  <div className="text-sm text-zinc-500">{file.tipo} · {(file.sizeBytes / 1024).toFixed(0)} KB</div>
-                  {file.errorProcesamiento ? <div className="mt-1 text-sm text-[#791F1F]">{file.errorProcesamiento}</div> : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <FileStatusBadge processed={file.procesado} error={file.errorProcesamiento} />
-                  <form action={reprocessClientFile.bind(null, client.id, file.id)}>
-                    <Button variant="secondary" type="submit">
-                        <RefreshCw className="h-4 w-4" />
-                        Reprocesar
-                    </Button>
-                  </form>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card>
-          <h2 className="text-lg font-bold">Vista previa extraída</h2>
-          <div className="mt-4 grid gap-5 xl:grid-cols-3">
-            <PreviewTable
-              title="SKUs y stock"
-              headers={["SKU", "Stock", "Título"]}
-              rows={preview.products.map((row) => [row.sku, row.stock ?? "-", row.title ?? "-"])}
-            />
-            <PreviewTable
-              title="Márgenes"
-              headers={["SKU", "Costo", "Precio", "Margen"]}
-              rows={preview.margins.map((row) => [row.sku, row.costo ?? "-", row.precio ?? "-", row.margen ?? "-"])}
-            />
-            <PreviewTable
-              title="Fichas"
-              headers={["SKU", "Título", "Descripción"]}
-              rows={preview.specs.map((row) => [row.sku, row.titulo ?? "-", row.descripcion ?? "-"])}
-            />
-          </div>
-        </Card>
-      </div>
-    </AppShell>
-  );
-}
 
-function PreviewTable({ title, headers, rows }: { title: string; headers: string[]; rows: Array<Array<string | number>> }) {
+  const companyResult = await getCompanyById(id);
+  if (!companyResult.success || !companyResult.data) {
+    return (
+      <main className="p-4 md:p-6">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">No pudimos cargar esta cuenta</div>
+      </main>
+    );
+  }
+
+  const accountsResult = await listMlAccountsByCompany(id, { activeOnly: true });
+  const primaryAccount = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
+
+  const filesResult = await listCompanyClientFiles(id);
+  const rawFiles = filesResult.success ? filesResult.data : [];
+
+  const filesWithUrls = await Promise.all(
+    rawFiles.map(async (f) => {
+      const signed = await createClientFileSignedUrl(f.path);
+      return {
+        ...f,
+        downloadUrl: signed.success ? signed.data : null
+      };
+    })
+  );
+
   return (
-    <div>
-      <h3 className="font-semibold text-zinc-950">{title}</h3>
-      <div className="mt-3 overflow-x-auto rounded-card border border-black/10">
-        {rows.length > 0 ? (
-            <table className="w-full min-w-[620px] text-left text-sm">
-              <thead className="border-b border-black/10 text-zinc-500">
-                <tr>
-                  {headers.map((header) => (
-                    <th key={header} className="px-3 py-2">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={String(row[0])} className="border-b border-black/5">
-                    {row.map((cell, index) => (
-                      <td key={`${row[0]}-${index}`} className={`px-3 py-3 ${index === 0 ? "font-medium" : ""}`}>{cell}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <main className="p-4 md:p-6 space-y-6">
+      <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <Link href={`/internal/clients/${id}`} className="text-xs font-semibold text-[#6B6B6B] hover:underline">
+            ← {companyResult.data.name}
+          </Link>
+          <h1 className="mt-1 text-xl font-bold text-[#1A1A1A]">Archivos</h1>
+          <p className="text-sm text-[#6B6B6B]">
+            Planillas y cargas en Storage para la empresa. Cuenta ML: {primaryAccount?.account_name ?? primaryAccount?.seller_id ?? "pendiente"}
+          </p>
+        </div>
+      </header>
+
+      {resolvedSearchParams.uploaded ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+          Archivo subido correctamente.
+        </div>
+      ) : null}
+      {resolvedSearchParams.error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">
+          {errorMessages[resolvedSearchParams.error] ?? "No se pudo completar la operación."}
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 xl:grid-cols-4">
+        {templates.map((template) => (
+          <TemplateCard key={template.title} {...template} />
+        ))}
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <FileUploader action={uploadCompanyFolderFile.bind(null, id)} />
+        <div className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+          <h2 className="text-lg font-bold text-[#1A1A1A]">Carga interna</h2>
+          <div className="mt-4 space-y-3 text-sm text-[#6B6B6B]">
+            <p>Los archivos se guardan en el bucket <span className="font-mono text-xs">client-files</span> bajo la carpeta de esta company.</p>
+            <p>Formatos: CSV, XLSX u ODS. Máximo 10 MB.</p>
+          </div>
+          <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-[#1A1A1A]">
+            <UploadCloud className="h-4 w-4" />
+            Supabase Storage
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+        <h2 className="text-lg font-bold text-[#1A1A1A]">Archivos en la cuenta</h2>
+        {filesResult.success === false ? (
+          <p className="mt-3 text-sm text-red-700">{filesResult.error}</p>
+        ) : filesWithUrls.length === 0 ? (
+          <p className="mt-3 text-sm text-[#6B6B6B]">Todavía no hay archivos para esta empresa.</p>
         ) : (
-          <div className="p-4 text-sm text-zinc-500">Sin datos procesados.</div>
+          <ul className="mt-4 divide-y divide-[#E8E8E2]">
+            {filesWithUrls.map((file) => (
+              <li key={file.path} className="flex flex-col gap-2 py-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-2">
+                  <FileText className="mt-0.5 h-5 w-5 text-[#6B6B6B]" />
+                  <div>
+                    <p className="font-semibold text-[#1A1A1A]">{file.name}</p>
+                    <p className="text-xs text-[#6B6B6B]">
+                      {file.sizeBytes != null ? `${(file.sizeBytes / 1024).toFixed(0)} KB` : "Tamaño N/D"}
+                      {file.updatedAt ? ` · ${new Date(file.updatedAt).toLocaleString("es-AR")}` : ""}
+                    </p>
+                  </div>
+                </div>
+                {file.downloadUrl ? (
+                  <a
+                    href={file.downloadUrl}
+                    className="inline-flex rounded-lg border border-[#E8E8E2] px-4 py-2 text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F5F0]"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Descargar
+                  </a>
+                ) : (
+                  <span className="text-xs text-amber-700">No se pudo generar enlace</span>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

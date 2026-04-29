@@ -1,4 +1,8 @@
-import { countAlertsByHealthId, createAlertsBulk, listAlertsByHealthId } from "@/lib/data-v2/alerts";
+import {
+  countUnresolvedAlertsForAccountSinceUtcStartOfDay,
+  createAlertsBulk,
+  listUnresolvedAlertsForAccountSinceUtcStartOfDay
+} from "@/lib/data-v2/alerts";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
@@ -37,12 +41,12 @@ export async function persistRecommendationsAsAlerts(
     };
   }
 
-  const duplicateCheck = await countAlertsByHealthId(input.health_id);
+  const duplicateCheck = await countUnresolvedAlertsForAccountSinceUtcStartOfDay(input.ml_account_id);
   if (!duplicateCheck.success) {
     return duplicateCheck;
   }
   if (duplicateCheck.data > 0) {
-    const existing = await listAlertsByHealthId(input.health_id);
+    const existing = await listUnresolvedAlertsForAccountSinceUtcStartOfDay(input.ml_account_id);
     if (!existing.success) {
       return existing;
     }

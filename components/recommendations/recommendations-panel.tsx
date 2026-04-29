@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RecommendationCard } from "@/components/recommendations/recommendation-card";
+import { RecommendationsMarkableList } from "@/components/recommendations/recommendations-markable-list";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
@@ -60,7 +60,6 @@ export async function RecommendationsPanel({ clientId, diagnosticId, maxVisible 
   if (filtered.length === 0) return <EmptyState context="recomendaciones" />;
 
   const visible = filtered.slice(0, maxVisible);
-  const grouped = filtered.length > 5 ? groupByBlock(visible) : null;
 
   return (
     <section className="space-y-4 rounded-xl border border-black/10 bg-white p-4">
@@ -69,24 +68,11 @@ export async function RecommendationsPanel({ clientId, diagnosticId, maxVisible 
         <h2 className="mt-1 text-lg font-bold text-zinc-950">Acciones prioritarias para esta cuenta</h2>
       </header>
 
-      {grouped ? (
-        <div className="space-y-4">
-          {Object.entries(grouped).map(([block, recommendations]) => (
-            <div key={block} className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{block}</p>
-              {recommendations.map((recommendation) => (
-                <RecommendationCard key={recommendation.id} recommendation={recommendation} compact mlAccountId={account.id} />
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {visible.map((recommendation) => (
-            <RecommendationCard key={recommendation.id} recommendation={recommendation} compact mlAccountId={account.id} />
-          ))}
-        </div>
-      )}
+      <RecommendationsMarkableList
+        initialRecommendations={visible}
+        totalFilteredCount={filtered.length}
+        mlAccountId={account.id}
+      />
 
       {filtered.length > maxVisible ? (
         <Link href={`/internal/clients/${clientId}`} className="inline-flex text-sm font-semibold text-brand-dark">
@@ -95,12 +81,4 @@ export async function RecommendationsPanel({ clientId, diagnosticId, maxVisible 
       ) : null}
     </section>
   );
-}
-
-function groupByBlock(items: Recommendation[]) {
-  return items.reduce<Record<string, Recommendation[]>>((acc, item) => {
-    const key = item.bloque || "General";
-    acc[key] = [...(acc[key] ?? []), item];
-    return acc;
-  }, {});
 }

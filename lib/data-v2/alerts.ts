@@ -72,16 +72,29 @@ export async function listUrgentPendingAlertsByAccounts(accountIds: string[]): P
   return { success: true, data: (data ?? []) as AlertRow[] };
 }
 
-/** Evita insertar de nuevo si ya hay filas para este health_id (equivale a COUNT(*) WHERE health_id). */
-export async function countAlertsByHealthId(healthId: string): Promise<ActionResult<number>> {
+/** Inicio del día actual en UTC (00:00:00.000Z). */
+export function utcStartOfTodayIso(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)).toISOString();
+}
+
+/**
+ * Alertas sin resolver creadas desde medianoche UTC de hoy (anti-duplicado por sync el mismo día).
+ */
+export async function countUnresolvedAlertsForAccountSinceUtcStartOfDay(
+  mlAccountId: string
+): Promise<ActionResult<number>> {
   const supabase = await createServerSupabaseClient();
+  const start = utcStartOfTodayIso();
   const { count, error } = await supabase
     .from("alerts")
     .select("*", { count: "exact", head: true })
-    .eq("health_id", healthId);
+    .eq("ml_account_id", mlAccountId)
+    .eq("resuelta", false)
+    .gte("created_at", start);
 
   if (error) {
-    logServerError("data-v2.countAlertsByHealthId", error, { healthId });
+    logServerError("data-v2.countUnresolvedAlertsForAccountSinceUtcStartOfDay", error, { mlAccountId });
     return {
       success: false,
       error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron verificar alertas",
@@ -90,6 +103,31 @@ export async function countAlertsByHealthId(healthId: string): Promise<ActionRes
   }
 
   return { success: true, data: count ?? 0 };
+}
+
+export async function listUnresolvedAlertsForAccountSinceUtcStartOfDay(
+  mlAccountId: string
+): Promise<ActionResult<AlertRow[]>> {
+  const supabase = await createServerSupabaseClient();
+  const start = utcStartOfTodayIso();
+  const { data, error } = await supabase
+    .from("alerts")
+    .select(ALERT_SELECT)
+    .eq("ml_account_id", mlAccountId)
+    .eq("resuelta", false)
+    .gte("created_at", start)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    logServerError("data-v2.listUnresolvedAlertsForAccountSinceUtcStartOfDay", error, { mlAccountId });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron cargar alertas",
+      code: error.code
+    };
+  }
+
+  return { success: true, data: (data ?? []) as AlertRow[] };
 }
 
 /** Alertas ya vinculadas a un registro de account_health (evita duplicar al re-ejecutar persist). */
