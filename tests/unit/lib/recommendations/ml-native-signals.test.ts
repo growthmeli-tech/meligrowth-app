@@ -22,8 +22,8 @@ describe("buildMlNativeSignals", () => {
   it("2.1 dispara cuando real_level es peor que level_id (protección)", () => {
     const recs = buildMlNativeSignals({
       ...base,
-      reputacion_real_level: "1_red",
-      reputacion_level_id: "2_green"
+      reputacion_real_level: "1_red_seller",
+      reputacion_level_id: "5_green_seller"
     });
     const r = recs.find((x) => x.id.includes("reputacion-protegida"));
     expect(r?.titulo).toBe("Tu reputación real está siendo protegida");
@@ -71,7 +71,7 @@ describe("buildMlNativeSignals", () => {
     expect(r?.titulo).toBe("Riesgo de quiebre de stock esta semana");
   });
 
-  it("2.6 potencial Mercado Línder sin power_seller y con ventas > 50", () => {
+  it("2.6 potencial Mercado Líder sin power_seller y con ventas > 50", () => {
     const recs = buildMlNativeSignals({ ...base, ventas_completadas_60d: 60, nivel_vendedor: null });
     const r = recs.find((x) => x.id.includes("mercado-lider-candidato"));
     expect(r?.prioridad).toBe("media");

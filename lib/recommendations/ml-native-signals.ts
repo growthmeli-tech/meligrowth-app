@@ -14,7 +14,6 @@ export type MlSnapshotSignalsInput = {
   listings_total_items: number | null;
   uso_full_flex_pct: number | null;
   acos: number | null;
-  roas: number | null;
   margen_pre_ads: number | null;
   dias_stock: number | null;
   skus_sin_stock_pct: number | null;

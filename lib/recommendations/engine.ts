@@ -270,7 +270,6 @@ export function generateRecommendations(
       (typeof snap.gasto_ads === "number" && snap.gasto_ads > 0) ||
       (typeof snap.ventas_ads === "number" && snap.ventas_ads > 0);
     const acosForMl = adsOk ? snap.acos : null;
-    const roasForMl = adsOk ? snap.roas : null;
     mlNative = buildMlNativeSignals({
       diagnosticId: diagnostic.id,
       nivel_vendedor: snap.nivel_vendedor,
@@ -281,7 +280,6 @@ export function generateRecommendations(
       listings_total_items: snap.listings_total_items,
       uso_full_flex_pct: snap.uso_full_flex_pct,
       acos: acosForMl,
-      roas: roasForMl,
       margen_pre_ads: snap.margen_pre_ads,
       dias_stock: snap.dias_stock,
       skus_sin_stock_pct: snap.skus_sin_stock_pct,
