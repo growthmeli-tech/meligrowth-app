@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { persistRecommendationsAsAlerts } from "@/lib/recommendations/persist";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import { createMockAlert } from "@/tests/helpers/factories";
-import { createAlertsBulk } from "@/lib/data-v2/alerts";
+import { createAlertsBulk, listAlertsByHealthId } from "@/lib/data-v2/alerts";
 
 vi.mock("@/lib/data-v2/alerts", () => ({
-  createAlertsBulk: vi.fn()
+  createAlertsBulk: vi.fn(),
+  listAlertsByHealthId: vi.fn()
 }));
 
 function createRecommendationsFixture(): DiagnosticRecommendations {
@@ -79,6 +80,29 @@ function createRecommendationsFixture(): DiagnosticRecommendations {
 describe("persistRecommendationsAsAlerts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(listAlertsByHealthId).mockResolvedValue({ success: true, data: [] });
+  });
+
+  it("si ya hay alertas para el health_id, no inserta y devuelve las existentes", async () => {
+    const existing = [
+      createMockAlert("internal", { id: "existing-1", health_id: "health-1" }),
+      createMockAlert("manager", { id: "existing-2", prioridad: "alta", audiencia: "manager", health_id: "health-1" })
+    ];
+    vi.mocked(listAlertsByHealthId).mockResolvedValue({ success: true, data: existing });
+
+    const result = await persistRecommendationsAsAlerts({
+      ml_account_id: "ml-account-1",
+      health_id: "health-1",
+      recommendations: createRecommendationsFixture()
+    });
+
+    expect(listAlertsByHealthId).toHaveBeenCalledWith("health-1", { mlAccountId: "ml-account-1" });
+    expect(createAlertsBulk).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.alerts).toEqual(existing);
+      expect(result.data.persisted_count).toBe(2);
+    }
   });
 
   it("solo persiste alertas urgente y alta, excluye media y baja", async () => {

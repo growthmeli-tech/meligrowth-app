@@ -72,6 +72,55 @@ export async function listUrgentPendingAlertsByAccounts(accountIds: string[]): P
   return { success: true, data: (data ?? []) as AlertRow[] };
 }
 
+/** Evita insertar de nuevo si ya hay filas para este health_id (equivale a COUNT(*) WHERE health_id). */
+export async function countAlertsByHealthId(healthId: string): Promise<ActionResult<number>> {
+  const supabase = await createServerSupabaseClient();
+  const { count, error } = await supabase
+    .from("alerts")
+    .select("*", { count: "exact", head: true })
+    .eq("health_id", healthId);
+
+  if (error) {
+    logServerError("data-v2.countAlertsByHealthId", error, { healthId });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron verificar alertas",
+      code: error.code
+    };
+  }
+
+  return { success: true, data: count ?? 0 };
+}
+
+/** Alertas ya vinculadas a un registro de account_health (evita duplicar al re-ejecutar persist). */
+export async function listAlertsByHealthId(
+  healthId: string,
+  options?: { mlAccountId?: string }
+): Promise<ActionResult<AlertRow[]>> {
+  const supabase = await createServerSupabaseClient();
+  let query = supabase
+    .from("alerts")
+    .select(ALERT_SELECT)
+    .eq("health_id", healthId)
+    .order("created_at", { ascending: true });
+
+  if (options?.mlAccountId) {
+    query = query.eq("ml_account_id", options.mlAccountId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    logServerError("data-v2.listAlertsByHealthId", error, { healthId, mlAccountId: options?.mlAccountId });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudieron cargar alertas",
+      code: error.code
+    };
+  }
+
+  return { success: true, data: (data ?? []) as AlertRow[] };
+}
+
 export async function createAlertsBulk(payload: AlertInsert[]): Promise<ActionResult<AlertRow[]>> {
   if (payload.length === 0) {
     return { success: true, data: [] };

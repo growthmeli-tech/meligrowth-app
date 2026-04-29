@@ -3,7 +3,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { ActionResult } from "@/lib/types/api";
-import type { TaskStatus } from "@/lib/types/enums";
+import type { TaskStatus, UserRoleV2 } from "@/lib/types/enums";
+
+const INTERNAL_TASK_UPDATE_ROLES: UserRoleV2[] = ["super_admin_meli_growth", "internal_operator_meli_growth"];
 
 export async function createTaskFromRecommendation(input: {
   ml_account_id: string;
@@ -94,6 +96,10 @@ export async function updateTaskStatus(input: {
   }
 
   const service = createServiceSupabaseClient();
+  const { data: profile } = await service.from("users_v2").select("role").eq("id", user.id).maybeSingle();
+  const role = profile?.role as UserRoleV2 | undefined;
+  const isInternalStaff = role ? INTERNAL_TASK_UPDATE_ROLES.includes(role) : false;
+
   const { data: taskRow, error: taskError } = await service
     .from("tasks")
     .select("id, ml_account_id")
@@ -104,17 +110,19 @@ export async function updateTaskStatus(input: {
     return { success: false, error: taskError?.message ?? "No pudimos encontrar la tarea." };
   }
 
-  const { data: accessRow, error: accessError } = await service
-    .from("user_account_access")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("ml_account_id", taskRow.ml_account_id)
-    .eq("access_type", "operator")
-    .limit(1)
-    .maybeSingle();
+  if (!isInternalStaff) {
+    const { data: accessRow, error: accessError } = await service
+      .from("user_account_access")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("ml_account_id", taskRow.ml_account_id)
+      .eq("access_type", "operator")
+      .limit(1)
+      .maybeSingle();
 
-  if (accessError || !accessRow) {
-    return { success: false, error: "No tenés acceso para actualizar esta tarea." };
+    if (accessError || !accessRow) {
+      return { success: false, error: "No tenés acceso para actualizar esta tarea." };
+    }
   }
 
   const updatePayload: {

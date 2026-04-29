@@ -1,4 +1,4 @@
-import { createAlertsBulk } from "@/lib/data-v2/alerts";
+import { countAlertsByHealthId, createAlertsBulk, listAlertsByHealthId } from "@/lib/data-v2/alerts";
 import type { DiagnosticRecommendations } from "@/lib/recommendations/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
@@ -33,6 +33,24 @@ export async function persistRecommendationsAsAlerts(
       data: {
         persisted_count: 0,
         alerts: []
+      }
+    };
+  }
+
+  const duplicateCheck = await countAlertsByHealthId(input.health_id);
+  if (!duplicateCheck.success) {
+    return duplicateCheck;
+  }
+  if (duplicateCheck.data > 0) {
+    const existing = await listAlertsByHealthId(input.health_id);
+    if (!existing.success) {
+      return existing;
+    }
+    return {
+      success: true,
+      data: {
+        persisted_count: existing.data.length,
+        alerts: existing.data
       }
     };
   }

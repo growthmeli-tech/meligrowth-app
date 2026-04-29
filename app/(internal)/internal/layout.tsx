@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Users, Bell, LogOut } from "lucide-react";
+import { Bell, CheckSquare, LayoutDashboard, LogOut, Users } from "lucide-react";
 import { logout } from "@/app/(auth)/login/actions";
 import { getInternalDashboardCompanies } from "@/lib/data-v2/dashboard-internal";
 import { getCurrentViewerProfile } from "@/lib/data-v2/viewer";
@@ -16,6 +16,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
   const initials = toInitials(viewerName);
   const clientsCount = companies.length;
   const unreadAlerts = companies.reduce((acc, company) => acc + company.urgentAlertsPending, 0);
+  const tasksPending = companies.reduce((acc, company) => acc + company.tasksPending, 0);
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] md:grid md:grid-cols-[264px_1fr]">
@@ -39,6 +40,12 @@ export default async function InternalLayout({ children }: { children: React.Rea
               label="Alertas"
               icon={<Bell className="h-4 w-4" />}
               badge={unreadAlerts > 0 ? String(unreadAlerts) : undefined}
+            />
+            <NavItem
+              href="/internal/tasks"
+              label="Tareas"
+              icon={<CheckSquare className="h-4 w-4" />}
+              badge={tasksPending > 0 ? String(tasksPending) : undefined}
             />
           </nav>
         </div>
