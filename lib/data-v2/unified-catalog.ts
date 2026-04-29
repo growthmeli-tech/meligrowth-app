@@ -1,5 +1,13 @@
-import { calcSellingPrice } from "@/lib/pricing/calculator";
-import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
+import {
+  calcRealProfit,
+  calcSellingPrice,
+  calcStockStatus,
+  coerceReputacion,
+  normalizePct,
+  type LogisticaType,
+  type ReputacionType
+} from "@/lib/pricing/calculator";
+import { listPricingSkus, type NormalizedPricingSkuRow } from "@/lib/data-v2/pricing-skus";
 import { listMlCatalogItems, updateCatalogItemPricingLink } from "@/lib/data-v2/ml-catalog-items";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
@@ -19,6 +27,8 @@ export interface UnifiedCatalogItem {
   price_ml: number | null;
   stock: number | null;
   sold_quantity: number | null;
+  /** Ventas últimos 30 días cuando la ingesta ML lo provea; hoy suele ser null (ver changelog). */
+  ventas_30d: number | null;
   status: string;
   logistic_type: string | null;
   permalink: string | null;
@@ -43,6 +53,20 @@ export interface UnifiedCatalogItem {
   stock_critico: boolean;
   margen_en_riesgo: boolean;
   sin_configurar: boolean;
+
+  ganancia_real: number | null;
+  margen_real_pct: number | null;
+  comision_real: number | null;
+  envio_real: number | null;
+  publicidad_real: number | null;
+
+  stock_status: "critico" | "reponer" | "saludable" | "exceso" | null;
+  units_to_buy: number | null;
+  days_remaining: number | null;
+  stock_urgency: "urgente" | "pronto" | "ok" | null;
+
+  precio_vs_objetivo: "sobre" | "bajo" | "ok" | null;
+  desviacion_precio_pct: number | null;
 }
 
 function resolvePricingRow(
@@ -65,7 +89,7 @@ function resolvePricingRow(
   return null;
 }
 
-function buildPricingIndexes(rows: PricingSkuRow[]) {
+function buildPricingIndexes(rows: NormalizedPricingSkuRow[]) {
   const byId = new Map<string, PricingSkuRow>();
   const bySkuKey = new Map<string, PricingSkuRow>();
   for (const r of rows) {
@@ -76,7 +100,7 @@ function buildPricingIndexes(rows: PricingSkuRow[]) {
   return { byId, bySkuKey };
 }
 
-function computeDerived(ml: {
+type MlSlice = {
   price: number | null;
   available_quantity: number | null;
   status: string | null;
@@ -84,7 +108,15 @@ function computeDerived(ml: {
   seller_custom_field: string | null;
   item_id: string;
   sold_quantity: number | null;
-}, pricing: PricingSkuRow | null): Omit<
+};
+
+/**
+ * Expone la derivación pura para tests y para `listUnifiedCatalog`.
+ */
+export function computeUnifiedCatalogDerived(
+  ml: MlSlice,
+  pricing: PricingSkuRow | null
+): Omit<
   UnifiedCatalogItem,
   | "ml_row_id"
   | "item_id"
@@ -94,28 +126,26 @@ function computeDerived(ml: {
   | "last_synced_at"
   | "seller_custom_field"
   | "logistic_type"
-  | "sold_quantity"
   | "status"
-> & {
-  price_ml: number | null;
-  stock: number | null;
-  sold_quantity: number | null;
-  status: string;
-} {
+> & { price_ml: number | null; stock: number | null; sold_quantity: number | null; status: string } {
   const tiene_costo = Boolean(pricing);
+
+  const pubNorm = pricing ? normalizePct(pricing.publicidad_pct) : 0;
+  const margNorm = pricing ? normalizePct(pricing.margen_pct ?? 0.15) || 0.15 : 0.15;
+  const reputacionResolved: ReputacionType = pricing ? coerceReputacion(pricing.reputacion) : "Verde / MercadoLíder";
+  const logisticaPricing = (pricing?.logistica ?? "Flex") as LogisticaType;
 
   let precio_calculado: number | null = null;
   let ganancia_calculada: number | null = null;
   let roi_calculado: number | null = null;
 
   if (pricing) {
-    const pub = pricing.publicidad_pct;
-    const marg = pricing.margen_pct;
     const res = calcSellingPrice({
       costo: Number(pricing.costo),
-      logistica: pricing.logistica,
-      publicidad_pct: pub === null || pub === undefined ? 0 : Number(pub),
-      margen_pct: marg === null || marg === undefined ? 0.15 : Number(marg)
+      logistica: logisticaPricing,
+      publicidad_pct: pubNorm,
+      margen_pct: margNorm,
+      reputacion: reputacionResolved
     });
     if (res.converged && Number.isFinite(res.precio_venta)) {
       precio_calculado = res.precio_venta;
@@ -125,25 +155,70 @@ function computeDerived(ml: {
   }
 
   const price_ml = ml.price === null || ml.price === undefined ? null : Number(ml.price);
+
+  let precio_vs_objetivo: "sobre" | "bajo" | "ok" | null = null;
+  let desviacion_precio_pct: number | null = null;
   let precio_desviado = false;
   if (price_ml !== null && precio_calculado !== null && precio_calculado > 0) {
+    desviacion_precio_pct = Math.round(((price_ml - precio_calculado) / precio_calculado) * 10_000) / 100;
     precio_desviado = Math.abs(price_ml - precio_calculado) / precio_calculado > 0.05;
+    const tol = 0.02;
+    if (price_ml < precio_calculado * (1 - tol)) precio_vs_objetivo = "bajo";
+    else if (price_ml > precio_calculado * (1 + tol)) precio_vs_objetivo = "sobre";
+    else precio_vs_objetivo = "ok";
   }
 
   const stock = ml.available_quantity === null || ml.available_quantity === undefined ? null : Number(ml.available_quantity);
-  const stock_critico = stock !== null && stock < 10;
+  const ventas_30d: number | null = null;
 
-  const margen_pct = pricing?.margen_pct !== null && pricing?.margen_pct !== undefined ? Number(pricing.margen_pct) : null;
-  const margen_en_riesgo = margen_pct !== null && margen_pct < 0.1;
+  const stockInfo =
+    stock === null
+      ? null
+      : calcStockStatus({
+          stock_actual: stock,
+          ventas_30d,
+          safety_pct: 0.2
+        });
+
+  let ganancia_real: number | null = null;
+  let margen_real_pct: number | null = null;
+  let comision_real: number | null = null;
+  let envio_real: number | null = null;
+  let publicidad_real: number | null = null;
+
+  if (pricing && price_ml !== null && Number(pricing.costo) > 0) {
+    const rp = calcRealProfit({
+      price_ml,
+      costo: Number(pricing.costo),
+      logistica: logisticaPricing,
+      reputacion: reputacionResolved,
+      publicidad_pct: pubNorm,
+      peso_kg: pricing.peso_kg !== null && pricing.peso_kg !== undefined ? Number(pricing.peso_kg) : null
+    });
+    if (rp.converged && Number.isFinite(rp.ganancia_real)) {
+      ganancia_real = rp.ganancia_real;
+      margen_real_pct = rp.margen_real;
+      comision_real = rp.comision_$;
+      envio_real = rp.envio_$;
+      publicidad_real = rp.publicidad_$;
+    }
+  }
+
+  const margen_pct_out = pricing?.margen_pct !== null && pricing?.margen_pct !== undefined ? normalizePct(pricing.margen_pct) : null;
+
+  const margen_en_riesgo =
+    margen_real_pct !== null && margen_real_pct >= 0 && margen_real_pct < 0.1 && tiene_costo && price_ml !== null;
+
+  const stock_critico = stockInfo?.status === "critico";
 
   const sin_configurar = !tiene_costo;
 
   return {
     price_ml,
     stock,
-    sold_quantity:
-      ml.sold_quantity === null || ml.sold_quantity === undefined ? null : Number(ml.sold_quantity),
+    sold_quantity: ml.sold_quantity === null || ml.sold_quantity === undefined ? null : Number(ml.sold_quantity),
     status: ml.status ?? "—",
+    ventas_30d,
     precio_calculado,
     ganancia_calculada,
     roi_calculado,
@@ -154,12 +229,23 @@ function computeDerived(ml: {
     logistica: pricing?.logistica ?? null,
     reputacion: pricing?.reputacion ?? null,
     publicidad_pct: pricing?.publicidad_pct !== null && pricing?.publicidad_pct !== undefined ? Number(pricing.publicidad_pct) : null,
-    margen_pct,
+    margen_pct: margen_pct_out,
     tiene_costo,
     precio_desviado,
     stock_critico,
     margen_en_riesgo,
-    sin_configurar
+    sin_configurar,
+    ganancia_real,
+    margen_real_pct,
+    comision_real,
+    envio_real,
+    publicidad_real,
+    stock_status: stockInfo?.status ?? null,
+    units_to_buy: stockInfo === null ? null : stockInfo.units_to_buy,
+    days_remaining: stockInfo === null ? null : stockInfo.days_remaining,
+    stock_urgency: stockInfo === null ? null : stockInfo.urgency,
+    precio_vs_objetivo,
+    desviacion_precio_pct
   };
 }
 
@@ -172,7 +258,7 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
 
   const unified: UnifiedCatalogItem[] = catRes.data.map((row) => {
     const pricing = resolvePricingRow(row, byId, bySkuKey);
-    const derived = computeDerived(
+    const derived = computeUnifiedCatalogDerived(
       {
         price: row.price,
         available_quantity: row.available_quantity,
@@ -249,6 +335,7 @@ export type MlPublicationLink = {
   item_id: string;
   permalink: string | null;
   stock: number | null;
+  price_ml: number | null;
 };
 
 /** Maps pricing SKU rows to ML publication data for `/ops/pricing`. */
@@ -269,7 +356,8 @@ export function mapPricingSkusToMlLinks(pricingRows: PricingSkuRow[], unified: U
       out.set(p.id, {
         item_id: fuzzy.item_id,
         permalink: fuzzy.permalink,
-        stock: fuzzy.stock
+        stock: fuzzy.stock,
+        price_ml: fuzzy.price_ml
       });
     }
   }

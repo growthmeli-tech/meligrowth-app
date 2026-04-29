@@ -94,7 +94,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (requiredScope === "ops" && (role !== "client_operator" || !operatorHasOpsAccess)) {
+  const isMeliGrowthTeam = role === "super_admin_meli_growth" || role === "internal_operator_meli_growth";
+
+  if (requiredScope === "ops" && !isMeliGrowthTeam && (role !== "client_operator" || !operatorHasOpsAccess)) {
     if (role === "client_operator") {
       return NextResponse.redirect(new URL("/brand/dashboard", request.url));
     }

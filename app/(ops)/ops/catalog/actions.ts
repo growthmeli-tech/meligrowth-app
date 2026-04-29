@@ -6,7 +6,7 @@ import { getValidAccessToken } from "@/lib/ml/auth";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
 import { linkPricingSkuToItem } from "@/lib/data-v2/unified-catalog";
-import { calcSellingPrice } from "@/lib/pricing/calculator";
+import { calcSellingPrice, normalizePct } from "@/lib/pricing/calculator";
 import type { ActionResult } from "@/lib/types/api";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
@@ -94,13 +94,14 @@ export async function saveCostForItem(
   }
 
   const sku = row.seller_custom_field?.trim() || row.item_id;
-  const pub = input.publicidad_pct;
-  const marg = input.margen_pct;
+  const pub = normalizePct(input.publicidad_pct);
+  const marg = normalizePct(input.margen_pct) || 0.15;
   const calc = calcSellingPrice({
     costo: input.costo,
     logistica: input.logistica,
     publicidad_pct: pub,
-    margen_pct: marg
+    margen_pct: marg,
+    reputacion: "Verde / MercadoLíder"
   });
 
   const { data: inserted, error: insErr } = await supabase
@@ -112,7 +113,7 @@ export async function saveCostForItem(
       costo: input.costo,
       peso_kg: null,
       logistica: input.logistica,
-      reputacion: null,
+      reputacion: "Verde / MercadoLíder",
       publicidad_pct: pub,
       margen_pct: marg,
       precio_venta: calc.converged ? calc.precio_venta : null,

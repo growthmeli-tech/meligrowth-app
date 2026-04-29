@@ -14,6 +14,7 @@ import {
   saveCostForItem,
   triggerCatalogSync
 } from "@/app/(ops)/ops/catalog/actions";
+import { calcRealProfit, calcSellingPrice, coerceReputacion, normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -53,6 +54,30 @@ function formatSyncLabel(iso: string | null) {
   return d.toLocaleString("es-AR");
 }
 
+function buildInsights(items: UnifiedCatalogItem[]): string[] {
+  const out: string[] = [];
+  const destroyers = items.filter(
+    (i) => i.tiene_costo && i.margen_real_pct !== null && i.margen_real_pct < 0 && i.price_ml !== null
+  );
+  if (destroyers.length) {
+    const x = destroyers[0];
+    const m = x.margen_real_pct !== null ? (x.margen_real_pct * 100).toFixed(0) : "?";
+    const target = x.margen_pct !== null ? (x.margen_pct * 100).toFixed(0) : "15";
+    out.push(
+      `${x.item_id} vende a ${x.price_ml !== null ? ars.format(x.price_ml) : "—"} pero con margen real de ${m}% — bajo tu objetivo del ${target}%`
+    );
+  }
+  const sinCosto = items.filter((i) => !i.tiene_costo).length;
+  if (sinCosto > 0 && out.length < 3) {
+    out.push(`${sinCosto} SKU${sinCosto > 1 ? "s" : ""} sin costo configurado — no podés medir rentabilidad`);
+  }
+  const crit = items.filter((i) => i.stock_status === "critico").length;
+  if (crit > 0 && out.length < 3) {
+    out.push(`Stock crítico en ${crit} SKU${crit > 1 ? "s" : ""} — riesgo de perder ventas esta semana`);
+  }
+  return out.slice(0, 3);
+}
+
 export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, pricingSkuChoices, loadError }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -65,14 +90,31 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
   const [logFilter, setLogFilter] = useState<string>("all");
   const [margenFilter, setMargenFilter] = useState<string>("all");
   const [costFilter, setCostFilter] = useState<string>("all");
+  const [stockFilter, setStockFilter] = useState<string>("all");
   const [pillPreset, setPillPreset] = useState<string | null>(null);
 
   const [costForms, setCostForms] = useState<Record<string, { costo: string; logistica: string; margen: string; pub: string }>>({});
+  const [inlineCostItemId, setInlineCostItemId] = useState<string | null>(null);
+  const [inlinePriceItemId, setInlinePriceItemId] = useState<string | null>(null);
 
   const stale = useMemo(() => {
     if (!lastSyncedAt) return true;
     return Date.now() - new Date(lastSyncedAt).getTime() > 6 * 60 * 60 * 1000;
   }, [lastSyncedAt]);
+
+  const promMargenReal = useMemo(() => {
+    let w = 0;
+    let acc = 0;
+    for (const row of items) {
+      if (!row.tiene_costo || row.margen_real_pct === null || row.costo === null || row.costo <= 0) continue;
+      w += row.costo;
+      acc += row.margen_real_pct * row.costo;
+    }
+    if (w <= 0) return null;
+    return acc / w;
+  }, [items]);
+
+  const insights = useMemo(() => buildInsights(items), [items]);
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -92,8 +134,15 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       if (costFilter === "sin" && row.tiene_costo) return false;
       if (costFilter === "con" && !row.tiene_costo) return false;
 
-      if (margenFilter === "riesgo" && !row.margen_en_riesgo) return false;
-      if (margenFilter === "ok" && row.margen_en_riesgo) return false;
+      if (stockFilter !== "all" && (row.stock_status ?? "") !== stockFilter) return false;
+
+      if (margenFilter === "pierde" && !(row.margen_real_pct !== null && row.margen_real_pct < 0)) return false;
+      if (margenFilter === "riesgo" && !(row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1)) return false;
+      if (margenFilter === "ok") {
+        const m = row.margen_real_pct;
+        if (m !== null && m < 0) return false;
+        if (m !== null && m >= 0 && m < 0.1) return false;
+      }
 
       if (qq) {
         const blob = `${row.item_id} ${row.title} ${row.seller_custom_field ?? ""} ${row.sku ?? ""}`.toLowerCase();
@@ -101,14 +150,26 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       }
       return true;
     });
-  }, [items, q, statusFilter, logFilter, margenFilter, costFilter, pillPreset]);
+  }, [items, q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, pillPreset]);
 
   const counts = useMemo(() => {
     const sinStock = items.filter((i) => i.status === "active" && i.stock === 0).length;
     const sinCosto = items.filter((i) => !i.tiene_costo).length;
     const precioDesviado = items.filter((i) => i.precio_desviado).length;
     const bien = items.filter((i) => i.tiene_costo && !i.precio_desviado && !i.stock_critico && !i.margen_en_riesgo).length;
-    return { sinStock, sinCosto, precioDesviado, bien };
+    const critStock = items.filter((i) => i.stock_status === "critico").length;
+    const reponer = items.filter((i) => i.stock_status === "reponer").length;
+    const margenRiesgo = items.filter(
+      (i) => i.tiene_costo && i.margen_real_pct !== null && i.margen_real_pct >= 0 && i.margen_real_pct < 0.1 && i.price_ml !== null
+    ).length;
+    const ok = items.filter(
+      (i) =>
+        i.tiene_costo &&
+        i.stock_status !== "critico" &&
+        !(i.margen_real_pct !== null && i.margen_real_pct < 0) &&
+        !(i.margen_real_pct !== null && i.margen_real_pct < 0.1)
+    ).length;
+    return { sinStock, sinCosto, precioDesviado, bien, critStock, reponer, margenRiesgo, ok };
   }, [items]);
 
   const toggleSelect = (itemId: string) => {
@@ -161,18 +222,7 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       setSyncHint("Seleccioná filas para exportar.");
       return;
     }
-    startTransition(async () => {
-      const res = await exportMasterCatalog(mlAccountId, ids);
-      if (!res.success) {
-        setSyncHint(res.error ?? "Export fallido");
-        return;
-      }
-      if (!res.data) {
-        setSyncHint("Export fallido");
-        return;
-      }
-      downloadBase64(res.data.base64, res.data.filename);
-    });
+    onExport(ids);
   };
 
   const onBulkAds = () => {
@@ -195,17 +245,19 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
     setPillPreset(key);
     setCostFilter("all");
     setMargenFilter("all");
+    setStockFilter("all");
     if (key === "sin_stock") setStatusFilter("active");
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" id="mg-catalog-command-table">
       <header className="rounded-xl border border-[#E8E8E2] bg-white p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-xl font-black text-[#1A1A1A]">CATÁLOGO</h1>
             <p className="mt-1 text-sm text-[#6B6B6B]">
-              {items.length} publicaciones · Sync: {formatSyncLabel(lastSyncedAt)}
+              {items.length} SKUs · Margen real prom.: {promMargenReal === null ? "—" : `${(promMargenReal * 100).toFixed(1)}%`} · Sync:{" "}
+              {formatSyncLabel(lastSyncedAt)}
               {stale ? (
                 <span className="ml-2 font-semibold text-amber-800">· Datos desactualizados · Sincronizá</span>
               ) : null}
@@ -252,11 +304,22 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
             <option value="closed">closed</option>
           </select>
           <select
+            value={stockFilter}
+            onChange={(e) => setStockFilter(e.target.value)}
+            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
+          >
+            <option value="all">Stock (todos)</option>
+            <option value="critico">Crítico</option>
+            <option value="reponer">Reponer</option>
+            <option value="saludable">Saludable</option>
+            <option value="exceso">Exceso</option>
+          </select>
+          <select
             value={logFilter}
             onChange={(e) => setLogFilter(e.target.value)}
             className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
           >
-            <option value="all">Logística (todas)</option>
+            <option value="all">Logística ML (todas)</option>
             <option value="fulfillment">fulfillment</option>
             <option value="xd_drop_off">xd_drop_off</option>
             <option value="cross_docking">cross_docking</option>
@@ -267,7 +330,8 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
             onChange={(e) => setMargenFilter(e.target.value)}
             className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
           >
-            <option value="all">Margen (todos)</option>
+            <option value="all">Margen real (todos)</option>
+            <option value="pierde">Pierde dinero</option>
             <option value="riesgo">&lt;10% en riesgo</option>
             <option value="ok">≥10%</option>
           </select>
@@ -280,6 +344,21 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
             <option value="sin">Sin costo</option>
             <option value="con">Con costo</option>
           </select>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-[#E8E8E2] pt-3 text-xs font-semibold">
+          <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-red-900">
+            {counts.critStock} críticos
+          </span>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-950">
+            {counts.reponer} reponer
+          </span>
+          <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-orange-950">
+            {counts.margenRiesgo} margen riesgo
+          </span>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-900">
+            {counts.ok} ok
+          </span>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
@@ -330,6 +409,17 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
           ) : null}
         </div>
 
+        {insights.length > 0 ? (
+          <div className="mt-4 space-y-1 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-3 text-sm text-[#1A1A1A]">
+            {insights.map((t, i) => (
+              <p key={i} className="flex gap-2">
+                <span aria-hidden>💡</span>
+                <span>{t}</span>
+              </p>
+            ))}
+          </div>
+        ) : null}
+
         {loadError ? <p className="mt-3 text-sm text-red-700">{loadError}</p> : null}
         {syncHint ? <p className="mt-3 text-sm text-red-700">{syncHint}</p> : null}
       </header>
@@ -347,28 +437,32 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[960px] text-left text-sm">
+        <table className="w-full min-w-[1020px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-2 w-8">
-                <input type="checkbox" aria-label="Seleccionar todas" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleAllFiltered} />
+                <input
+                  type="checkbox"
+                  aria-label="Seleccionar todas"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleAllFiltered}
+                />
               </th>
-              <th className="p-2">Imagen</th>
-              <th className="p-2">Título / SKU</th>
+              <th className="p-2">IMG</th>
+              <th className="p-2">Título / MLA</th>
               <th className="p-2">Stock</th>
               <th className="p-2">Precio ML</th>
               <th className="p-2">Costo</th>
-              <th className="p-2">Precio calc</th>
+              <th className="p-2">Ganancia real</th>
               <th className="p-2">Margen</th>
-              <th className="p-2">Ganancia</th>
-              <th className="p-2">Estado</th>
+              <th className="p-2">Acción</th>
               <th className="p-2 w-8" />
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className="p-6 text-center">
+                <td colSpan={10} className="p-6 text-center">
                   <p className="font-medium text-[#1A1A1A]">No hay publicaciones sincronizadas.</p>
                   <button type="button" disabled={pending} onClick={onSync} className="mt-4 rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold">
                     Sincronizar con Mercado Libre
@@ -376,36 +470,27 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
                 </td>
               </tr>
             ) : (
-              filtered.map((row) => {
-                const tone = !row.tiene_costo
-                  ? "bg-neutral-50"
-                  : row.stock === 0
-                    ? "bg-red-50"
-                    : row.margen_en_riesgo
-                      ? "bg-amber-50"
-                      : row.precio_desviado
-                        ? "bg-orange-50"
-                        : "";
-                const open = expanded === row.item_id;
-                return (
-                  <FragmentRow
-                    key={row.item_id}
-                    row={row}
-                    tone={tone}
-                    open={open}
-                    pending={pending}
-                    selected={selected.has(row.item_id)}
-                    onToggle={() => toggleSelect(row.item_id)}
-                    onToggleExpand={() => setExpanded(open ? null : row.item_id)}
-                    mlAccountId={mlAccountId}
-                    pricingSkuChoices={pricingSkuChoices}
-                    costForms={costForms}
-                    setCostForms={setCostForms}
-                    onSaved={() => router.refresh()}
-                    startTransition={startTransition}
-                  />
-                );
-              })
+              filtered.map((row) => (
+                <CatalogRows
+                  key={row.item_id}
+                  row={row}
+                  expanded={expanded === row.item_id}
+                  onToggleExpand={() => setExpanded(expanded === row.item_id ? null : row.item_id)}
+                  pending={pending}
+                  selected={selected.has(row.item_id)}
+                  onToggleSelect={() => toggleSelect(row.item_id)}
+                  mlAccountId={mlAccountId}
+                  pricingSkuChoices={pricingSkuChoices}
+                  costForms={costForms}
+                  setCostForms={setCostForms}
+                  onSaved={() => router.refresh()}
+                  startTransition={startTransition}
+                  inlineCostOpen={inlineCostItemId === row.item_id}
+                  setInlineCostOpen={(v) => setInlineCostItemId(v ? row.item_id : null)}
+                  inlinePriceOpen={inlinePriceItemId === row.item_id}
+                  setInlinePriceOpen={(v) => setInlinePriceItemId(v ? row.item_id : null)}
+                />
+              ))
             )}
           </tbody>
         </table>
@@ -414,46 +499,113 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
   );
 }
 
-function FragmentRow({
+function CatalogRows({
   row,
-  tone,
-  open,
+  expanded,
+  onToggleExpand,
   pending,
   selected,
-  onToggle,
-  onToggleExpand,
+  onToggleSelect,
   mlAccountId,
   pricingSkuChoices,
   costForms,
   setCostForms,
   onSaved,
-  startTransition
+  startTransition,
+  inlineCostOpen,
+  setInlineCostOpen,
+  inlinePriceOpen,
+  setInlinePriceOpen
 }: {
   row: UnifiedCatalogItem;
-  tone: string;
-  open: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
   pending: boolean;
   selected: boolean;
-  onToggle: () => void;
-  onToggleExpand: () => void;
+  onToggleSelect: () => void;
   mlAccountId: string;
   pricingSkuChoices: PricingChoice[];
   costForms: Record<string, { costo: string; logistica: string; margen: string; pub: string }>;
   setCostForms: Dispatch<SetStateAction<Record<string, { costo: string; logistica: string; margen: string; pub: string }>>>;
   onSaved: () => void;
   startTransition: (cb: () => Promise<void>) => void;
+  inlineCostOpen: boolean;
+  setInlineCostOpen: (open: boolean) => void;
+  inlinePriceOpen: boolean;
+  setInlinePriceOpen: (open: boolean) => void;
 }) {
+  const logistica = (row.logistica ?? "Flex") as LogisticaType;
+  const rep = coerceReputacion(row.reputacion);
+  const pubN = normalizePct(row.publicidad_pct);
+  const margN = normalizePct(row.margen_pct ?? 0.15) || 0.15;
+
+  const liveReal =
+    row.tiene_costo && row.price_ml !== null && row.costo !== null && row.costo > 0
+      ? calcRealProfit({
+          price_ml: row.price_ml,
+          costo: row.costo,
+          logistica,
+          reputacion: rep,
+          publicidad_pct: pubN,
+          peso_kg: row.peso_kg
+        })
+      : null;
+
+  const liveTarget =
+    row.tiene_costo && row.costo !== null && row.costo > 0
+      ? calcSellingPrice({
+          costo: row.costo,
+          logistica,
+          publicidad_pct: pubN,
+          margen_pct: margN,
+          reputacion: rep
+        })
+      : null;
+
+  const gananciaRealLabel =
+    !row.tiene_costo || row.costo === null
+      ? "—"
+      : liveReal && liveReal.converged && Number.isFinite(liveReal.ganancia_real)
+        ? ars.format(liveReal.ganancia_real)
+        : "—";
+
+  const margenRealLabel =
+    !row.tiene_costo || row.margen_real_pct === null ? (row.tiene_costo ? "—" : "—") : `${(row.margen_real_pct * 100).toFixed(1)}%`;
+
+  const pierde = row.margen_real_pct !== null && row.margen_real_pct < 0;
+  const riesgoMargen = row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1;
+
+  const rowBg = !row.tiene_costo
+    ? "bg-neutral-50"
+    : pierde
+      ? "bg-red-100/90"
+      : riesgoMargen
+        ? "bg-amber-50"
+        : "";
+
+  const borderLeft = row.stock_status === "critico" ? "border-l-4 border-l-red-600" : "border-l-4 border-l-transparent";
+
+  const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-100 font-semibold text-orange-950" : "";
+
   const [linkId, setLinkId] = useState("");
   const [hint, setHint] = useState<string | null>(null);
 
-  const margenLabel =
-    row.margen_pct === null || row.margen_pct === undefined ? "—" : `${(Number(row.margen_pct) * 100).toFixed(1)}%`;
+  const action =
+    !row.tiene_costo
+      ? { kind: "cost" as const }
+      : pierde
+        ? { kind: "price" as const }
+        : row.precio_vs_objetivo === "bajo"
+          ? { kind: "bajo" as const }
+          : row.stock_status === "critico"
+            ? { kind: "stock" as const }
+            : { kind: "none" as const };
 
   return (
     <>
-      <tr className={cn("border-b border-[#E8E8E2] align-top", tone)}>
+      <tr className={cn("border-b border-[#E8E8E2] align-top", rowBg, borderLeft)}>
         <td className="p-2">
-          <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Seleccionar ${row.item_id}`} />
+          <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Seleccionar ${row.item_id}`} />
         </td>
         <td className="p-2">
           {row.thumbnail ? (
@@ -468,209 +620,299 @@ function FragmentRow({
           <div className="mt-1 font-mono text-xs text-[#6B6B6B]">{row.item_id}</div>
           {row.sku ? <div className="text-xs text-[#6B6B6B]">SKU costos: {row.sku}</div> : null}
           {!row.tiene_costo ? (
-            <span className="mt-2 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-semibold text-neutral-800">Sin costo</span>
+            <span className="mt-2 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-semibold text-neutral-800">
+              Sin costo
+            </span>
           ) : null}
         </td>
         <td className="p-2">
-          <span className={cn(row.stock_critico && "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white")}>
+          <span
+            className={cn(
+              row.stock_status === "critico" && "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white",
+              row.stock_status === "reponer" && "rounded bg-amber-500 px-2 py-0.5 text-xs font-bold text-white"
+            )}
+          >
             {row.stock === null ? "—" : row.stock}
           </span>
         </td>
-        <td className="p-2 tabular-nums">{row.price_ml === null ? "—" : ars.format(row.price_ml)}</td>
+        <td className={cn("p-2 tabular-nums", precioCellClass)}>{row.price_ml === null ? "—" : ars.format(row.price_ml)}</td>
         <td className="p-2 tabular-nums">{row.costo === null ? "—" : ars.format(row.costo)}</td>
-        <td className="p-2 tabular-nums">
-          {row.precio_calculado === null ? "—" : ars.format(row.precio_calculado)}
-          {row.precio_desviado && row.price_ml !== null && row.precio_calculado !== null ? (
-            <div className="text-xs font-semibold text-orange-800">
-              ML {ars.format(row.price_ml)} vs calc {ars.format(row.precio_calculado)}
-            </div>
-          ) : null}
+        <td className="p-2 tabular-nums font-medium">{gananciaRealLabel}</td>
+        <td className="p-2 tabular-nums">{!row.tiene_costo ? "—" : margenRealLabel}</td>
+        <td className="p-2 text-xs">
+          {action.kind === "cost" ? (
+            <button
+              type="button"
+              className="font-semibold text-blue-700 underline"
+              onClick={() => {
+                setInlineCostOpen(!inlineCostOpen);
+                setInlinePriceOpen(false);
+              }}
+            >
+              Configurar costo
+            </button>
+          ) : action.kind === "price" ? (
+            <button
+              type="button"
+              className="font-semibold text-red-800 underline"
+              onClick={() => {
+                setInlinePriceOpen(!inlinePriceOpen);
+                setInlineCostOpen(false);
+              }}
+            >
+              Ajustar precio
+            </button>
+          ) : action.kind === "bajo" ? (
+            <span className="font-semibold text-orange-800">Precio bajo objetivo</span>
+          ) : action.kind === "stock" ? (
+            <Link href="/ops/catalog#mg-catalog-command-table" className="font-semibold text-red-800 underline">
+              Reponer urgente
+            </Link>
+          ) : (
+            "—"
+          )}
         </td>
-        <td className="p-2">{margenLabel}</td>
-        <td className="p-2 tabular-nums">{row.ganancia_calculada === null ? "—" : ars.format(row.ganancia_calculada)}</td>
-        <td className="p-2 text-xs font-semibold uppercase">{row.status}</td>
         <td className="p-2">
           <button type="button" onClick={onToggleExpand} className="grid place-items-center rounded border border-[#E8E8E2] p-1">
-            {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
         </td>
       </tr>
-      {open ? (
-        <tr className={cn("border-b border-[#E8E8E2] bg-[#FAFAF8]", tone)}>
-          <td colSpan={11} className="p-4">
+
+      {inlineCostOpen && !row.tiene_costo ? (
+        <tr className="border-b border-[#E8E8E2] bg-neutral-50">
+          <td colSpan={10} className="p-4">
+            <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo (inline)</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-xs font-semibold text-[#6B6B6B]">
+                Costo $
+                <input
+                  type="number"
+                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
+                  value={costForms[row.item_id]?.costo ?? ""}
+                  onChange={(e) =>
+                    setCostForms((prev) => ({
+                      ...prev,
+                      [row.item_id]: {
+                        costo: e.target.value,
+                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        margen: prev[row.item_id]?.margen ?? "15",
+                        pub: prev[row.item_id]?.pub ?? "10"
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label className="text-xs font-semibold text-[#6B6B6B]">
+                Logística
+                <select
+                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
+                  value={costForms[row.item_id]?.logistica ?? "Flex"}
+                  onChange={(e) =>
+                    setCostForms((prev) => ({
+                      ...prev,
+                      [row.item_id]: {
+                        costo: prev[row.item_id]?.costo ?? "",
+                        logistica: e.target.value,
+                        margen: prev[row.item_id]?.margen ?? "15",
+                        pub: prev[row.item_id]?.pub ?? "10"
+                      }
+                    }))
+                  }
+                >
+                  <option value="Flex">Flex</option>
+                  <option value="Full">Full</option>
+                  <option value="Retiro domicilio">Retiro domicilio</option>
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-[#6B6B6B]">
+                % Publicidad (0–100 o 0–1)
+                <input
+                  type="number"
+                  step="0.01"
+                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
+                  value={costForms[row.item_id]?.pub ?? "10"}
+                  onChange={(e) =>
+                    setCostForms((prev) => ({
+                      ...prev,
+                      [row.item_id]: {
+                        costo: prev[row.item_id]?.costo ?? "",
+                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        margen: prev[row.item_id]?.margen ?? "15",
+                        pub: e.target.value
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label className="text-xs font-semibold text-[#6B6B6B]">
+                % Margen objetivo (0–100 o 0–1)
+                <input
+                  type="number"
+                  step="0.01"
+                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
+                  value={costForms[row.item_id]?.margen ?? "15"}
+                  onChange={(e) =>
+                    setCostForms((prev) => ({
+                      ...prev,
+                      [row.item_id]: {
+                        costo: prev[row.item_id]?.costo ?? "",
+                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        margen: e.target.value,
+                        pub: prev[row.item_id]?.pub ?? "10"
+                      }
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={pending}
+                className="rounded-lg bg-[#FFD600] px-3 py-2 text-sm font-semibold"
+                onClick={() => {
+                  const f = costForms[row.item_id];
+                  const costo = Number(f?.costo);
+                  if (!Number.isFinite(costo) || costo <= 0) {
+                    setHint("Ingresá un costo válido.");
+                    return;
+                  }
+                  const logisticaIns = (f?.logistica ?? "Flex") as "Full" | "Flex" | "Retiro domicilio";
+                  const margen_pct = normalizePct(Number(f?.margen ?? 15));
+                  const publicidad_pct = normalizePct(Number(f?.pub ?? 10));
+                  setHint(null);
+                  startTransition(async () => {
+                    const res = await saveCostForItem(mlAccountId, row.item_id, {
+                      costo,
+                      logistica: logisticaIns,
+                      margen_pct,
+                      publicidad_pct
+                    });
+                    if (!res.success) {
+                      setHint(res.error ?? "No se pudo guardar");
+                      return;
+                    }
+                    setInlineCostOpen(false);
+                    onSaved();
+                  });
+                }}
+              >
+                Guardar
+              </button>
+              <button type="button" className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold" onClick={() => setInlineCostOpen(false)}>
+                Cancelar
+              </button>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+
+      {inlinePriceOpen && row.tiene_costo ? (
+        <tr className="border-b border-[#E8E8E2] bg-red-50/80">
+          <td colSpan={10} className="p-4 text-sm">
+            <p className="font-semibold text-[#1A1A1A]">Ajustar precio en Mercado Libre</p>
+            <p className="mt-1 text-[#6B6B6B]">
+              Precio objetivo calculado (margen deseado):{" "}
+              {liveTarget && liveTarget.converged ? (
+                <span className="font-mono font-semibold text-[#1A1A1A]">{ars.format(liveTarget.precio_venta)}</span>
+              ) : (
+                "—"
+              )}
+              . Actualizá el precio en la publicación; la app no puede modificar ML por API en este entorno.
+            </p>
+            {row.permalink ? (
+              <Link href={row.permalink} className="mt-2 inline-block font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">
+                Abrir publicación en ML
+              </Link>
+            ) : null}
+            <button type="button" className="mt-2 ml-3 text-sm font-semibold text-[#6B6B6B] underline" onClick={() => setInlinePriceOpen(false)}>
+              Cerrar
+            </button>
+          </td>
+        </tr>
+      ) : null}
+
+      {expanded ? (
+        <tr className={cn("border-b border-[#E8E8E2] bg-[#FAFAF8]", rowBg)}>
+          <td colSpan={10} className="p-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2 text-sm">
+              <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
+                <p className="font-bold text-[#1A1A1A]">Desglose rentabilidad</p>
+                {row.price_ml !== null && row.tiene_costo && liveReal && liveReal.converged ? (
+                  <ul className="space-y-1 font-mono text-xs leading-relaxed">
+                    <li>Precio ML: {ars.format(row.price_ml)}</li>
+                    <li>- Comisión ML: − {ars.format(liveReal.comision_$)}</li>
+                    <li>- Costo envío ({row.logistica ?? "Flex"}): − {ars.format(liveReal.envio_$)}</li>
+                    <li>- Publicidad ({(pubN * 100).toFixed(0)}%): − {ars.format(liveReal.publicidad_$)}</li>
+                    <li>- Costo producto: − {ars.format(liveReal.costo_total)}</li>
+                    <li className="border-t border-[#E8E8E2] pt-1 font-semibold">
+                      Ganancia real: {liveReal.ganancia_real >= 0 ? "+" : ""}
+                      {ars.format(liveReal.ganancia_real)} ({((liveReal.ganancia_real / row.price_ml) * 100).toFixed(1)}%)
+                    </li>
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[#6B6B6B]">{!row.tiene_costo ? "Sin costo — no hay desglose." : "Sin precio ML o datos incompletos."}</p>
+                )}
+              </div>
+              <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
+                <p className="font-bold text-[#1A1A1A]">Stock</p>
+                <p>Stock actual: {row.stock === null ? "—" : `${row.stock} unidad${row.stock === 1 ? "" : "es"}`}</p>
+                <p>Ventas 30d: {row.ventas_30d === null ? "N/A" : row.ventas_30d}</p>
+                <p className="text-[#6B6B6B]">
+                  Estado:{" "}
+                  {row.ventas_30d === null
+                    ? "Sin datos de ventas (sync ML aún no expone ventas 30d por ítem)."
+                    : `${row.stock_status ?? "—"} · Urgencia ${row.stock_urgency ?? "—"}`}
+                </p>
                 {row.permalink ? (
                   <p>
-                    <span className="font-semibold">Permalink: </span>
                     <Link href={row.permalink} className="font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">
                       Abrir en ML
                     </Link>
                   </p>
                 ) : null}
-                <p>
-                  <span className="font-semibold">Logística ML:</span> {row.logistic_type ?? "—"}
-                </p>
-                <p>
-                  <span className="font-semibold">Vendidos:</span> {row.sold_quantity === null ? "—" : row.sold_quantity}
-                </p>
               </div>
-              <div className="space-y-3 rounded-lg border border-[#E8E8E2] bg-white p-3">
-                {!row.tiene_costo ? (
-                  <div>
-                    <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo</p>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <label className="text-xs font-semibold text-[#6B6B6B]">
-                        Costo
-                        <input
-                          type="number"
-                          className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                          value={costForms[row.item_id]?.costo ?? ""}
-                          onChange={(e) =>
-                            setCostForms((prev) => ({
-                              ...prev,
-                              [row.item_id]: {
-                                costo: e.target.value,
-                                logistica: prev[row.item_id]?.logistica ?? "Flex",
-                                margen: prev[row.item_id]?.margen ?? "0.15",
-                                pub: prev[row.item_id]?.pub ?? "0.1"
-                              }
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-[#6B6B6B]">
-                        Logística
-                        <select
-                          className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                          value={costForms[row.item_id]?.logistica ?? "Flex"}
-                          onChange={(e) =>
-                            setCostForms((prev) => ({
-                              ...prev,
-                              [row.item_id]: {
-                                costo: prev[row.item_id]?.costo ?? "",
-                                logistica: e.target.value,
-                                margen: prev[row.item_id]?.margen ?? "0.15",
-                                pub: prev[row.item_id]?.pub ?? "0.1"
-                              }
-                            }))
-                          }
-                        >
-                          <option value="Flex">Flex</option>
-                          <option value="Full">Full</option>
-                          <option value="Retiro domicilio">Retiro domicilio</option>
-                        </select>
-                      </label>
-                      <label className="text-xs font-semibold text-[#6B6B6B]">
-                        % Margen (0–1)
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                          value={costForms[row.item_id]?.margen ?? "0.15"}
-                          onChange={(e) =>
-                            setCostForms((prev) => ({
-                              ...prev,
-                              [row.item_id]: {
-                                costo: prev[row.item_id]?.costo ?? "",
-                                logistica: prev[row.item_id]?.logistica ?? "Flex",
-                                margen: e.target.value,
-                                pub: prev[row.item_id]?.pub ?? "0.1"
-                              }
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-[#6B6B6B]">
-                        % Publicidad (0–1)
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                          value={costForms[row.item_id]?.pub ?? "0.1"}
-                          onChange={(e) =>
-                            setCostForms((prev) => ({
-                              ...prev,
-                              [row.item_id]: {
-                                costo: prev[row.item_id]?.costo ?? "",
-                                logistica: prev[row.item_id]?.logistica ?? "Flex",
-                                margen: prev[row.item_id]?.margen ?? "0.15",
-                                pub: e.target.value
-                              }
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    {hint ? <p className="text-xs text-red-700">{hint}</p> : null}
+            </div>
+
+            <div className="mt-4 rounded-lg border border-[#E8E8E2] bg-white p-3">
+              {row.tiene_costo ? (
+                <div>
+                  <p className="text-sm font-semibold">Vincular a otro SKU de costos</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <select value={linkId} onChange={(e) => setLinkId(e.target.value)} className="rounded border border-[#E8E8E2] px-2 py-1 text-sm">
+                      <option value="">Elegí SKU…</option>
+                      {pricingSkuChoices.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {(p.sku ?? p.producto).slice(0, 40)}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      disabled={pending}
-                      className="mt-3 rounded-lg bg-[#FFD600] px-3 py-2 text-sm font-semibold"
+                      disabled={pending || !linkId}
+                      className="rounded-lg bg-[#1A1A1A] px-3 py-1 text-sm font-semibold text-white disabled:opacity-50"
                       onClick={() => {
-                        const f = costForms[row.item_id];
-                        const costo = Number(f?.costo);
-                        if (!Number.isFinite(costo) || costo <= 0) {
-                          setHint("Ingresá un costo válido.");
-                          return;
-                        }
-                        const logistica = (f?.logistica ?? "Flex") as "Full" | "Flex" | "Retiro domicilio";
-                        const margen = Number(f?.margen ?? 0.15);
-                        const pub = Number(f?.pub ?? 0);
-                        setHint(null);
                         startTransition(async () => {
-                          const res = await saveCostForItem(mlAccountId, row.item_id, {
-                            costo,
-                            logistica,
-                            margen_pct: margen,
-                            publicidad_pct: pub
-                          });
+                          const res = await linkSkuToItem(mlAccountId, row.item_id, linkId);
                           if (!res.success) {
-                            setHint(res.error ?? "No se pudo guardar");
+                            setHint(res.error ?? "No se pudo vincular");
                             return;
                           }
+                          setLinkId("");
                           onSaved();
                         });
                       }}
                     >
-                      Guardar costo y vincular
+                      Vincular
                     </button>
                   </div>
-                ) : (
-                  <div>
-                    <p className="text-sm font-semibold">Vincular a otro SKU de costos</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <select value={linkId} onChange={(e) => setLinkId(e.target.value)} className="rounded border border-[#E8E8E2] px-2 py-1 text-sm">
-                        <option value="">Elegí SKU…</option>
-                        {pricingSkuChoices.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {(p.sku ?? p.producto).slice(0, 40)}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        disabled={pending || !linkId}
-                        className="rounded-lg bg-[#1A1A1A] px-3 py-1 text-sm font-semibold text-white disabled:opacity-50"
-                        onClick={() => {
-                          startTransition(async () => {
-                            const res = await linkSkuToItem(mlAccountId, row.item_id, linkId);
-                            if (!res.success) {
-                              setHint(res.error ?? "No se pudo vincular");
-                              return;
-                            }
-                            setLinkId("");
-                            onSaved();
-                          });
-                        }}
-                      >
-                        Vincular
-                      </button>
-                    </div>
-                    {hint ? <p className="text-xs text-red-700">{hint}</p> : null}
-                  </div>
-                )}
-              </div>
+                  {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
+                </div>
+              ) : (
+                <p className="text-xs text-[#6B6B6B]">Usá &quot;Configurar costo&quot; en la columna Acción para cargar costos sin salir de la tabla.</p>
+              )}
             </div>
           </td>
         </tr>

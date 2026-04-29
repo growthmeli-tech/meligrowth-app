@@ -1,5 +1,6 @@
 import type { Database } from "@/lib/supabase/database.types";
 import { computeSkuPricingRow, detectPricingRisks, type SkuPricingComputed } from "@/lib/pricing/alerts";
+import { coerceReputacion, normalizePct } from "@/lib/pricing/calculator";
 
 type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
 
@@ -15,8 +16,11 @@ export function pricingSkuRowToComputed(row: PricingSkuRow): SkuPricingComputed 
     producto: row.producto,
     costo: Number(row.costo),
     logistica: row.logistica,
-    publicidad_pct: row.publicidad_pct !== null && row.publicidad_pct !== undefined ? Number(row.publicidad_pct) : DEF_PUBLICIDAD,
-    margen_pct: row.margen_pct !== null && row.margen_pct !== undefined ? Number(row.margen_pct) : DEF_MARGEN
+    reputacion: coerceReputacion(row.reputacion),
+    publicidad_pct:
+      row.publicidad_pct !== null && row.publicidad_pct !== undefined ? normalizePct(Number(row.publicidad_pct)) : DEF_PUBLICIDAD,
+    margen_pct:
+      row.margen_pct !== null && row.margen_pct !== undefined ? normalizePct(Number(row.margen_pct)) : DEF_MARGEN
   });
 }
 

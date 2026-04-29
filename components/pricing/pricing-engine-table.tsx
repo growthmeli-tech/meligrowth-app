@@ -5,6 +5,13 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Search, Tag } from "lucide-react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
+import {
+  calcRealProfit,
+  calcSellingPrice,
+  coerceReputacion,
+  normalizePct,
+  type LogisticaType
+} from "@/lib/pricing/calculator";
 import { cn } from "@/lib/utils";
 
 type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
@@ -22,21 +29,71 @@ function pctLabel(v: number | null): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-function rowRiskTier(margenPct: number | null): "destroy" | "risk" | "ok" | "unknown" {
-  if (margenPct === null || margenPct === undefined) return "unknown";
-  if (margenPct < 0) return "destroy";
-  if (margenPct < 0.1) return "risk";
-  return "ok";
+function vsObjetivoTone(margenReal: number | null, margenTarget: number): "green" | "amber" | "red" | "unknown" {
+  if (margenReal === null || Number.isNaN(margenReal)) return "unknown";
+  if (margenReal >= margenTarget) return "green";
+  if (margenReal >= margenTarget - 0.05) return "amber";
+  return "red";
 }
 
 export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) {
   const [q, setQ] = useState("");
   const [riskFilter, setRiskFilter] = useState<"all" | "destroy" | "risk">("all");
 
+  const weightedReal = useMemo(() => {
+    let w = 0;
+    let acc = 0;
+    for (const r of rows) {
+      const priceMl = mlLinks?.[r.id]?.price_ml;
+      if (priceMl === null || priceMl === undefined || !Number.isFinite(priceMl) || priceMl <= 0) continue;
+      const pub = normalizePct(r.publicidad_pct ?? 0);
+      const margT = normalizePct(r.margen_pct ?? 0.15) || 0.15;
+      const rp = calcRealProfit({
+        price_ml: priceMl,
+        costo: Number(r.costo),
+        logistica: r.logistica as LogisticaType,
+        reputacion: coerceReputacion(r.reputacion),
+        publicidad_pct: pub,
+        peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
+      });
+      if (!rp.converged || !Number.isFinite(rp.margen_real)) continue;
+      w += Number(r.costo);
+      acc += rp.margen_real * Number(r.costo);
+    }
+    if (w <= 0) return null;
+    return acc / w;
+  }, [rows, mlLinks]);
+
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return rows.filter((r) => {
-      const tier = rowRiskTier(r.margen_pct !== null && r.margen_pct !== undefined ? Number(r.margen_pct) : null);
+      const priceMl = mlLinks?.[r.id]?.price_ml;
+      const pub = normalizePct(r.publicidad_pct ?? 0);
+      const margT = normalizePct(r.margen_pct ?? 0.15) || 0.15;
+      let margenReal: number | null = null;
+      if (priceMl !== null && priceMl !== undefined && Number.isFinite(priceMl) && priceMl > 0) {
+        const rp = calcRealProfit({
+          price_ml: priceMl,
+          costo: Number(r.costo),
+          logistica: r.logistica as LogisticaType,
+          reputacion: coerceReputacion(r.reputacion),
+          publicidad_pct: pub,
+          peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
+        });
+        margenReal = rp.converged && Number.isFinite(rp.margen_real) ? rp.margen_real : null;
+      }
+      const tier =
+        margenReal !== null && !Number.isNaN(margenReal)
+          ? margenReal < 0
+            ? "destroy"
+            : margenReal < 0.1
+              ? "risk"
+              : "ok"
+          : margT < 0
+            ? "destroy"
+            : margT < 0.1
+              ? "risk"
+              : "ok";
       if (riskFilter === "destroy" && tier !== "destroy") return false;
       if (riskFilter === "risk" && tier !== "risk") return false;
       if (!qq) return true;
@@ -44,7 +101,7 @@ export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) 
       const prod = (r.producto ?? "").toLowerCase();
       return sku.includes(qq) || prod.includes(qq);
     });
-  }, [rows, q, riskFilter]);
+  }, [rows, q, riskFilter, mlLinks]);
 
   return (
     <div className="space-y-4">
@@ -55,7 +112,10 @@ export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) 
         </div>
         <div className="flex flex-wrap gap-3 text-sm">
           <span className="rounded-lg border border-[#E8E8E2] bg-[#F5F5F0] px-3 py-1 font-semibold text-[#1A1A1A]">
-            Margen prom.: {weightedMargenPct === null ? "—" : pctLabel(weightedMargenPct)}
+            Margen objetivo prom.: {weightedMargenPct === null ? "—" : pctLabel(weightedMargenPct)}
+          </span>
+          <span className="rounded-lg border border-[#E8E8E2] bg-white px-3 py-1 font-semibold text-[#1A1A1A]">
+            Margen real prom.: {weightedReal === null ? "—" : pctLabel(weightedReal)}
           </span>
           <span className="rounded-lg border border-[#E8E8E2] bg-white px-3 py-1 font-semibold text-[#6B6B6B]">
             SKUs: {rows.length}
@@ -89,23 +149,64 @@ export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) 
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[960px] text-left text-sm">
+        <table className="w-full min-w-[1100px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-3">SKU / Producto</th>
               <th className="p-3">Publicación ML</th>
               <th className="p-3">Stock ML</th>
               <th className="p-3">Costo</th>
-              <th className="p-3">Precio venta</th>
-              <th className="p-3">Ganancia</th>
+              <th className="p-3">Precio actual ML</th>
+              <th className="p-3">Precio venta obj.</th>
+              <th className="p-3">Ganancia real</th>
+              <th className="p-3">Ganancia obj.</th>
               <th className="p-3">Margen target</th>
-              <th className="p-3">ROI</th>
+              <th className="p-3">vs Objetivo</th>
+              <th className="p-3">ROI obj.</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => {
-              const m = r.margen_pct !== null && r.margen_pct !== undefined ? Number(r.margen_pct) : null;
-              const tier = rowRiskTier(m);
+              const pub = normalizePct(r.publicidad_pct ?? 0);
+              const margT = normalizePct(r.margen_pct ?? 0.15) || 0.15;
+              const rep = coerceReputacion(r.reputacion);
+              const target = calcSellingPrice({
+                costo: Number(r.costo),
+                logistica: r.logistica as LogisticaType,
+                publicidad_pct: pub,
+                margen_pct: margT,
+                reputacion: rep
+              });
+              const priceMl = mlLinks?.[r.id]?.price_ml;
+              const hasMlPrice = priceMl !== null && priceMl !== undefined && Number.isFinite(priceMl) && priceMl > 0;
+              const real = hasMlPrice
+                ? calcRealProfit({
+                    price_ml: priceMl,
+                    costo: Number(r.costo),
+                    logistica: r.logistica as LogisticaType,
+                    reputacion: rep,
+                    publicidad_pct: pub,
+                    peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
+                  })
+                : null;
+              const gananciaReal =
+                real && real.converged && Number.isFinite(real.ganancia_real) ? real.ganancia_real : null;
+              const margenReal = real && real.converged && Number.isFinite(real.margen_real) ? real.margen_real : null;
+              const deltaPct =
+                margenReal !== null ? Math.round((margenReal - margT) * 10_000) / 100 : null;
+              const vsTone = vsObjetivoTone(margenReal, margT);
+              const tier =
+                margenReal !== null
+                  ? margenReal < 0
+                    ? "destroy"
+                    : margenReal < 0.1
+                      ? "risk"
+                      : "ok"
+                  : margT < 0
+                    ? "destroy"
+                    : margT < 0.1
+                      ? "risk"
+                      : "ok";
               const ml = mlLinks?.[r.id];
               return (
                 <tr
@@ -114,7 +215,7 @@ export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) 
                     "border-b border-[#E8E8E2] align-top",
                     tier === "destroy" && "bg-red-50",
                     tier === "risk" && "bg-amber-50/90",
-                    tier === "unknown" && "bg-white"
+                    tier === "ok" && "bg-white"
                   )}
                 >
                   <td className="p-3 font-semibold text-[#1A1A1A]">
@@ -142,16 +243,31 @@ export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) 
                     )}
                   </td>
                   <td className="p-3 tabular-nums text-sm">{ml?.stock === null || ml?.stock === undefined ? "—" : ml.stock}</td>
-                  <td className="p-3 tabular-nums">{ars.format(Number(r.costo))}</td>
+                  <td className="p-3 tabular-nums">{Number.isFinite(Number(r.costo)) ? ars.format(Number(r.costo)) : "—"}</td>
+                  <td className="p-3 tabular-nums">{hasMlPrice ? ars.format(priceMl) : "—"}</td>
                   <td className="p-3 tabular-nums">
-                    {r.precio_venta !== null && r.precio_venta !== undefined ? ars.format(Number(r.precio_venta)) : "—"}
+                    {target.converged && Number.isFinite(target.precio_venta) ? ars.format(target.precio_venta) : "—"}
+                  </td>
+                  <td className="p-3 tabular-nums font-semibold">
+                    {gananciaReal === null ? "—" : ars.format(gananciaReal)}
                   </td>
                   <td className="p-3 tabular-nums">
-                    {r.ganancia_unit !== null && r.ganancia_unit !== undefined ? ars.format(Number(r.ganancia_unit)) : "—"}
+                    {target.converged && Number.isFinite(target.ganancia_unit) ? ars.format(target.ganancia_unit) : "—"}
                   </td>
-                  <td className="p-3 tabular-nums">{pctLabel(m)}</td>
+                  <td className="p-3 tabular-nums">{pctLabel(margT)}</td>
+                  <td
+                    className={cn(
+                      "p-3 tabular-nums font-semibold",
+                      vsTone === "green" && "text-emerald-800",
+                      vsTone === "amber" && "text-amber-800",
+                      vsTone === "red" && "text-red-700",
+                      vsTone === "unknown" && "text-[#6B6B6B]"
+                    )}
+                  >
+                    {deltaPct === null ? "—" : `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)} pp`}
+                  </td>
                   <td className="p-3 tabular-nums">
-                    {r.roi !== null && r.roi !== undefined ? `${Number(r.roi).toFixed(1)}%` : "—"}
+                    {target.converged && Number.isFinite(target.roi) ? `${target.roi.toFixed(1)}%` : "—"}
                   </td>
                 </tr>
               );

@@ -10,7 +10,8 @@ const HDR_GREEN = "FFC6EFCE";
 
 function rowTone(item: UnifiedCatalogItem): "red" | "amber" | "orange" | "gray" | "white" {
   if (!item.tiene_costo) return "gray";
-  if (item.stock === 0) return "red";
+  if (item.margen_real_pct !== null && item.margen_real_pct < 0) return "red";
+  if (item.stock_status === "critico") return "red";
   if (item.margen_en_riesgo) return "amber";
   if (item.precio_desviado) return "orange";
   return "white";

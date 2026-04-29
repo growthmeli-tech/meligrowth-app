@@ -1,3 +1,4 @@
+import { normalizePct } from "@/lib/pricing/calculator";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";
@@ -5,6 +6,16 @@ import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/util
 
 type Row = Database["public"]["Tables"]["pricing_skus"]["Row"];
 type Insert = Database["public"]["Tables"]["pricing_skus"]["Insert"];
+
+export type NormalizedPricingSkuRow = Row;
+
+function normalizePricingSkuRow(row: Row): NormalizedPricingSkuRow {
+  return {
+    ...row,
+    publicidad_pct: row.publicidad_pct === null || row.publicidad_pct === undefined ? null : normalizePct(Number(row.publicidad_pct)),
+    margen_pct: row.margen_pct === null || row.margen_pct === undefined ? null : normalizePct(Number(row.margen_pct))
+  };
+}
 
 export async function deletePricingSkusBySource(
   mlAccountId: string,
@@ -42,7 +53,7 @@ export async function bulkReplacePricingSkusForFile(
   return insertPricingSkusBatch(withFile);
 }
 
-export async function listPricingSkus(mlAccountId: string): Promise<ActionResult<Row[]>> {
+export async function listPricingSkus(mlAccountId: string): Promise<ActionResult<NormalizedPricingSkuRow[]>> {
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("pricing_skus")
@@ -55,5 +66,6 @@ export async function listPricingSkus(mlAccountId: string): Promise<ActionResult
     return { success: false, error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo cargar pricing_skus", code: error.code };
   }
 
-  return { success: true, data: (data ?? []) as Row[] };
+  const raw = (data ?? []) as Row[];
+  return { success: true, data: raw.map(normalizePricingSkuRow) };
 }

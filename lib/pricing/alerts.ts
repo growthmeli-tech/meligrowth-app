@@ -51,7 +51,9 @@ export function detectPricingRisks(healthId: string, mlAccountId: string, skus: 
   return out;
 }
 
-export function computeSkuPricingRow(row: Pick<MargenesRow, "costo" | "logistica" | "publicidad_pct" | "margen_pct" | "producto">): SkuPricingComputed {
+export function computeSkuPricingRow(
+  row: Pick<MargenesRow, "costo" | "logistica" | "publicidad_pct" | "margen_pct" | "producto" | "reputacion">
+): SkuPricingComputed {
   const result = calcSellingPrice(row);
   return { producto: row.producto, costo: row.costo, margen_pct: row.margen_pct, result };
 }
