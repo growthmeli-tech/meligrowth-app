@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PricingEngineTable } from "@/components/pricing/pricing-engine-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
+import { mapPricingSkusToMlLinks, listUnifiedCatalog, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 import { weightedMargenPctFromPricingSkus } from "@/lib/pricing/stats";
 
@@ -19,6 +20,11 @@ export default async function OpsPricingPage() {
       </div>
     );
   }
+
+  const unified = await listUnifiedCatalog(accountResult.data.id);
+  const mlLinksRecord: Record<string, MlPublicationLink> = unified.success
+    ? Object.fromEntries(mapPricingSkusToMlLinks(skusResult.data, unified.data))
+    : {};
 
   const rows = skusResult.data;
   const weighted = weightedMargenPctFromPricingSkus(rows);
@@ -47,7 +53,7 @@ export default async function OpsPricingPage() {
 
   return (
     <main>
-      <PricingEngineTable rows={rows} weightedMargenPct={weighted} />
+      <PricingEngineTable rows={rows} weightedMargenPct={weighted} mlLinks={mlLinksRecord} />
     </main>
   );
 }

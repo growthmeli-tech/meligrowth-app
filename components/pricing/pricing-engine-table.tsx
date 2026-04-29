@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AlertTriangle, Search, Tag } from "lucide-react";
 import type { Database } from "@/lib/supabase/database.types";
+import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { cn } from "@/lib/utils";
 
 type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
@@ -10,6 +12,7 @@ type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
 type Props = {
   rows: PricingSkuRow[];
   weightedMargenPct: number | null;
+  mlLinks?: Record<string, MlPublicationLink>;
 };
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
@@ -26,7 +29,7 @@ function rowRiskTier(margenPct: number | null): "destroy" | "risk" | "ok" | "unk
   return "ok";
 }
 
-export function PricingEngineTable({ rows, weightedMargenPct }: Props) {
+export function PricingEngineTable({ rows, weightedMargenPct, mlLinks }: Props) {
   const [q, setQ] = useState("");
   const [riskFilter, setRiskFilter] = useState<"all" | "destroy" | "risk">("all");
 
@@ -86,10 +89,12 @@ export function PricingEngineTable({ rows, weightedMargenPct }: Props) {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[960px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-3">SKU / Producto</th>
+              <th className="p-3">Publicación ML</th>
+              <th className="p-3">Stock ML</th>
               <th className="p-3">Costo</th>
               <th className="p-3">Precio venta</th>
               <th className="p-3">Ganancia</th>
@@ -101,6 +106,7 @@ export function PricingEngineTable({ rows, weightedMargenPct }: Props) {
             {filtered.map((r) => {
               const m = r.margen_pct !== null && r.margen_pct !== undefined ? Number(r.margen_pct) : null;
               const tier = rowRiskTier(m);
+              const ml = mlLinks?.[r.id];
               return (
                 <tr
                   key={r.id}
@@ -126,6 +132,16 @@ export function PricingEngineTable({ rows, weightedMargenPct }: Props) {
                     </div>
                     <div className="mt-1 max-w-[280px] text-xs font-normal leading-snug">{r.producto}</div>
                   </td>
+                  <td className="p-3 text-sm">
+                    {ml?.permalink ? (
+                      <Link href={ml.permalink} className="font-semibold text-blue-700 underline underline-offset-2" target="_blank" rel="noreferrer">
+                        {ml.item_id}
+                      </Link>
+                    ) : (
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700">Sin publicación ML</span>
+                    )}
+                  </td>
+                  <td className="p-3 tabular-nums text-sm">{ml?.stock === null || ml?.stock === undefined ? "—" : ml.stock}</td>
                   <td className="p-3 tabular-nums">{ars.format(Number(r.costo))}</td>
                   <td className="p-3 tabular-nums">
                     {r.precio_venta !== null && r.precio_venta !== undefined ? ars.format(Number(r.precio_venta)) : "—"}

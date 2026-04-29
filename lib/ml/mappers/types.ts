@@ -147,3 +147,27 @@ export type MlFulfillmentOperationsResponse = {
     available_quantity?: number;
   }>;
 };
+
+/** Multi-get GET /items?ids= — ML returns either wrapped entries or plain bodies depending on version */
+export type MlItemsMultiEntry = {
+  code?: number;
+  body?: Record<string, unknown>;
+};
+
+export type MlItemCatalogBody = {
+  id?: string;
+  title?: string;
+  price?: number;
+  available_quantity?: number;
+  sold_quantity?: number;
+  status?: string;
+  seller_custom_field?: string | null;
+  condition?: string;
+  permalink?: string;
+  thumbnail?: string | null;
+  listing_type_id?: string;
+  last_updated?: string;
+  shipping?: {
+    logistic_type?: string | null;
+  } | null;
+};

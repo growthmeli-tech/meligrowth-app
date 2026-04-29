@@ -7,6 +7,7 @@ import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getLatestIngestionRunByAccount } from "@/lib/data-v2/ingestion-runs";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { listTasksByAccount } from "@/lib/data-v2/tasks";
+import { getCatalogHealthSummary } from "@/lib/data-v2/unified-catalog";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 import { getOperationalPriorityCopy } from "@/lib/ops/copy";
 import { countPricingRiskAlerts } from "@/lib/pricing/pricing-sku-computed";
@@ -18,14 +19,16 @@ export default async function OpsDashboardPage() {
     return <EmptyState context="cuenta" />;
   }
 
-  const [healthResult, alertsResult, pendingTasks, inProgressTasks, ingestionResult, pricingSkusResult] = await Promise.all([
-    getLatestAccountHealthByAccount(accountResult.data.id),
-    listAlertsByAccount(accountResult.data.id, { audience: "operator", includeResolved: false, limit: 10 }),
-    listTasksByAccount(accountResult.data.id, { status: "pendiente" }),
-    listTasksByAccount(accountResult.data.id, { status: "en_curso" }),
-    getLatestIngestionRunByAccount(accountResult.data.id),
-    listPricingSkus(accountResult.data.id)
-  ]);
+  const [healthResult, alertsResult, pendingTasks, inProgressTasks, ingestionResult, pricingSkusResult, catalogHealthResult] =
+    await Promise.all([
+      getLatestAccountHealthByAccount(accountResult.data.id),
+      listAlertsByAccount(accountResult.data.id, { audience: "operator", includeResolved: false, limit: 10 }),
+      listTasksByAccount(accountResult.data.id, { status: "pendiente" }),
+      listTasksByAccount(accountResult.data.id, { status: "en_curso" }),
+      getLatestIngestionRunByAccount(accountResult.data.id),
+      listPricingSkus(accountResult.data.id),
+      getCatalogHealthSummary(accountResult.data.id)
+    ]);
 
   if (!healthResult.success || !healthResult.data) {
     return <EmptyState context="diagnosticos" />;
@@ -63,6 +66,9 @@ export default async function OpsDashboardPage() {
     pricingSkusResult.success && health
       ? countPricingRiskAlerts(health.id, accountResult.data.id, pricingSkusResult.data)
       : 0;
+
+  const catalogHealth =
+    catalogHealthResult.success && catalogHealthResult.data.totalPublications > 0 ? catalogHealthResult.data : null;
 
   return (
     <main className="space-y-4">
@@ -128,6 +134,20 @@ export default async function OpsDashboardPage() {
               {pricingRiskCount} SKU{pricingRiskCount === 1 ? "" : "s"} con riesgo de margen
             </span>
             <span className="shrink-0 underline-offset-2">Ver motor de precios →</span>
+          </Link>
+        </section>
+      ) : null}
+
+      {catalogHealth ? (
+        <section className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-[#6B6B6B]">Catálogo</p>
+          <p className="mt-2 text-sm font-medium text-[#1A1A1A]">
+            {catalogHealth.activePublications} publicaciones activas · {catalogHealth.sinStock} sin stock · {catalogHealth.sinCosto}{" "}
+            sin costo
+            {catalogHealth.precioDesviado > 0 ? ` · ${catalogHealth.precioDesviado} precio desviado` : ""}
+          </p>
+          <Link href="/ops/catalog" className="mt-3 inline-flex text-sm font-semibold text-[#1A1A1A] underline underline-offset-2">
+            Ver catálogo →
           </Link>
         </section>
       ) : null}

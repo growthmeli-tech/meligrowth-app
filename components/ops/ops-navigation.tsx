@@ -20,8 +20,8 @@ const NAV_ITEMS: Array<{
   { href: "/ops/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/ops/alerts", label: "Alertas", icon: Bell, badgeKey: "alertasUrgentes" },
   { href: "/ops/blocks", label: "Bloques", icon: BarChart2 },
-  { href: "/ops/pricing", label: "Precios", icon: Tag },
   { href: "/ops/catalog", label: "Catálogo", icon: BookOpen },
+  { href: "/ops/pricing", label: "Precios", icon: Tag },
   { href: "/ops/tasks", label: "Tareas", icon: CheckSquare, badgeKey: "tareasPendientes" }
 ];
 

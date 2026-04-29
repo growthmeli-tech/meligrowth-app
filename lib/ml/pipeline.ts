@@ -5,6 +5,7 @@ import { getListingsOptimizationRate, getListingsStats, getMarketplaceListingsCa
 import { getLogisticsMetrics } from "@/lib/ml/endpoints/logistics";
 import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
+import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
 import type { MlDataSource, MlDiagnosticPrefill } from "@/lib/ml/mappers/types";
 import { createIngestionRunPipeline, finishIngestionRunPipeline, type IngestionBlockEntry } from "@/lib/data-v2/ingestion-runs";
@@ -437,6 +438,16 @@ export async function fetchMLDiagnosticData(
         }
       },
       error_msg: null
+    });
+  }
+
+  if (options?.mlAccountId) {
+    void syncMlCatalog(options.mlAccountId, sellerId, accessToken).catch((err) => {
+      console.error("[ml-catalog:pipeline_side_effect]", {
+        mlAccountId: options.mlAccountId,
+        sellerId,
+        error: err instanceof Error ? err.message : String(err)
+      });
     });
   }
 

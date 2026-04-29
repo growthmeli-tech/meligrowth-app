@@ -658,6 +658,33 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["pricing_skus"]["Row"]>;
         Relationships: [];
       };
+      ml_catalog_items: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          item_id: string;
+          title: string;
+          price: number | null;
+          available_quantity: number | null;
+          sold_quantity: number | null;
+          status: string | null;
+          seller_custom_field: string | null;
+          condition: string | null;
+          permalink: string | null;
+          thumbnail: string | null;
+          logistic_type: string | null;
+          pricing_sku_id: string | null;
+          last_synced_at: string;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]> & {
+          ml_account_id: string;
+          item_id: string;
+          title: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]>;
+        Relationships: [];
+      };
       ingestion_runs: {
         Row: {
           id: string;
