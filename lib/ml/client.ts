@@ -52,12 +52,13 @@ export async function mlFetch<T>(path: string, options?: MlFetchOptions): Promis
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
     try {
+      const token = options?.token?.trim();
       const response = await fetch(url, {
         ...options,
         headers: {
           Accept: "application/json",
-          ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
-          ...(options?.headers ?? {})
+          ...(options?.headers ?? {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         cache: "no-store"
       });

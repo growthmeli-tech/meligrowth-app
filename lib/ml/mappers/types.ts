@@ -61,6 +61,12 @@ export type MlSellerReputationResponse = {
   };
 };
 
+/** Respuesta parcial de GET /users/{id}; solo lo que usamos para reputación. */
+export type MlUserResponse = {
+  id?: number;
+  seller_reputation?: MlSellerReputationResponse | null;
+};
+
 export type MlListingsSearchResponse = {
   results: string[];
   paging: {
