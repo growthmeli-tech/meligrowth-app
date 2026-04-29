@@ -113,8 +113,8 @@ async function triggerScrapeJob(tipo: ScraperTipo, ctx: ScrapeJobContext) {
   const supabase = await createServerSupabaseClient();
   const insertPayload =
     ctx.mode === "v2"
-      ? { ml_account_id: ctx.mlAccountId, client_id: null as string | null, tipo, estado: "pending" as const }
-      : { client_id: ctx.clientId, ml_account_id: null as string | null, tipo, estado: "pending" as const };
+      ? { ml_account_id: ctx.mlAccountId, tipo, estado: "pending" as const }
+      : { client_id: ctx.clientId, tipo, estado: "pending" as const };
 
   const { data: job, error: insertError } = await supabase.from("scraping_jobs").insert(insertPayload).select("id").single();
 
