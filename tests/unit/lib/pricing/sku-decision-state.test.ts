@@ -5,7 +5,7 @@ function base(): Parameters<typeof buildSkuDecisionState>[0] {
   return {
     accountId: "acc-1",
     financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
-    ml: { itemId: "MLA1", title: "Producto test", sku: "SKU-1" },
+    ml: { itemId: "MLA1", title: "Producto test", sku: "SKU-1", freeShipping: false },
     inputs: { reputacion: "Verde / MercadoLíder" }
   };
 }

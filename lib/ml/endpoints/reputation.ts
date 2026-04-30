@@ -47,9 +47,10 @@ export function computeReputationProtection(reputation: MlSellerReputationRespon
 }
 
 /**
- * GET /users/{sellerId} → `seller_reputation` (official path; avoids seller_reputation-only endpoint quirks).
+ * GET /users/{sellerId} → full `seller_reputation` for métricas / diagnóstico.
+ * Persistencia de nivel usa `lib/ml/endpoints/users.getSellerReputation`.
  */
-export async function getSellerReputation(
+export async function getSellerReputationDetails(
   sellerId: string,
   accessToken: string
 ): Promise<MlSellerReputationResponse | null> {

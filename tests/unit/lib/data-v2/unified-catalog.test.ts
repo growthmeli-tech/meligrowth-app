@@ -39,7 +39,8 @@ describe("computeUnifiedCatalogDerived", () => {
       item_id: "MLA123",
       sold_quantity: 0,
       ventas_30d: null as number | null,
-      title: "T"
+      title: "T",
+      free_shipping: false
     };
     const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}));
     expect(d.ganancia_real).not.toBeNull();

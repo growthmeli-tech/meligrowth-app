@@ -7,6 +7,13 @@ import {
   type LogisticaType,
   type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
+import {
+  estimateSellerShippingCostAr,
+  mapMlLogisticTypeToShippingMode,
+  parseMlItemCondition,
+  resolveSellerReputationForRow,
+  type ShippingCostInput
+} from "@/lib/pricing/shipping-costs-argentina";
 
 export type SkuDecisionState = {
   ml: {
@@ -24,6 +31,9 @@ export type SkuDecisionState = {
     freeShipping: boolean | null;
     categoryId: string | null;
     listingType: string | null;
+    /** Condición publicación ML — tabla envío solo `new`. */
+    condition: string | null;
+    packageWeightKg: number | null;
   };
 
   inputs: {
@@ -67,6 +77,9 @@ export type SkuDecisionState = {
     priorityScore: number;
     primaryInsight: string | null;
     recommendedAction: string | null;
+    /** Señales solo envío (≤8 palabras / ≤12 palabras acción). */
+    shippingMessage: string | null;
+    shippingAction: string | null;
   };
 
   sync: {
@@ -92,6 +105,14 @@ export type BuildSkuDecisionStateInput = {
     freeShipping?: boolean | null;
     categoryId?: string | null;
     listingType?: string | null;
+    condition?: string | null;
+    packageWeightKg?: number | null;
+  };
+  /** Reputación vendedor ML (API/sync + fallback pricing). */
+  accountReputation?: {
+    sellerReputationLevel: string | null;
+    sellerPowerSellerStatus: string | null;
+    sellerReputationSyncedAt: string | null;
   };
   inputs: {
     productCost?: number | null;
@@ -136,9 +157,21 @@ function mergeSellerFinancialSettings(
   };
 }
 
-function fiscalNetCompleteFromBreakdown(b: FinancialCostBreakdown | null): boolean {
+function netProfitCompleteFromBreakdown(b: FinancialCostBreakdown | null, freeShipping: boolean | null): boolean {
   if (!b) return false;
-  return !b.missing.includes("iibb") && !b.missing.includes("tax");
+  const fiscalOk = !b.missing.includes("iibb") && !b.missing.includes("tax");
+  if (freeShipping === false) {
+    return fiscalOk;
+  }
+  if (freeShipping === null) {
+    return false;
+  }
+  return (
+    fiscalOk &&
+    b.shipping.completeness === "complete" &&
+    b.shipping.sellerShippingCost !== null &&
+    Number.isFinite(b.shipping.sellerShippingCost)
+  );
 }
 
 function normalizeCurrentPrice(v: number | null | undefined): number | null {
@@ -166,7 +199,7 @@ function solveBreakEvenPrice(
   logistica: LogisticaType,
   rep: string,
   publicidadPct: number | null | undefined,
-  pesoKg: number | null
+  shippingOmit: () => Omit<ShippingCostInput, "price">
 ): number | null {
   if (!Number.isFinite(productCost) || productCost <= 0) return null;
 
@@ -177,9 +210,10 @@ function solveBreakEvenPrice(
       logistica,
       reputacion: rep,
       publicidad_pct: publicidadPct,
-      peso_kg: pesoKg,
+      peso_kg: null,
       financialSettings: financialMerged,
-      skuAdditionalFixedCost
+      skuAdditionalFixedCost,
+      shipping: shippingOmit()
     });
 
   let hi = Math.max(500, productCost * 4);
@@ -472,6 +506,29 @@ function priorityScoreFrom(input: {
   return score;
 }
 
+function pickShippingShortSignal(
+  freeShipping: boolean | null,
+  breakdown: FinancialCostBreakdown | null,
+  shippingModeRaw: string | null
+): { msg: string | null; action: string | null } {
+  if (!breakdown) return { msg: null, action: null };
+  const mode = mapMlLogisticTypeToShippingMode(shippingModeRaw);
+  if (freeShipping === false) return { msg: null, action: null };
+  if (mode === "retire" && freeShipping === true) {
+    return { msg: "No soporta envío gratis", action: "Quitar envío gratis o subir precio" };
+  }
+  if (breakdown.shipping.source === "missing_table") {
+    return { msg: "Tabla de envío no disponible", action: "Cargar tabla para esta reputación" };
+  }
+  if (breakdown.missing.some((m) => m === "shipping_package_weight" || m.includes("package_weight"))) {
+    return { msg: "Falta peso del paquete", action: "Completar peso para estimar envío" };
+  }
+  if (breakdown.missing.some((m) => m === "shipping_ml_reputation" || m.includes("ml_reputation"))) {
+    return { msg: "Falta reputación ML", action: "Sincronizar reputación de cuenta" };
+  }
+  return { msg: null, action: null };
+}
+
 export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDecisionState {
   const accountId = input.accountId;
   const publicidadPct = input.inputs.publicidadPct ?? 0;
@@ -512,6 +569,30 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const rep = coerceReputacion(input.inputs.reputacion ?? null);
   const pesoKg = input.inputs.pesoKg ?? null;
 
+  const acc = input.accountReputation;
+  const sellerRep = resolveSellerReputationForRow({
+    accountLevel: acc?.sellerReputationLevel ?? null,
+    accountPower: acc?.sellerPowerSellerStatus ?? null,
+    accountSyncedAt: acc?.sellerReputationSyncedAt ?? null,
+    legacyPricingReputacion: input.inputs.reputacion ?? null
+  });
+  const itemCondition = parseMlItemCondition(input.ml.condition ?? null);
+  const packageKg =
+    input.ml.packageWeightKg !== null &&
+    input.ml.packageWeightKg !== undefined &&
+    Number.isFinite(Number(input.ml.packageWeightKg))
+      ? Number(input.ml.packageWeightKg)
+      : pesoKg;
+  const shipMode = mapMlLogisticTypeToShippingMode(input.ml.shippingMode ?? null);
+
+  const shippingOmit = (): Omit<ShippingCostInput, "price"> => ({
+    packageWeightKg: packageKg,
+    reputation: sellerRep,
+    shippingMode: shipMode,
+    freeShipping: input.ml.freeShipping ?? null,
+    condition: itemCondition
+  });
+
   const currentPrice = normalizeCurrentPrice(input.ml.currentPrice ?? null);
   const stock = normalizeStock(input.ml.stock ?? null);
   const ventas30d = normalizeVentas30d(input.ml.ventas30d ?? null);
@@ -533,7 +614,9 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     shippingMode: input.ml.shippingMode ?? null,
     freeShipping: input.ml.freeShipping ?? null,
     categoryId: input.ml.categoryId ?? null,
-    listingType: input.ml.listingType ?? null
+    listingType: input.ml.listingType ?? null,
+    condition: input.ml.condition ?? null,
+    packageWeightKg: packageKg
   };
 
   const inputsOut: SkuDecisionState["inputs"] = {
@@ -563,7 +646,11 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       margen_pct: targetMarginValid,
       reputacion: rep,
       financialSettings: mergedFinancial,
-      skuAdditionalFixedCost: additionalCosts
+      skuAdditionalFixedCost: additionalCosts,
+      sellerShippingAtPrice: (p) => {
+        const e = estimateSellerShippingCostAr({ ...shippingOmit(), price: p });
+        return e.completeness === "complete" && e.sellerShippingCost !== null ? e.sellerShippingCost : 0;
+      }
     });
     if (sellResult.converged && Number.isFinite(sellResult.precio_venta) && sellResult.precio_venta > 0) {
       optimalPrice = Math.round(sellResult.precio_venta * 100) / 100;
@@ -597,13 +684,18 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       publicidad_pct: input.inputs.publicidadPct ?? null,
       peso_kg: pesoKg,
       financialSettings: mergedFinancial,
-      skuAdditionalFixedCost: additionalCosts
+      skuAdditionalFixedCost: additionalCosts,
+      shipping: shippingOmit()
     });
     financialBreakdown = rp.breakdown;
-    profitCompleteness = fiscalNetCompleteFromBreakdown(rp.breakdown) ? "net_full" : "net_partial";
+    profitCompleteness = netProfitCompleteFromBreakdown(rp.breakdown, input.ml.freeShipping ?? null)
+      ? "net_full"
+      : "net_partial";
     if (
       calculationStatus === "valid" &&
-      (rp.breakdown.missing.includes("iibb") || rp.breakdown.missing.includes("tax"))
+      (rp.breakdown.missing.includes("iibb") ||
+        rp.breakdown.missing.includes("tax") ||
+        rp.breakdown.missing.some((x) => x.startsWith("shipping_")))
     ) {
       calculationStatus = "partial";
     }
@@ -630,7 +722,15 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
 
   const breakEvenPrice =
     productCost !== null && productCost > 0
-      ? solveBreakEvenPrice(productCost, additionalCosts, mergedFinancial, logistica, rep, publicidadPct, pesoKg)
+      ? solveBreakEvenPrice(
+          productCost,
+          additionalCosts,
+          mergedFinancial,
+          logistica,
+          rep,
+          publicidadPct,
+          shippingOmit
+        )
       : null;
 
   const priceDelta =
@@ -641,7 +741,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const stockBranch = computeStockBranch({ ventas30d, stock, safetyStockPct });
   const { velocity30d, idealStock, stockGap, daysOfStock, stockStatus } = stockBranch;
 
-  const fiscalComplete = fiscalNetCompleteFromBreakdown(financialBreakdown);
+  const fiscalComplete = netProfitCompleteFromBreakdown(financialBreakdown, input.ml.freeShipping ?? null);
   const profitabilityStatus = profitabilityFromReal(
     realProfit,
     realMarginPct,
@@ -672,6 +772,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     breakdownMissing: financialBreakdown?.missing ?? [],
     realMarginPct
   });
+
+  const shipSig = pickShippingShortSignal(input.ml.freeShipping ?? null, financialBreakdown, input.ml.shippingMode ?? null);
 
   const priorityScore = priorityScoreFrom({
     profitabilityStatus,
@@ -709,7 +811,9 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       pricingStatus,
       priorityScore,
       primaryInsight: insight,
-      recommendedAction: action
+      recommendedAction: action,
+      shippingMessage: shipSig.msg,
+      shippingAction: shipSig.action
     },
     sync: { calculationStatus }
   };

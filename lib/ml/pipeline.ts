@@ -3,7 +3,7 @@ import { getValidAccessToken } from "@/lib/ml/auth";
 import { getAdvertiserId, getAdsMetrics, mapAdsToDiagnostic } from "@/lib/ml/endpoints/ads";
 import { getListingsOptimizationRate, getListingsStats, getMarketplaceListingsCap, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
 import { getLogisticsMetrics } from "@/lib/ml/endpoints/logistics";
-import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
+import { getSellerReputationDetails, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
 import { getStockMetrics } from "@/lib/ml/endpoints/stock";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
@@ -203,7 +203,7 @@ export async function fetchMLDiagnosticData(
   };
 
   try {
-    const reputation = await getSellerReputation(sellerId, accessToken);
+    const reputation = await getSellerReputationDetails(sellerId, accessToken);
     Object.assign(prefill, mapReputationToDiagnostic(reputation));
     dataSources.salud = "api";
     blocksFetched.salud = blockEntry("api", true);

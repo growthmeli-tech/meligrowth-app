@@ -8,6 +8,7 @@ export function netMarginDisplayLabel(computed: SkuDecisionState["computed"]): s
     const parts: string[] = ["margen parcial"];
     if (m.includes("iibb")) parts.push("faltan IIBB");
     if (m.includes("tax")) parts.push("faltan impuestos");
+    if (m.some((x) => x.startsWith("shipping_"))) parts.push("envío incompleto");
     return parts.join(" · ");
   }
   return "";

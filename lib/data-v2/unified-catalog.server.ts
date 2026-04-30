@@ -6,38 +6,63 @@ import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings
 import type { ActionResult } from "@/lib/types/api";
 import { buildPricingIndexes, computeUnifiedCatalogDerived, resolvePricingRow } from "@/lib/data-v2/unified-catalog.model";
 import type { CatalogHealthSummary, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionResult<UnifiedCatalogItem[]>> {
-  const [catRes, priceRes, financialRes] = await Promise.all([
+  const supabase = await createServerSupabaseClient();
+  const [catRes, priceRes, financialRes, accRepRes] = await Promise.all([
     listMlCatalogItems(mlAccountId),
     listPricingSkus(mlAccountId),
-    getFinancialSettingsForAccount(mlAccountId)
+    getFinancialSettingsForAccount(mlAccountId),
+    supabase
+      .from("ml_accounts")
+      .select("seller_reputation_level, seller_power_seller_status, seller_reputation_synced_at")
+      .eq("id", mlAccountId)
+      .maybeSingle()
   ]);
   if (!catRes.success) return catRes;
   if (!priceRes.success) return priceRes;
 
   const accountFinancialSettings = financialRes;
 
+  const accountReputation = accRepRes.data
+    ? {
+        sellerReputationLevel: accRepRes.data.seller_reputation_level,
+        sellerPowerSellerStatus: accRepRes.data.seller_power_seller_status,
+        sellerReputationSyncedAt: accRepRes.data.seller_reputation_synced_at
+      }
+    : null;
+
   const { byId, bySkuKey } = buildPricingIndexes(priceRes.data);
 
   const unified: UnifiedCatalogItem[] = catRes.data.map((row) => {
     const pricing = resolvePricingRow(row, byId, bySkuKey);
-    const derived = computeUnifiedCatalogDerived(mlAccountId, {
-      price: row.price,
-      available_quantity: row.available_quantity,
-      status: row.status,
-      pricing_sku_id: row.pricing_sku_id,
-      seller_custom_field: row.seller_custom_field,
-      item_id: row.item_id,
-      sold_quantity: row.sold_quantity,
-      ventas_30d: row.ventas_30d === null || row.ventas_30d === undefined ? null : Number(row.ventas_30d),
-      title: row.title,
-      thumbnail: row.thumbnail,
-      permalink: row.permalink,
-      revenue_30d: row.revenue_30d === null || row.revenue_30d === undefined ? null : Number(row.revenue_30d),
-      last_sale_date: row.last_sale_date ?? null,
-      logistic_type: row.logistic_type
-    }, pricing, accountFinancialSettings);
+    const derived = computeUnifiedCatalogDerived(
+      mlAccountId,
+      {
+        price: row.price,
+        available_quantity: row.available_quantity,
+        status: row.status,
+        pricing_sku_id: row.pricing_sku_id,
+        seller_custom_field: row.seller_custom_field,
+        item_id: row.item_id,
+        sold_quantity: row.sold_quantity,
+        ventas_30d: row.ventas_30d === null || row.ventas_30d === undefined ? null : Number(row.ventas_30d),
+        title: row.title,
+        thumbnail: row.thumbnail,
+        permalink: row.permalink,
+        revenue_30d: row.revenue_30d === null || row.revenue_30d === undefined ? null : Number(row.revenue_30d),
+        last_sale_date: row.last_sale_date ?? null,
+        logistic_type: row.logistic_type,
+        free_shipping: row.free_shipping,
+        shipping_mode: row.shipping_mode,
+        condition: row.condition,
+        package_weight_kg: row.package_weight_kg === null || row.package_weight_kg === undefined ? null : Number(row.package_weight_kg)
+      },
+      pricing,
+      accountFinancialSettings,
+      accountReputation
+    );
 
     return {
       ml_row_id: row.id,

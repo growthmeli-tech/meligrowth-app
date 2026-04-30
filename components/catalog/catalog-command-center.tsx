@@ -1138,6 +1138,12 @@ function CatalogRows({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Desglose</p>
+                {ds.decision.shippingMessage ? (
+                  <p className="text-xs text-[#6B6B6B]">
+                    {ds.decision.shippingMessage}
+                    {ds.decision.shippingAction ? ` · ${ds.decision.shippingAction}` : ""}
+                  </p>
+                ) : null}
                 {row.price_ml !== null && row.tiene_costo && ds.computed.financialBreakdown !== null ? (
                   <>
                     {netMarginDisplayLabel(ds.computed) ? (
@@ -1193,19 +1199,19 @@ function CatalogRows({
                         </span>
                       </li>
                       <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− ML envío (variable):</span>
+                        <span>− Envío (envío estimado):</span>
                         <span>
-                          {ds.computed.financialBreakdown.mlShippingAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.mlShippingAmount)}`
-                            : "—"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− ML fulfillment (fijo estimado):</span>
-                        <span>
-                          {ds.computed.financialBreakdown.fulfillmentAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.fulfillmentAmount)}`
-                            : "—"}
+                          {ds.computed.financialBreakdown.shipping.source === "buyer_pays_shipping"
+                            ? "envío no absorbido"
+                            : ds.computed.financialBreakdown.mlShippingAmount !== null
+                              ? `− ${ars.format(ds.computed.financialBreakdown.mlShippingAmount)}`
+                              : ds.computed.financialBreakdown.missing.some((x) => x.includes("package_weight"))
+                                ? "falta peso"
+                                : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation"))
+                                  ? "falta reputación ML"
+                                  : ds.computed.financialBreakdown.shipping.source === "missing_table"
+                                    ? "tabla de envío no disponible"
+                                    : "—"}
                         </span>
                       </li>
                       <li className="flex justify-between gap-4 text-[#6B6B6B]">

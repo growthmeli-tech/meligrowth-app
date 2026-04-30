@@ -1,5 +1,7 @@
 import { getItemCatalog } from "@/lib/ml/endpoints/catalog";
+import { getSellerReputation } from "@/lib/ml/endpoints/users";
 import { getSalesLast30Days } from "@/lib/ml/endpoints/sales";
+import { invalidateDecisionCacheByAccountId } from "@/lib/pricing/decision-state-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -37,6 +39,9 @@ export async function syncMlCatalog(
     permalink: row.permalink || null,
     thumbnail: row.thumbnail,
     logistic_type: row.logistic_type,
+    free_shipping: row.free_shipping,
+    shipping_mode: row.shipping_mode,
+    package_weight_kg: row.package_weight_kg,
     last_synced_at: now
   }));
 
@@ -82,6 +87,33 @@ export async function syncMlCatalog(
       }
       await new Promise((r) => setTimeout(r, 25));
     }
+  }
+
+  try {
+    const repRaw = await getSellerReputation(sellerId, accessToken);
+    const payload =
+      repRaw === null
+        ? {
+            seller_reputation_level: null as string | null,
+            seller_power_seller_status: null as string | null,
+            seller_reputation_synced_at: now
+          }
+        : {
+            seller_reputation_level: repRaw.level_id ?? null,
+            seller_power_seller_status: repRaw.power_seller_status ?? null,
+            seller_reputation_synced_at: now
+          };
+    const { error: repErr } = await supabase.from("ml_accounts").update(payload).eq("id", mlAccountId);
+    if (repErr) {
+      console.error("[ml-catalog:seller_reputation_persist]", { mlAccountId, message: repErr.message });
+    } else {
+      invalidateDecisionCacheByAccountId(mlAccountId);
+    }
+  } catch (repCatch) {
+    console.error("[ml-catalog:seller_reputation_fetch]", {
+      mlAccountId,
+      message: repCatch instanceof Error ? repCatch.message : String(repCatch)
+    });
   }
 
   const durationMs = Date.now() - started;

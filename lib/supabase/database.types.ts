@@ -351,6 +351,9 @@ export type Database = {
           account_name: string;
           active: boolean;
           meli_account_url: string | null;
+          seller_reputation_level: string | null;
+          seller_power_seller_status: string | null;
+          seller_reputation_synced_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -700,6 +703,9 @@ export type Database = {
           last_price_push_at: string | null;
           last_price_push_value: number | null;
           last_price_push_status: "pending" | "success" | "error" | null;
+          free_shipping: boolean | null;
+          shipping_mode: string | null;
+          package_weight_kg: number | null;
         };
         Insert: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]> & {
           ml_account_id: string;

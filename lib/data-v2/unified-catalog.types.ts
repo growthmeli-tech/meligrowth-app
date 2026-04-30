@@ -67,6 +67,11 @@ export type MlSlice = {
   revenue_30d?: number | null;
   last_sale_date?: string | null;
   logistic_type?: string | null;
+  /** ML API / sync — política envío gratis (≠ modo logístico). */
+  free_shipping?: boolean | null;
+  shipping_mode?: string | null;
+  condition?: string | null;
+  package_weight_kg?: number | null;
 };
 
 export type MlPublicationLink = {
@@ -80,6 +85,10 @@ export type MlPublicationLink = {
   logistic_type?: string | null;
   thumbnail?: string | null;
   title?: string | null;
+  free_shipping?: boolean | null;
+  shipping_mode?: string | null;
+  condition?: string | null;
+  package_weight_kg?: number | null;
 };
 
 export type CatalogHealthSummary = {

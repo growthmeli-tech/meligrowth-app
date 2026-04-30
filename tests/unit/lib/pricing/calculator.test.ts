@@ -82,7 +82,7 @@ describe("Motor ML — calcShippingCostAtPrice", () => {
 });
 
 describe("Motor ML — calcRealProfit", () => {
-  it("calcula ganancia real en Flex + verde", () => {
+  it("compra envío: freeShipping false → envío 0 en costo vendedor", () => {
     const price_ml = 30_000;
     const r = calcRealProfit({
       price_ml,
@@ -91,16 +91,22 @@ describe("Motor ML — calcRealProfit", () => {
       reputacion: "Verde / MercadoLíder",
       publicidad_pct: 0.1,
       peso_kg: null,
-      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null }
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+      shipping: {
+        packageWeightKg: 1,
+        reputation: "yellow",
+        shippingMode: "flex",
+        freeShipping: false,
+        condition: "new"
+      }
     });
     expect(r.converged).toBe(true);
-    const envio = calcShippingCostAtPrice("Flex", price_ml);
+    expect(r.envio_$).toBe(0);
     const comision = price_ml * 0.1375;
     const pub = price_ml * 0.1;
     expect(r.comision_$).toBeCloseTo(comision, 1);
-    expect(r.envio_$).toBeCloseTo(envio, 1);
     expect(r.publicidad_$).toBeCloseTo(pub, 1);
-    expect(r.ganancia_real).toBeCloseTo(price_ml - 15_600 - comision - envio - pub, 1);
+    expect(r.ganancia_real).toBeCloseTo(price_ml - 15_600 - comision - pub, 1);
   });
 
   it("usa comisión naranja", () => {
@@ -232,7 +238,8 @@ describe("Motor ML — FinancialCostBreakdown / fiscal", () => {
         publicidad_pct: base(fs).publicidadPct,
         peso_kg: base(fs).pesoKg,
         financialSettings: fs,
-        skuAdditionalFixedCost: null
+        skuAdditionalFixedCost: null,
+        shipping: { packageWeightKg: null, reputation: "unknown", shippingMode: "unknown", freeShipping: false, condition: "unknown" }
       }).ganancia_real;
 
     const p0 = 20_000;

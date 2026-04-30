@@ -70,7 +70,8 @@ describe("account financial settings wiring", () => {
       item_id: "MLA-FIS2",
       sold_quantity: 0,
       ventas_30d: 4,
-      title: "T"
+      title: "T",
+      free_shipping: false
     };
     const fs = {
       iibbPct: 0,

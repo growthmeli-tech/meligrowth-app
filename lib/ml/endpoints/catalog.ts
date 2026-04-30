@@ -17,6 +17,12 @@ export interface MlCatalogItem {
   permalink: string;
   thumbnail: string | null;
   logistic_type: string | null;
+  /** ML `shipping.free_shipping` — política comercial, distinta del modo logístico. */
+  free_shipping: boolean | null;
+  /** ML `shipping.mode` (me2, custom, …). */
+  shipping_mode: string | null;
+  /** Peso empaquetado (kg) desde `shipping.dimensions` cuando ML lo envía. */
+  package_weight_kg: number | null;
   last_updated: string;
 }
 
@@ -42,6 +48,26 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
       : typeof (body as { logistic_type?: string }).logistic_type === "string"
         ? (body as { logistic_type: string }).logistic_type
         : null;
+
+  let free_shipping: boolean | null = null;
+  let shipping_mode: string | null = null;
+  let package_weight_kg: number | null = null;
+  if (shipping && typeof shipping === "object") {
+    const sh = shipping as Record<string, unknown>;
+    if (typeof sh.free_shipping === "boolean") free_shipping = sh.free_shipping;
+    if (typeof sh.mode === "string" && sh.mode.trim()) shipping_mode = sh.mode.trim();
+    if (typeof sh.dimensions === "string" && sh.dimensions.trim()) {
+      const dim = sh.dimensions.trim();
+      const comma = dim.lastIndexOf(",");
+      if (comma >= 0) {
+        const tail = dim.slice(comma + 1).replace(/[^\d.]/g, "");
+        const wn = Number(tail);
+        if (Number.isFinite(wn) && wn > 0) {
+          package_weight_kg = wn / 1000;
+        }
+      }
+    }
+  }
 
   let sellerSku: string | null =
     typeof body.seller_custom_field === "string" && body.seller_custom_field.trim()
@@ -93,6 +119,9 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
     permalink: typeof body.permalink === "string" ? body.permalink : "",
     thumbnail: thumb,
     logistic_type: logisticType,
+    free_shipping,
+    shipping_mode,
+    package_weight_kg,
     last_updated: lastUpdated
   };
 }

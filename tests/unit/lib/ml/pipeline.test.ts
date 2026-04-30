@@ -4,7 +4,7 @@ vi.mock("@/lib/ml/auth", () => ({
   getValidAccessToken: vi.fn()
 }));
 vi.mock("@/lib/ml/endpoints/reputation", () => ({
-  getSellerReputation: vi.fn(),
+  getSellerReputationDetails: vi.fn(),
   mapReputationToDiagnostic: vi.fn()
 }));
 vi.mock("@/lib/ml/endpoints/listings", () => ({
@@ -27,7 +27,7 @@ vi.mock("@/lib/ml/endpoints/stock", () => ({
 
 import { fetchMLDiagnosticData } from "@/lib/ml/pipeline";
 import { getValidAccessToken } from "@/lib/ml/auth";
-import { getSellerReputation, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
+import { getSellerReputationDetails, mapReputationToDiagnostic } from "@/lib/ml/endpoints/reputation";
 import { getListingsOptimizationRate, getListingsStats, getMarketplaceListingsCap, mapListingsToDiagnostic } from "@/lib/ml/endpoints/listings";
 import { getAdvertiserId, getAdsMetrics, mapAdsToDiagnostic } from "@/lib/ml/endpoints/ads";
 import { getLogisticsMetrics } from "@/lib/ml/endpoints/logistics";
@@ -37,7 +37,7 @@ describe("ML pipeline", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getValidAccessToken).mockResolvedValue("token");
-    vi.mocked(getSellerReputation).mockResolvedValue({} as never);
+    vi.mocked(getSellerReputationDetails).mockResolvedValue({} as never);
     vi.mocked(mapReputationToDiagnostic).mockReturnValue({
       reclamos: 0.6,
       mediaciones: 0.2,

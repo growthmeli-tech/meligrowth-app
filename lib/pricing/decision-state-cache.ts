@@ -28,12 +28,12 @@ export function sellerFinancialSettingsFingerprint(fs: SellerFinancialSettings |
 
 /**
  * Deterministic, minimal key. Partition: first segment `skuId` (opaque row id).
- * Value segments: currentPrice, stock, ventas30d, productCost, publicidadPct,
- * targetMarginPct, logistics, taxPct, additionalCosts (per product contract).
+ * Incluye drivers de envío AR: gratis, modo, peso, reputación ML, condición.
  */
 export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionStateInput): string {
   const ml = input.ml;
   const i = input.inputs;
+  const ar = input.accountReputation;
   const pubKey = keyNum(normalizePct(i.publicidadPct ?? 0));
   const target =
     i.targetMarginPct === null || i.targetMarginPct === undefined ? "" : keyNum(normalizePct(i.targetMarginPct));
@@ -50,7 +50,15 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
     i.taxPct === null || i.taxPct === undefined ? "" : keyNum(i.taxPct),
     i.iibbPct === null || i.iibbPct === undefined ? "" : keyNum(i.iibbPct),
     i.additionalCosts === null || i.additionalCosts === undefined ? "" : keyNum(i.additionalCosts),
-    financialSettingsKey(input.financialSettings)
+    financialSettingsKey(input.financialSettings),
+    String(ml.freeShipping),
+    String(ml.shippingMode ?? ""),
+    keyNum(ml.packageWeightKg ?? undefined),
+    ar?.sellerReputationLevel ?? "",
+    ar?.sellerPowerSellerStatus ?? "",
+    ar?.sellerReputationSyncedAt ?? "",
+    String(ml.condition ?? ""),
+    String(i.reputacion ?? "")
   ].join(SEP);
 }
 

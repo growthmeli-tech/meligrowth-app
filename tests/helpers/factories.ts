@@ -134,6 +134,9 @@ export function createMockMLAccount(overrides: Partial<MLAccountRow> = {}): MLAc
     account_name: "Cuenta MLA Principal",
     active: true,
     meli_account_url: "https://www.mercadolibre.com.ar/perfil/123456789",
+    seller_reputation_level: null,
+    seller_power_seller_status: null,
+    seller_reputation_synced_at: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides

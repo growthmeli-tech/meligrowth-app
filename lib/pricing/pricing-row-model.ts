@@ -34,21 +34,23 @@ export function buildPricingRowInput(
   return {
     accountId: mlAccountId,
     financialSettings: financialSettings ?? null,
-    ml: {
-      itemId: ml?.item_id ?? null,
-      sku: r.sku,
-      title: r.producto,
-      imageUrl: ml?.thumbnail ?? null,
-      currentPrice: ml?.price_ml ?? null,
-      stock: ml?.stock ?? null,
-      ventas30d: ml?.ventas_30d ?? null,
-      revenue30d: ml?.revenue_30d ?? null,
-      lastSaleDate: ml?.last_sale_date ?? null,
-      shippingMode: ml?.logistic_type ?? null,
-      listingType: null,
-      freeShipping: null,
-      categoryId: null
-    },
+      ml: {
+        itemId: ml?.item_id ?? null,
+        sku: r.sku,
+        title: r.producto,
+        imageUrl: ml?.thumbnail ?? null,
+        currentPrice: ml?.price_ml ?? null,
+        stock: ml?.stock ?? null,
+        ventas30d: ml?.ventas_30d ?? null,
+        revenue30d: ml?.revenue_30d ?? null,
+        lastSaleDate: ml?.last_sale_date ?? null,
+        shippingMode: ml?.shipping_mode ?? ml?.logistic_type ?? null,
+        listingType: null,
+        freeShipping: ml?.free_shipping ?? null,
+        categoryId: null,
+        condition: ml?.condition ?? null,
+        packageWeightKg: ml?.package_weight_kg ?? (r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null)
+      },
     inputs: {
       productCost: Number.isFinite(d.costo) ? d.costo : null,
       logistics: d.logistica,
@@ -102,7 +104,11 @@ export function pricingMlLinkFieldsEqual(a: MlPublicationLink | undefined, b: Ml
     a.last_sale_date === b.last_sale_date &&
     a.logistic_type === b.logistic_type &&
     a.thumbnail === b.thumbnail &&
-    a.permalink === b.permalink
+    a.permalink === b.permalink &&
+    a.free_shipping === b.free_shipping &&
+    a.shipping_mode === b.shipping_mode &&
+    a.condition === b.condition &&
+    a.package_weight_kg === b.package_weight_kg
   );
 }
 
@@ -158,6 +164,8 @@ export function makeMlLinksImpactKey(mlLinks: Record<string, MlPublicationLink> 
     h = fnv1aU32(h, m.stock ?? 0);
     h = fnv1aU32(h, m.ventas_30d === null || m.ventas_30d === undefined ? 0 : (m.ventas_30d * 17) | 0);
     h = fnv1aStr(h, m.logistic_type ?? "");
+    h = fnv1aU32(h, m.free_shipping ? 1 : 0);
+    h = fnv1aStr(h, m.shipping_mode ?? "");
   }
   return `${keys.length}:${h.toString(16)}`;
 }
