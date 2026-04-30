@@ -1,4 +1,6 @@
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
+import { recomputeCatalogItemFinancials } from "@/lib/data-v2/unified-catalog.model";
+import type { SellerFinancialSettings } from "@/lib/pricing/calculator";
 
 export type CatalogState = {
   itemsById: Record<string, UnifiedCatalogItem>;
@@ -81,6 +83,28 @@ export function reconcileItemReplaces(state: CatalogState, rows: UnifiedCatalogI
       changed = true;
     }
     itemsById[next.item_id] = next;
+  }
+  if (!changed) return state;
+  return { orderedIds: state.orderedIds, itemsById };
+}
+
+/** After account fiscal settings change (invalidate decision cache for `mlAccountId` first). */
+export function reconcileCatalogFinancialSettings(
+  mlAccountId: string,
+  state: CatalogState,
+  financialSettings: SellerFinancialSettings | null
+): CatalogState {
+  let itemsById = state.itemsById;
+  let changed = false;
+  for (const itemId of state.orderedIds) {
+    const prev = itemsById[itemId];
+    if (!prev) continue;
+    const next = recomputeCatalogItemFinancials(mlAccountId, prev, financialSettings);
+    if (!changed) {
+      itemsById = { ...state.itemsById };
+      changed = true;
+    }
+    itemsById[itemId] = next;
   }
   if (!changed) return state;
   return { orderedIds: state.orderedIds, itemsById };

@@ -6,7 +6,7 @@ import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { ChevronDown, ChevronRight, Download, Filter, RefreshCw } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { mergeCatalogRowAfterCostSave, mergeCatalogRowAfterMlPricePush } from "@/lib/data-v2/unified-catalog";
-import { getCachedDecisionState, invalidateDecisionCacheBySkuId } from "@/lib/pricing/decision-state-cache";
+import { getCachedDecisionState, invalidateDecisionCacheBySkuId, invalidateDecisionCacheByAccountId, sellerFinancialSettingsFingerprint } from "@/lib/pricing/decision-state-cache";
 import type { BuildSkuDecisionStateInput } from "@/lib/pricing/sku-decision-state";
 import {
   bulkMarkNoAds,
@@ -20,6 +20,7 @@ import {
 import {
   catalogOrderedItems,
   catalogStateFromItems,
+  reconcileCatalogFinancialSettings,
   reconcileItemReplace,
   reconcileItemReplaces
 } from "@/lib/data-v2/catalog-state";
@@ -42,9 +43,11 @@ import {
   mlComisionRate,
   normalizePct,
   type LogisticaType,
-  type ReputacionType
+  type ReputacionType,
+  type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
+import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -53,6 +56,7 @@ type PricingChoice = { id: string; sku: string | null; producto: string };
 type Props = {
   mlAccountId: string;
   initialItems: UnifiedCatalogItem[];
+  initialFinancialSettings: SellerFinancialSettings | null;
   lastSyncedAt: string | null;
   pricingSkuChoices: PricingChoice[];
   loadError: string | null;
@@ -145,13 +149,20 @@ function margenObjDefaultForSimulator(row: UnifiedCatalogItem): number | null {
 export function CatalogCommandCenter({
   mlAccountId,
   initialItems,
+  initialFinancialSettings,
   lastSyncedAt,
   pricingSkuChoices,
   loadError
 }: Props) {
   const [pending, startTransition] = useTransition();
+  /** Account-level fiscal inputs (persisted); null = no row / profitability partial for IIBB+tax path. */
+  const [financialSettings, setFinancialSettings] = useState<SellerFinancialSettings | null>(initialFinancialSettings);
   /** Catalog dataset (indexed reconciliation). */
   const [catalog, setCatalog] = useState(() => catalogStateFromItems(initialItems));
+
+  useEffect(() => {
+    setFinancialSettings(initialFinancialSettings);
+  }, [mlAccountId, initialFinancialSettings]);
 
   useEffect(() => {
     setCatalog(catalogStateFromItems(initialItems));
@@ -191,11 +202,11 @@ export function CatalogCommandCenter({
         invalidateDecisionCacheBySkuId(cid);
         invalidateDecisionCacheBySkuId(`${cid}:opt`);
         invalidateDecisionCacheBySkuId(saved.pricing_sku_id);
-        const next = mergeCatalogRowAfterCostSave(mlAccountId, i, saved);
+        const next = mergeCatalogRowAfterCostSave(mlAccountId, i, saved, financialSettings);
         return reconcileItemReplace(c, next);
       });
     },
-    [mlAccountId, partitionSkuCacheId]
+    [mlAccountId, partitionSkuCacheId, financialSettings]
   );
 
   const onReconcileMlPrice = useCallback((itemId: string, newPrice: number) => {
@@ -203,10 +214,10 @@ export function CatalogCommandCenter({
       const cur = c.itemsById[itemId];
       if (!cur) return c;
       if (cur.pricing_sku_id) invalidateDecisionCacheBySkuId(cur.pricing_sku_id);
-      const next = mergeCatalogRowAfterMlPricePush(mlAccountId, cur, newPrice);
+      const next = mergeCatalogRowAfterMlPricePush(mlAccountId, cur, newPrice, financialSettings);
       return reconcileItemReplace(c, next);
     });
-  }, [mlAccountId]);
+  }, [mlAccountId, financialSettings]);
 
   const onReconcileFromServer = useCallback(() => {
     startTransition(async () => {
@@ -416,14 +427,19 @@ export function CatalogCommandCenter({
           invalidateDecisionCacheBySkuId(cid);
           invalidateDecisionCacheBySkuId(`${cid}:opt`);
           replaces.push(
-            mergeCatalogRowAfterCostSave(mlAccountId, row, {
-              pricing_sku_id: row.pricing_sku_id,
-              costo: row.costo ?? 0,
-              logistica: (row.logistica ?? "Flex") as LogisticaType,
-              margen_pct: marg,
-              publicidad_pct: 0,
-              reputacion: row.reputacion
-            })
+            mergeCatalogRowAfterCostSave(
+              mlAccountId,
+              row,
+              {
+                pricing_sku_id: row.pricing_sku_id,
+                costo: row.costo ?? 0,
+                logistica: (row.logistica ?? "Flex") as LogisticaType,
+                margen_pct: marg,
+                publicidad_pct: 0,
+                reputacion: row.reputacion
+              },
+              financialSettings
+            )
           );
         }
         return reconcileItemReplaces(prev, replaces);
@@ -441,7 +457,8 @@ export function CatalogCommandCenter({
         ? `${draft.costo}\x1f${draft.logistica}\x1f${draft.margen}\x1f${draft.pub}`
         : "";
       const mlKey = `${row.price_ml ?? "∅"}\x1f${row.stock ?? "∅"}\x1f${row.precio_calculado ?? "∅"}\x1f${row.decisionState.decision.profitabilityStatus}\x1f${row.decisionState.decision.stockStatus}`;
-      const rowKey = `${row.pricing_sku_id ?? ""}\x1f${row.last_synced_at}`;
+      const fsFp = sellerFinancialSettingsFingerprint(financialSettings);
+      const rowKey = `${row.pricing_sku_id ?? ""}\x1f${row.last_synced_at}\x1f${fsFp}`;
       const ra = resolveRowAction(row) as CatalogGridRowAction;
       const rowActionKey = ra.kind === "calc" ? `calc:${ra.reason}` : ra.kind;
       return (
@@ -494,7 +511,8 @@ export function CatalogCommandCenter({
       selected,
       pending,
       inlineCostItemId,
-      inlineCalcItemId
+      inlineCalcItemId,
+      financialSettings
     ]
   );
 
@@ -682,6 +700,15 @@ export function CatalogCommandCenter({
 
         {loadError ? <p className="text-sm text-red-700">{loadError}</p> : null}
         {syncHint ? <p className="text-sm text-red-700">{syncHint}</p> : null}
+        <AccountFiscalConfigPanel
+          mlAccountId={mlAccountId}
+          initialSettings={financialSettings}
+          onSaved={(s) => {
+            invalidateDecisionCacheByAccountId(mlAccountId);
+            setFinancialSettings(s);
+            setCatalog((c) => reconcileCatalogFinancialSettings(mlAccountId, c, s));
+          }}
+        />
       </header>
 
       {selected.size > 0 ? (
@@ -780,6 +807,7 @@ export function CatalogCommandCenter({
                   inlineCalcOpen={inlineCalcItemId === id}
                   setInlineCalcOpen={(v) => setInlineCalcItemId(v ? id : null)}
                   margenObjDefault={margenObjDefaultForSimulator(row)}
+                  financialSettings={financialSettings}
                   mlPushItemId={mlPushItemId}
                   onCloseMlPush={() => setMlPushItemId(null)}
                   rowHint={rowHints[id] ?? null}
@@ -820,6 +848,7 @@ function CatalogRows({
   inlineCalcOpen,
   setInlineCalcOpen,
   margenObjDefault,
+  financialSettings,
   mlPushItemId,
   onCloseMlPush,
   rowHint,
@@ -856,6 +885,7 @@ function CatalogRows({
   inlineCalcOpen: boolean;
   setInlineCalcOpen: (open: boolean) => void;
   margenObjDefault: number | null;
+  financialSettings: SellerFinancialSettings | null;
   mlPushItemId: string | null;
   onCloseMlPush: () => void;
   rowHint: string | null;
@@ -1092,7 +1122,8 @@ function CatalogRows({
               row={row}
               mlAccountId={mlAccountId}
               pending={pending}
-                  margenObjDefault={margenObjDefault}
+              margenObjDefault={margenObjDefault}
+              financialSettings={financialSettings}
               onClose={() => setInlineCalcOpen(false)}
               onCostRowMerged={(patch, serverItem) => onReconcileCostRow(row.item_id, patch, serverItem)}
               startTransition={startTransition}
@@ -1323,6 +1354,7 @@ function InlinePriceCalculator({
   mlAccountId,
   pending,
   margenObjDefault,
+  financialSettings,
   onClose,
   onCostRowMerged,
   startTransition,
@@ -1332,6 +1364,7 @@ function InlinePriceCalculator({
   mlAccountId: string;
   pending: boolean;
   margenObjDefault: number | null;
+  financialSettings: SellerFinancialSettings | null;
   onClose: () => void;
   onCostRowMerged: (
     saved: {
@@ -1404,7 +1437,7 @@ function InlinePriceCalculator({
         pesoKg: row.peso_kg,
         reputacion
       },
-      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null }
+      financialSettings
     };
     const cacheSkuId = row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`;
     const base = getCachedDecisionState(cacheSkuId, baseInput);
@@ -1436,7 +1469,8 @@ function InlinePriceCalculator({
     row.logistic_type,
     row.pricing_sku_id,
     row.decisionState.ml.revenue30d,
-    row.decisionState.ml.lastSaleDate
+    row.decisionState.ml.lastSaleDate,
+    financialSettings
   ]);
 
   const deltaVsMl = (() => {

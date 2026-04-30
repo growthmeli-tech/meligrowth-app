@@ -10,12 +10,13 @@ export default async function OpsCatalogPage() {
   }
 
   const mlAccountId = accountResult.data.id;
-  const { items, lastSyncedAt, pricingSkuChoices, loadError } = await loadCatalogPageData(mlAccountId);
+  const { items, lastSyncedAt, pricingSkuChoices, loadError, financialSettings } = await loadCatalogPageData(mlAccountId);
 
   return (
     <CatalogCommandCenter
       mlAccountId={mlAccountId}
       initialItems={items}
+      initialFinancialSettings={financialSettings}
       lastSyncedAt={lastSyncedAt}
       pricingSkuChoices={pricingSkuChoices}
       loadError={loadError}

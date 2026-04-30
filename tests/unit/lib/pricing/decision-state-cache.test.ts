@@ -3,6 +3,7 @@ import {
   getCachedDecisionState,
   getDecisionStateCache,
   invalidateDecisionCacheBySkuId,
+  invalidateDecisionCacheByAccountId,
   makeDecisionCacheKey,
   resetDecisionStateCacheForTests
 } from "@/lib/pricing/decision-state-cache";
@@ -45,12 +46,20 @@ describe("makeDecisionCacheKey", () => {
     expect(makeDecisionCacheKey("sku-1", a)).toBe(makeDecisionCacheKey("sku-1", a));
   });
 
+  it("prefixes with accountId then sku partition", () => {
+    const a = sampleInput();
+    const k = makeDecisionCacheKey("sku-1", a);
+    expect(k.startsWith("acc\x1fsku-1\x1f")).toBe(true);
+  });
+
   it("changes when skuId or economic inputs change", () => {
     const base = sampleInput();
     const k0 = makeDecisionCacheKey("sku-1", base);
     expect(makeDecisionCacheKey("sku-2", base)).not.toBe(k0);
     const alt: BuildSkuDecisionStateInput = { ...base, ml: { ...base.ml, currentPrice: 2000 } };
     expect(makeDecisionCacheKey("sku-1", alt)).not.toBe(k0);
+    const otherAcc: BuildSkuDecisionStateInput = { ...base, accountId: "acc-b" };
+    expect(makeDecisionCacheKey("sku-1", otherAcc)).not.toBe(k0);
   });
 });
 
@@ -76,6 +85,19 @@ describe("getCachedDecisionState", () => {
     const b2 = getCachedDecisionState("b", input);
     expect(a2).not.toBe(a);
     expect(b2).toBe(b);
+  });
+
+  it("invalidateDecisionCacheByAccountId drops only that account", () => {
+    const inputA = { ...sampleInput(), accountId: "acc-a" };
+    const inputB = { ...sampleInput(), accountId: "acc-b" };
+    const sa = getCachedDecisionState("x", inputA);
+    const sb = getCachedDecisionState("x", inputB);
+    expect(sa).not.toBe(sb);
+    invalidateDecisionCacheByAccountId("acc-a");
+    const sa2 = getCachedDecisionState("x", inputA);
+    const sb2 = getCachedDecisionState("x", inputB);
+    expect(sa2).not.toBe(sa);
+    expect(sb2).toBe(sb);
   });
 
   it("keeps cache size bounded (LRU)", () => {

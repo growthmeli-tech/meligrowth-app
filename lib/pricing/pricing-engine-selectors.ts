@@ -1,5 +1,6 @@
 import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { getCachedDecisionState } from "@/lib/pricing/decision-state-cache";
+import type { SellerFinancialSettings } from "@/lib/pricing/calculator";
 import type { SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import {
   buildPricingRowInput,
@@ -23,6 +24,7 @@ export function selectFilteredPricingRowIds(
   mlLinks: Record<string, MlPublicationLink> | undefined,
   mlOverride: Record<string, number>,
   mlAccountId: string,
+  financialSettings: SellerFinancialSettings | null,
   q: string,
   riskFilter: "all" | "destroy" | "risk"
 ): string[] {
@@ -32,7 +34,7 @@ export function selectFilteredPricingRowIds(
     const d = getDraft(r.id);
     if (!d) continue;
     const ml = mergePricingMlLink(r.id, mlLinks, mlOverride);
-    const dec = getCachedDecisionState(r.id, buildPricingRowInput(mlAccountId, r, d, ml));
+    const dec = getCachedDecisionState(r.id, buildPricingRowInput(mlAccountId, r, d, ml, financialSettings));
     const tier = pricingTierFromDecision(dec.decision.profitabilityStatus);
     if (riskFilter === "destroy" && tier !== "destroy") continue;
     if (riskFilter === "risk" && tier !== "risk") continue;
@@ -60,7 +62,8 @@ export function selectHeaderMetrics(
   getDraft: (id: string) => PricingDraft | undefined,
   mlLinks: Record<string, MlPublicationLink> | undefined,
   mlOverride: Record<string, number>,
-  mlAccountId: string
+  mlAccountId: string,
+  financialSettings: SellerFinancialSettings | null
 ): { weightedMargenObj: number | null; weightedReal: number | null } {
   let wM = 0;
   let accM = 0;
@@ -76,7 +79,7 @@ export function selectHeaderMetrics(
       accM += d.margen_pct * c;
     }
     const ml = mergePricingMlLink(r.id, mlLinks, mlOverride);
-    const dec = getCachedDecisionState(r.id, buildPricingRowInput(mlAccountId, r, d, ml));
+    const dec = getCachedDecisionState(r.id, buildPricingRowInput(mlAccountId, r, d, ml, financialSettings));
     const m = dec.computed.realMarginPct;
     if (m !== null && Number.isFinite(m)) {
       wR += c;

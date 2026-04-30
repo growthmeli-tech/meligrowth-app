@@ -361,6 +361,24 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["ml_accounts"]["Row"]>;
         Relationships: [];
       };
+      ml_account_financial_settings: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          iibb_pct: number | null;
+          tax_pct: number | null;
+          internal_logistics_cost: number | null;
+          additional_costs_pct: number | null;
+          additional_costs_fixed: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ml_account_financial_settings"]["Row"]> & {
+          ml_account_id: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_account_financial_settings"]["Row"]>;
+        Relationships: [];
+      };
       users_v2: {
         Row: {
           id: string;

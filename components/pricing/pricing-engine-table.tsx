@@ -4,7 +4,7 @@ import Link from "next/link";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AlertTriangle, Search } from "lucide-react";
 import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
-import { getCachedDecisionState, invalidateDecisionCacheBySkuId, makeDecisionCacheKey } from "@/lib/pricing/decision-state-cache";
+import { getCachedDecisionState, invalidateDecisionCacheBySkuId, invalidateDecisionCacheByAccountId, makeDecisionCacheKey, sellerFinancialSettingsFingerprint } from "@/lib/pricing/decision-state-cache";
 import {
   selectFilteredPricingRowIds,
   selectHeaderMetrics,
@@ -25,16 +25,18 @@ import {
   type PricingDraft,
   type PricingSkuRow
 } from "@/lib/pricing/pricing-row-model";
-import { normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
+import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
+import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
 import { cn } from "@/lib/utils";
 
 type Props = {
   rows: PricingSkuRow[];
   mlLinks?: Record<string, MlPublicationLink>;
   mlAccountId: string;
+  initialFinancialSettings: SellerFinancialSettings | null;
 };
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
@@ -51,8 +53,13 @@ function resultadoTone(ganancia: number, margenReal: number): string {
   return "text-orange-800";
 }
 
-export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
+export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancialSettings }: Props) {
   const [isPending, startTransition] = useTransition();
+  const [financialSettings, setFinancialSettings] = useState<SellerFinancialSettings | null>(initialFinancialSettings);
+
+  useEffect(() => {
+    setFinancialSettings(initialFinancialSettings);
+  }, [mlAccountId, initialFinancialSettings]);
   const [q, setQ] = useState("");
   const [riskFilter, setRiskFilter] = useState<"all" | "destroy" | "risk">("all");
   const [drafts, setDrafts] = useState<Record<string, PricingDraft>>({});
@@ -86,18 +93,28 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
   const mlOverrideKey = useMemo(() => makeMlOverrideImpactKey(mlPriceOverrideBySku), [mlPriceOverrideBySku]);
   const mlLinksKey = useMemo(() => makeMlLinksImpactKey(mlLinks), [mlLinks]);
   const filterImpactKey = useMemo(() => makePricingFilterImpactKey(q, riskFilter), [q, riskFilter]);
+  const financialFp = useMemo(() => sellerFinancialSettingsFingerprint(financialSettings), [financialSettings]);
 
   const filteredIds = useMemo(
     () =>
-      selectFilteredPricingRowIds(rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, q, riskFilter),
-    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, filterImpactKey, mlLinksKey, mlOverrideKey, draftImpactKey]
+      selectFilteredPricingRowIds(
+        rows,
+        getDraft,
+        mlLinks,
+        mlPriceOverrideBySku,
+        mlAccountId,
+        financialSettings,
+        q,
+        riskFilter
+      ),
+    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, financialSettings, filterImpactKey, mlLinksKey, mlOverrideKey, draftImpactKey, financialFp]
   );
 
   const visibleRows = useMemo(() => selectVisiblePricingRows(rowsById, filteredIds), [rowsById, filteredIds]);
 
   const headerMetrics = useMemo(
-    () => selectHeaderMetrics(rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId),
-    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, mlLinksKey, mlOverrideKey, draftImpactKey]
+    () => selectHeaderMetrics(rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, financialSettings),
+    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, financialSettings, mlLinksKey, mlOverrideKey, draftImpactKey, financialFp]
   );
 
   const isDirty = useCallback(
@@ -230,6 +247,15 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
         </div>
       </div>
 
+      <AccountFiscalConfigPanel
+        mlAccountId={mlAccountId}
+        initialSettings={financialSettings}
+        onSaved={(s) => {
+          invalidateDecisionCacheByAccountId(mlAccountId);
+          setFinancialSettings(s);
+        }}
+      />
+
       <div className="flex flex-col gap-2 md:flex-row md:items-center">
         <label className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B6B6B]" />
@@ -295,7 +321,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
               const d = drafts[r.id];
               if (!d) return null;
               const mlLink = mergePricingMlLink(r.id, mlLinks, mlPriceOverrideBySku);
-              const input = buildPricingRowInput(mlAccountId, r, d, mlLink);
+              const input = buildPricingRowInput(mlAccountId, r, d, mlLink, financialSettings);
               const rowKey = makeDecisionCacheKey(r.id, input);
               const dirty = isDirty(r.id);
               const editingField = editing?.skuId === r.id ? editing.field : null;
@@ -306,6 +332,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
                   mlLink={mlLink}
                   draftForRow={d}
                   rowKey={rowKey}
+                  financialSettings={financialSettings}
                   saveStatus={savedFlashId === r.id}
                   error={saveErrors[r.id] ?? null}
                   dirty={dirty}
@@ -337,6 +364,7 @@ type PricingEngineRowProps = {
   mlLink?: MlPublicationLink;
   draftForRow: PricingDraft;
   rowKey: string;
+  financialSettings: SellerFinancialSettings | null;
   saveStatus: boolean;
   error: string | null;
   dirty: boolean;
@@ -377,6 +405,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
   mlLink,
   draftForRow: d,
   rowKey,
+  financialSettings,
   saveStatus,
   error,
   dirty,
@@ -393,9 +422,9 @@ const PricingEngineRow = memo(function PricingEngineRow({
   const [pushOpen, setPushOpen] = useState(false);
 
   const decision = useMemo(() => {
-    const input = buildPricingRowInput(mlAccountId, row, d, mlLink);
+    const input = buildPricingRowInput(mlAccountId, row, d, mlLink, financialSettings);
     return getCachedDecisionState(row.id, input);
-  }, [rowKey]);
+  }, [rowKey, mlAccountId, row, d, mlLink, financialSettings]);
 
   const tier = pricingTierFromDecision(decision.decision.profitabilityStatus);
   const priceMl = decision.ml.currentPrice ?? undefined;

@@ -9,5 +9,6 @@ export {
   computeUnifiedCatalogDerived,
   mapPricingSkusToMlLinks,
   mergeCatalogRowAfterCostSave,
-  mergeCatalogRowAfterMlPricePush
+  mergeCatalogRowAfterMlPricePush,
+  recomputeCatalogItemFinancials
 } from "./unified-catalog.model";

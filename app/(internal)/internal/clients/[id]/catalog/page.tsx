@@ -23,13 +23,14 @@ export default async function InternalClientCatalogPage({ params }: { params: Pr
   }
 
   const mlAccountId = account.id;
-  const { items, lastSyncedAt, pricingSkuChoices, loadError } = await loadCatalogPageData(mlAccountId);
+  const { items, lastSyncedAt, pricingSkuChoices, loadError, financialSettings } = await loadCatalogPageData(mlAccountId);
 
   return (
     <main className="p-4 md:p-6">
       <CatalogCommandCenter
         mlAccountId={mlAccountId}
         initialItems={items}
+        initialFinancialSettings={financialSettings}
         lastSyncedAt={lastSyncedAt}
         pricingSkuChoices={pricingSkuChoices}
         loadError={loadError}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PricingEngineTable } from "@/components/pricing/pricing-engine-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings.server";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { mapPricingSkusToMlLinks, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
@@ -11,7 +12,10 @@ export default async function OpsPricingPage() {
     return <EmptyState context="cuenta" />;
   }
 
-  const skusResult = await listPricingSkus(accountResult.data.id);
+  const [skusResult, financialSettings] = await Promise.all([
+    listPricingSkus(accountResult.data.id),
+    getFinancialSettingsForAccount(accountResult.data.id)
+  ]);
   if (!skusResult.success) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -51,7 +55,12 @@ export default async function OpsPricingPage() {
 
   return (
     <main>
-      <PricingEngineTable rows={rows} mlLinks={mlLinksRecord} mlAccountId={accountResult.data.id} />
+      <PricingEngineTable
+        rows={rows}
+        mlLinks={mlLinksRecord}
+        mlAccountId={accountResult.data.id}
+        initialFinancialSettings={financialSettings}
+      />
     </main>
   );
 }

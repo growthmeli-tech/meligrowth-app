@@ -1,4 +1,4 @@
-import { normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
+import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { getCachedDecisionState } from "@/lib/pricing/decision-state-cache";
 import type { BuildSkuDecisionStateInput, SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import type { Database } from "@/lib/supabase/database.types";
@@ -58,13 +58,80 @@ function stockUrgencyFromDecision(s: SkuDecisionState["decision"]["stockStatus"]
   return "ok";
 }
 
+function mlSliceFromUnifiedCatalogItem(row: UnifiedCatalogItem): MlSlice {
+  return {
+    price: row.price_ml,
+    available_quantity: row.stock,
+    status: row.status,
+    pricing_sku_id: row.pricing_sku_id,
+    seller_custom_field: row.seller_custom_field,
+    item_id: row.item_id,
+    sold_quantity: row.sold_quantity,
+    ventas_30d: row.ventas_30d,
+    title: row.title,
+    thumbnail: row.thumbnail,
+    permalink: row.permalink,
+    revenue_30d: row.decisionState.ml.revenue30d,
+    last_sale_date: row.decisionState.ml.lastSaleDate,
+    logistic_type: row.logistic_type
+  };
+}
+
+function pricingSkuFromUnifiedItem(row: UnifiedCatalogItem, mlAccountId: string): PricingSkuRow | null {
+  if (!row.pricing_sku_id || !row.tiene_costo) return null;
+  return {
+    id: row.pricing_sku_id,
+    ml_account_id: mlAccountId,
+    sku: row.sku ?? row.seller_custom_field,
+    producto: row.title,
+    costo: row.costo ?? 0,
+    logistica: (row.logistica ?? "Flex") as LogisticaType,
+    reputacion: row.reputacion,
+    publicidad_pct: row.publicidad_pct,
+    margen_pct: row.margen_pct,
+    peso_kg: row.peso_kg,
+    precio_venta: null,
+    ganancia_unit: null,
+    roi: null,
+    source_file: null,
+    created_at: row.last_synced_at,
+    updated_at: row.last_synced_at
+  } as PricingSkuRow;
+}
+
+/** Rebuild one catalog row after account-level fiscal settings change (cache must be invalidated first). */
+export function recomputeCatalogItemFinancials(
+  mlAccountId: string,
+  row: UnifiedCatalogItem,
+  accountFinancialSettings: SellerFinancialSettings | null
+): UnifiedCatalogItem {
+  const derived = computeUnifiedCatalogDerived(
+    mlAccountId,
+    mlSliceFromUnifiedCatalogItem(row),
+    pricingSkuFromUnifiedItem(row, mlAccountId),
+    accountFinancialSettings
+  );
+  return {
+    ml_row_id: row.ml_row_id,
+    item_id: row.item_id,
+    title: row.title,
+    permalink: row.permalink,
+    thumbnail: row.thumbnail,
+    last_synced_at: row.last_synced_at,
+    seller_custom_field: row.seller_custom_field,
+    logistic_type: row.logistic_type,
+    ...derived
+  };
+}
+
 /**
  * Pure derivation for tests, `listUnifiedCatalog` (server), and client reconciliation.
  */
 export function computeUnifiedCatalogDerived(
   mlAccountId: string,
   ml: MlSlice,
-  pricing: PricingSkuRow | null
+  pricing: PricingSkuRow | null,
+  accountFinancialSettings: SellerFinancialSettings | null = null
 ): Omit<
   UnifiedCatalogItem,
   | "ml_row_id"
@@ -117,7 +184,8 @@ export function computeUnifiedCatalogDerived(
         pricing?.margen_pct !== null && pricing?.margen_pct !== undefined ? Number(pricing.margen_pct) : null,
       pesoKg: pricing?.peso_kg !== null && pricing?.peso_kg !== undefined ? Number(pricing.peso_kg) : null,
       reputacion: pricing?.reputacion ?? null
-    }
+    },
+    financialSettings: accountFinancialSettings
   };
   const cacheSkuId = pricing?.id ?? `${mlAccountId}:${ml.item_id}`;
   const decisionState = getCachedDecisionState(cacheSkuId, decisionInput);
@@ -206,7 +274,8 @@ export function mergeCatalogRowAfterCostSave(
     margen_pct: number;
     publicidad_pct: number;
     reputacion: string | null;
-  }
+  },
+  accountFinancialSettings: SellerFinancialSettings | null = null
 ): UnifiedCatalogItem {
   const ml: MlSlice = {
     price: row.price_ml,
@@ -237,7 +306,7 @@ export function mergeCatalogRowAfterCostSave(
     peso_kg: row.peso_kg
   } as PricingSkuRow;
 
-  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricingMinimal);
+  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricingMinimal, accountFinancialSettings);
   return {
     ml_row_id: row.ml_row_id,
     item_id: row.item_id,
@@ -255,7 +324,8 @@ export function mergeCatalogRowAfterCostSave(
 export function mergeCatalogRowAfterMlPricePush(
   mlAccountId: string,
   row: UnifiedCatalogItem,
-  newPrice: number
+  newPrice: number,
+  accountFinancialSettings: SellerFinancialSettings | null = null
 ): UnifiedCatalogItem {
   const ml: MlSlice = {
     price: newPrice,
@@ -289,7 +359,7 @@ export function mergeCatalogRowAfterMlPricePush(
         } as PricingSkuRow)
       : null;
 
-  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricing);
+  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricing, accountFinancialSettings);
   return {
     ml_row_id: row.ml_row_id,
     item_id: row.item_id,

@@ -21,6 +21,11 @@ function financialSettingsKey(fs: SellerFinancialSettings | null | undefined): s
   ].join("\x1e");
 }
 
+/** Stable string for React memo / selector deps (same segments as cache key fiscal part). */
+export function sellerFinancialSettingsFingerprint(fs: SellerFinancialSettings | null | undefined): string {
+  return financialSettingsKey(fs);
+}
+
 /**
  * Deterministic, minimal key. Partition: first segment `skuId` (opaque row id).
  * Value segments: currentPrice, stock, ventas30d, productCost, publicidadPct,
@@ -33,6 +38,7 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
   const target =
     i.targetMarginPct === null || i.targetMarginPct === undefined ? "" : keyNum(normalizePct(i.targetMarginPct));
   return [
+    input.accountId,
     skuId,
     keyNum(ml.currentPrice),
     keyNum(ml.stock),
@@ -73,11 +79,22 @@ export class DecisionStateCache {
     this.map.delete(key);
   }
 
-  /** O(n_keys) — only keys whose first segment equals skuId. */
-  invalidateBySku(skuId: string): void {
-    const prefix = `${skuId}${SEP}`;
+  /** O(n_keys) — keys are `${accountId}${SEP}${skuPartitionId}${SEP}...`; match second segment. */
+  invalidateBySku(skuPartitionId: string): void {
     for (const k of [...this.map.keys()]) {
-      if (k === skuId || k.startsWith(prefix)) {
+      const parts = k.split(SEP);
+      const keySku = parts.length >= 2 ? parts[1] : parts[0];
+      if (keySku === skuPartitionId) {
+        this.map.delete(k);
+      }
+    }
+  }
+
+  /** O(n_keys) — drop all cached decision states for one ML account (fiscal/settings change). */
+  invalidateByAccountId(mlAccountId: string): void {
+    const prefix = `${mlAccountId}${SEP}`;
+    for (const k of [...this.map.keys()]) {
+      if (k.startsWith(prefix)) {
         this.map.delete(k);
       }
     }
@@ -120,4 +137,8 @@ export function getCachedDecisionState(skuId: string, input: BuildSkuDecisionSta
 
 export function invalidateDecisionCacheBySkuId(skuId: string): void {
   getDecisionStateCache().invalidateBySku(skuId);
+}
+
+export function invalidateDecisionCacheByAccountId(mlAccountId: string): void {
+  getDecisionStateCache().invalidateByAccountId(mlAccountId);
 }

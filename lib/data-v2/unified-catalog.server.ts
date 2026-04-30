@@ -2,14 +2,21 @@ import "server-only";
 
 import { listMlCatalogItems, updateCatalogItemPricingLink } from "@/lib/data-v2/ml-catalog-items";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
+import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings.server";
 import type { ActionResult } from "@/lib/types/api";
 import { buildPricingIndexes, computeUnifiedCatalogDerived, resolvePricingRow } from "@/lib/data-v2/unified-catalog.model";
 import type { CatalogHealthSummary, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
 
 export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionResult<UnifiedCatalogItem[]>> {
-  const [catRes, priceRes] = await Promise.all([listMlCatalogItems(mlAccountId), listPricingSkus(mlAccountId)]);
+  const [catRes, priceRes, financialRes] = await Promise.all([
+    listMlCatalogItems(mlAccountId),
+    listPricingSkus(mlAccountId),
+    getFinancialSettingsForAccount(mlAccountId)
+  ]);
   if (!catRes.success) return catRes;
   if (!priceRes.success) return priceRes;
+
+  const accountFinancialSettings = financialRes;
 
   const { byId, bySkuKey } = buildPricingIndexes(priceRes.data);
 
@@ -30,7 +37,7 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
       revenue_30d: row.revenue_30d === null || row.revenue_30d === undefined ? null : Number(row.revenue_30d),
       last_sale_date: row.last_sale_date ?? null,
       logistic_type: row.logistic_type
-    }, pricing);
+    }, pricing, accountFinancialSettings);
 
     return {
       ml_row_id: row.id,

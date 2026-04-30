@@ -44,7 +44,7 @@ describe("pricing-engine-selectors", () => {
     const r2 = samplePricingRow({ id: "00000000-0000-4000-8000-000000000002", sku: "y", costo: 200 });
     const rows = [r1, r2];
     const drafts = { [r1.id]: rowToDraft(r1), [r2.id]: rowToDraft(r2) };
-    const ids = selectFilteredPricingRowIds(rows, (id) => drafts[id], undefined, {}, ACC, "", "all");
+    const ids = selectFilteredPricingRowIds(rows, (id) => drafts[id], undefined, {}, ACC, null, "", "all");
     expect(ids).toContain(r1.id);
     expect(ids).toContain(r2.id);
   });
@@ -63,7 +63,7 @@ describe("pricing-engine-selectors", () => {
     const r = samplePricingRow({});
     const rows = [r];
     const drafts = { [r.id]: rowToDraft(r) };
-    const m = selectHeaderMetrics(rows, (id) => drafts[id], undefined, {}, ACC);
+    const m = selectHeaderMetrics(rows, (id) => drafts[id], undefined, {}, ACC, null);
     expect(m.weightedMargenObj).not.toBeNull();
     expect(typeof m.weightedReal === "number" || m.weightedReal === null).toBe(true);
   });

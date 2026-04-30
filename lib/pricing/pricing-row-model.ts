@@ -1,7 +1,7 @@
 import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import type { BuildSkuDecisionStateInput } from "@/lib/pricing/sku-decision-state";
-import { normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
+import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 
 export type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
 
@@ -28,10 +28,12 @@ export function buildPricingRowInput(
   mlAccountId: string,
   r: PricingSkuRow,
   d: PricingDraft,
-  ml?: MlPublicationLink
+  ml?: MlPublicationLink,
+  financialSettings?: SellerFinancialSettings | null
 ): BuildSkuDecisionStateInput {
   return {
     accountId: mlAccountId,
+    financialSettings: financialSettings ?? null,
     ml: {
       itemId: ml?.item_id ?? null,
       sku: r.sku,
