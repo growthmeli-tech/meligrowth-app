@@ -163,4 +163,36 @@ describe("buildSkuDecisionState", () => {
     expect(s.computed.financialBreakdown?.missing.some((m) => m === "iibb" || m === "tax")).toBe(true);
     expect(s.decision.primaryInsight).toMatch(/IIBB|impuestos|parcial/i);
   });
+
+  it("cuenta no_reputation no usa mensaje corto falta reputación ML", () => {
+    const s = buildSkuDecisionState({
+      accountId: "acc",
+      accountReputation: {
+        sellerReputationLevel: null,
+        sellerPowerSellerStatus: null,
+        sellerReputationSyncedAt: "2026-01-01T00:00:00.000Z"
+      },
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+      ml: {
+        itemId: "MLA1",
+        title: "P",
+        sku: "S",
+        currentPrice: 40_000,
+        stock: 10,
+        ventas30d: 5,
+        freeShipping: true,
+        shippingMode: "me2",
+        packageWeightKg: 0.4,
+        condition: "new"
+      },
+      inputs: {
+        reputacion: "Verde / MercadoLíder",
+        productCost: 10_000,
+        logistics: "Flex",
+        publicidadPct: 0,
+        targetMarginPct: 0.2
+      }
+    });
+    expect(s.decision.shippingMessage).not.toBe("Falta reputación ML");
+  });
 });

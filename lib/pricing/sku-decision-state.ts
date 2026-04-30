@@ -14,6 +14,7 @@ import {
   resolveSellerReputationForRow,
   type ShippingCostInput
 } from "@/lib/pricing/shipping-costs-argentina";
+import { deriveSellerReputationStateFromPersistedAccount, type SellerReputationState } from "@/lib/pricing/seller-reputation-state";
 
 export type SkuDecisionState = {
   ml: {
@@ -509,7 +510,8 @@ function priorityScoreFrom(input: {
 function pickShippingShortSignal(
   freeShipping: boolean | null,
   breakdown: FinancialCostBreakdown | null,
-  shippingModeRaw: string | null
+  shippingModeRaw: string | null,
+  accountReputationState: SellerReputationState
 ): { msg: string | null; action: string | null } {
   if (!breakdown) return { msg: null, action: null };
   const mode = mapMlLogisticTypeToShippingMode(shippingModeRaw);
@@ -523,7 +525,10 @@ function pickShippingShortSignal(
   if (breakdown.missing.some((m) => m === "shipping_package_weight" || m.includes("package_weight"))) {
     return { msg: "Falta peso del paquete", action: "Completar peso para estimar envío" };
   }
-  if (breakdown.missing.some((m) => m === "shipping_ml_reputation" || m.includes("ml_reputation"))) {
+  if (
+    accountReputationState !== "no_reputation" &&
+    breakdown.missing.some((m) => m === "shipping_ml_reputation" || m.includes("ml_reputation"))
+  ) {
     return { msg: "Falta reputación ML", action: "Sincronizar reputación de cuenta" };
   }
   return { msg: null, action: null };
@@ -570,6 +575,11 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const pesoKg = input.inputs.pesoKg ?? null;
 
   const acc = input.accountReputation;
+  const accountReputationState = deriveSellerReputationStateFromPersistedAccount(
+    acc?.sellerReputationSyncedAt ?? null,
+    acc?.sellerReputationLevel ?? null,
+    acc?.sellerPowerSellerStatus ?? null
+  );
   const sellerRep = resolveSellerReputationForRow({
     accountLevel: acc?.sellerReputationLevel ?? null,
     accountPower: acc?.sellerPowerSellerStatus ?? null,
@@ -773,7 +783,12 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     realMarginPct
   });
 
-  const shipSig = pickShippingShortSignal(input.ml.freeShipping ?? null, financialBreakdown, input.ml.shippingMode ?? null);
+  const shipSig = pickShippingShortSignal(
+    input.ml.freeShipping ?? null,
+    financialBreakdown,
+    input.ml.shippingMode ?? null,
+    accountReputationState
+  );
 
   const priorityScore = priorityScoreFrom({
     profitabilityStatus,

@@ -61,6 +61,27 @@ describe("makeDecisionCacheKey", () => {
     const otherAcc: BuildSkuDecisionStateInput = { ...base, accountId: "acc-b" };
     expect(makeDecisionCacheKey("sku-1", otherAcc)).not.toBe(k0);
   });
+
+  it("changes when derived reputation_state (synced no-tier vs rated) changes", () => {
+    const base = sampleInput();
+    const rated: BuildSkuDecisionStateInput = {
+      ...base,
+      accountReputation: {
+        sellerReputationLevel: "green",
+        sellerPowerSellerStatus: null,
+        sellerReputationSyncedAt: "2026-01-01"
+      }
+    };
+    const noTier: BuildSkuDecisionStateInput = {
+      ...base,
+      accountReputation: {
+        sellerReputationLevel: null,
+        sellerPowerSellerStatus: null,
+        sellerReputationSyncedAt: "2026-01-01"
+      }
+    };
+    expect(makeDecisionCacheKey("sku-1", rated)).not.toBe(makeDecisionCacheKey("sku-1", noTier));
+  });
 });
 
 describe("getCachedDecisionState", () => {

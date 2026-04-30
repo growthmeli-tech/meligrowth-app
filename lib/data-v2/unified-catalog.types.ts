@@ -21,6 +21,8 @@ export interface UnifiedCatalogItem {
   costo: number | null;
   peso_kg: number | null;
   logistica: string | null;
+  /** Cuenta ML (sincronización) — copy fija según estado de reputación, sin valores nulos. */
+  cuenta_reputacion_ml: string;
   reputacion: string | null;
   publicidad_pct: number | null;
   margen_pct: number | null;

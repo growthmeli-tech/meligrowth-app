@@ -44,6 +44,7 @@ describe("computeUnifiedCatalogDerived", () => {
     };
     const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}));
     expect(d.ganancia_real).not.toBeNull();
+    expect(d.cuenta_reputacion_ml).toBe("falta reputación ML");
     expect(d.margen_real_pct).not.toBeNull();
     expect(d.ganancia_real).toBeGreaterThan(0);
     expect(d.comision_real).not.toBeNull();

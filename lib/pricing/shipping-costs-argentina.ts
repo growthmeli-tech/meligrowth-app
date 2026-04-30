@@ -1,5 +1,10 @@
 /** Pure ML Argentina shipping cost domain — client-safe types & table estimates (no I/O). */
 
+import {
+  deriveSellerReputationStateFromPersistedAccount,
+  type SellerReputationState
+} from "@/lib/pricing/seller-reputation-state";
+
 export type SellerReputation =
   | "mercado_lider_green"
   | "green"
@@ -56,6 +61,8 @@ export type ShippingCostInput = {
   freeShipping: boolean | null;
   condition: "new" | "used" | "unknown";
 };
+
+export type { SellerReputationState };
 
 export type ShippingCostEstimate = {
   sellerShippingCost: number | null;
@@ -231,7 +238,8 @@ export function parseMlItemCondition(raw: string | null | undefined): "new" | "u
 }
 
 /**
- * Cuenta ML con API sync > fallback explícito desde fila de pricing (texto legado).
+ * Envío ML: estado derivado de columnas de cuenta sincronizadas (sin fallback silencioso desde margen).
+ * `legacyPricingReputacion` se mantiene en la firma por compatibilidad de llamadas; no afecta el tier de envío.
  */
 export function resolveSellerReputationForRow(input: {
   accountLevel: string | null;
@@ -239,10 +247,15 @@ export function resolveSellerReputationForRow(input: {
   accountSyncedAt: string | null;
   legacyPricingReputacion: string | null;
 }): SellerReputation {
-  if (input.accountSyncedAt !== null && input.accountSyncedAt !== undefined && String(input.accountSyncedAt).trim() !== "") {
+  void input.legacyPricingReputacion;
+  const state = deriveSellerReputationStateFromPersistedAccount(input.accountSyncedAt, input.accountLevel, input.accountPower);
+  if (state === "no_reputation") {
+    return "no_reputation";
+  }
+  if (state === "rated") {
     return mapMlSellerReputation({ levelId: input.accountLevel, powerSellerStatus: input.accountPower });
   }
-  return mapLegacyReputacionLabelToSellerReputation(input.legacyPricingReputacion);
+  return "unknown";
 }
 
 export function estimateSellerShippingCostAr(input: ShippingCostInput): ShippingCostEstimate {

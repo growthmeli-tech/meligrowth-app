@@ -1138,6 +1138,7 @@ function CatalogRows({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Desglose</p>
+                <p className="text-xs text-[#6B6B6B]">Cuenta ML: {row.cuenta_reputacion_ml}</p>
                 {ds.decision.shippingMessage ? (
                   <p className="text-xs text-[#6B6B6B]">
                     {ds.decision.shippingMessage}

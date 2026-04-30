@@ -1,5 +1,9 @@
 import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { getCachedDecisionState } from "@/lib/pricing/decision-state-cache";
+import {
+  deriveSellerReputationStateFromPersistedAccount,
+  formatSellerReputationStateForOps
+} from "@/lib/pricing/seller-reputation-state";
 import type { BuildSkuDecisionStateInput, SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink, MlSlice, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
@@ -181,6 +185,13 @@ export function computeUnifiedCatalogDerived(
       : null;
   const packageWeightCombined = pkgFromMl ?? pkgFromPricing;
 
+  const accountRepState = deriveSellerReputationStateFromPersistedAccount(
+    accountReputation?.sellerReputationSyncedAt ?? null,
+    accountReputation?.sellerReputationLevel ?? null,
+    accountReputation?.sellerPowerSellerStatus ?? null
+  );
+  const cuenta_reputacion_ml = formatSellerReputationStateForOps(accountRepState, accountReputation?.sellerReputationLevel ?? null);
+
   const decisionInput: BuildSkuDecisionStateInput = {
     accountId: mlAccountId,
     accountReputation: accountReputation ?? undefined,
@@ -268,6 +279,7 @@ export function computeUnifiedCatalogDerived(
     costo: pricing ? Number(pricing.costo) : null,
     peso_kg: pricing?.peso_kg !== null && pricing?.peso_kg !== undefined ? Number(pricing.peso_kg) : null,
     logistica: pricing?.logistica ?? null,
+    cuenta_reputacion_ml,
     reputacion: pricing?.reputacion ?? null,
     publicidad_pct: pricing?.publicidad_pct !== null && pricing?.publicidad_pct !== undefined ? Number(pricing.publicidad_pct) : null,
     margen_pct: margen_pct_out,
@@ -348,7 +360,8 @@ export function mergeCatalogRowAfterCostSave(
     last_synced_at: row.last_synced_at,
     seller_custom_field: row.seller_custom_field,
     logistic_type: row.logistic_type,
-    ...derived
+    ...derived,
+    cuenta_reputacion_ml: row.cuenta_reputacion_ml
   };
 }
 
@@ -405,7 +418,8 @@ export function mergeCatalogRowAfterMlPricePush(
     last_synced_at: row.last_synced_at,
     seller_custom_field: row.seller_custom_field,
     logistic_type: row.logistic_type,
-    ...derived
+    ...derived,
+    cuenta_reputacion_ml: row.cuenta_reputacion_ml
   };
 }
 

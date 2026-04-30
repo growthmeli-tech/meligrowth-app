@@ -1,5 +1,6 @@
 import { normalizePct, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { buildSkuDecisionState, type BuildSkuDecisionStateInput, type SkuDecisionState } from "@/lib/pricing/sku-decision-state";
+import { deriveSellerReputationStateFromPersistedAccount } from "@/lib/pricing/seller-reputation-state";
 
 const SEP = "\x1f";
 
@@ -34,6 +35,14 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
   const ml = input.ml;
   const i = input.inputs;
   const ar = input.accountReputation;
+  const reputationState =
+    ar === undefined
+      ? "unknown"
+      : deriveSellerReputationStateFromPersistedAccount(
+          ar.sellerReputationSyncedAt ?? null,
+          ar.sellerReputationLevel ?? null,
+          ar.sellerPowerSellerStatus ?? null
+        );
   const pubKey = keyNum(normalizePct(i.publicidadPct ?? 0));
   const target =
     i.targetMarginPct === null || i.targetMarginPct === undefined ? "" : keyNum(normalizePct(i.targetMarginPct));
@@ -54,6 +63,7 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
     String(ml.freeShipping),
     String(ml.shippingMode ?? ""),
     keyNum(ml.packageWeightKg ?? undefined),
+    reputationState,
     ar?.sellerReputationLevel ?? "",
     ar?.sellerPowerSellerStatus ?? "",
     ar?.sellerReputationSyncedAt ?? "",

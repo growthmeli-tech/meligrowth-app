@@ -46,6 +46,7 @@ describe("mapMlSellerReputation", () => {
 describe("reputation group mapping", () => {
   it("agrupa leader_green_or_none y orange_or_red", () => {
     expect(resolveShippingReputationGroup("green")).toBe("leader_green_or_none");
+    expect(resolveShippingReputationGroup("no_reputation")).toBe("leader_green_or_none");
     expect(resolveShippingReputationGroup("yellow")).toBe("yellow");
     expect(resolveShippingReputationGroup("orange")).toBe("orange_or_red");
     expect(resolveShippingReputationGroup("unknown")).toBe("unknown");
@@ -199,7 +200,7 @@ describe("Financial breakdown — shipping subtract", () => {
 });
 
 describe("resolveSellerReputationForRow", () => {
-  it("prioriza cuenta sincronizada sobre pricing", () => {
+  it("prioriza cuenta sincronizada sobre pricing (tier ML)", () => {
     expect(
       resolveSellerReputationForRow({
         accountLevel: "yellow",
@@ -208,6 +209,45 @@ describe("resolveSellerReputationForRow", () => {
         legacyPricingReputacion: "Verde / MercadoLíder"
       })
     ).toBe("yellow");
+  });
+
+  it("sin sync ignora legado margen → unknown para envío", () => {
+    expect(
+      resolveSellerReputationForRow({
+        accountLevel: null,
+        accountPower: null,
+        accountSyncedAt: null,
+        legacyPricingReputacion: "Verde / MercadoLíder"
+      })
+    ).toBe("unknown");
+  });
+
+  it("synced + tier ML ausente → no_reputation", () => {
+    expect(
+      resolveSellerReputationForRow({
+        accountLevel: null,
+        accountPower: null,
+        accountSyncedAt: "2026-01-01",
+        legacyPricingReputacion: "Verde / MercadoLíder"
+      })
+    ).toBe("no_reputation");
+  });
+});
+
+describe("estimateSellerShippingCostAr — no_reputation tier", () => {
+  it("no_reputation + freeShipping no marca ml_reputation missing; grupo leader_green_or_none", () => {
+    const e = estimateSellerShippingCostAr({
+      price: 30_000,
+      packageWeightKg: 0.4,
+      reputation: "no_reputation",
+      shippingMode: "flex",
+      freeShipping: true,
+      condition: "new"
+    });
+    expect(e.reputationGroup).toBe("leader_green_or_none");
+    expect(e.missing.some((m) => m.includes("ml_reputation"))).toBe(false);
+    expect(e.completeness).toBe("partial");
+    expect(e.source).toBe("missing_table");
   });
 });
 
@@ -231,7 +271,7 @@ describe("decision cache key — shipping drivers", () => {
     inputs: { productCost: 50, logistics: "Flex", publicidadPct: 0, targetMarginPct: 0.2 }
   });
 
-  it("cambia con freeShipping / peso / reputación", () => {
+  it("cambia con freeShipping / peso / reputación / reputation_state", () => {
     const a = makeDecisionCacheKey("sku1", base());
     const b = makeDecisionCacheKey("sku1", {
       ...base(),
@@ -243,5 +283,14 @@ describe("decision cache key — shipping drivers", () => {
       ml: { ...base().ml, packageWeightKg: 2 }
     });
     expect(a).not.toBe(c);
+    const noTier = makeDecisionCacheKey("sku1", {
+      ...base(),
+      accountReputation: {
+        sellerReputationLevel: null,
+        sellerPowerSellerStatus: null,
+        sellerReputationSyncedAt: "t1"
+      }
+    });
+    expect(a).not.toBe(noTier);
   });
 });
