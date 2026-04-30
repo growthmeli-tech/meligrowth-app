@@ -9,6 +9,7 @@ export function netMarginDisplayLabel(computed: SkuDecisionState["computed"]): s
     if (m.includes("iibb")) parts.push("faltan IIBB");
     if (m.includes("tax")) parts.push("faltan impuestos");
     if (m.some((x) => x.startsWith("shipping_"))) parts.push("envío incompleto");
+    if (m.some((x) => x.startsWith("logistics_"))) parts.push("logística incompleta");
     return parts.join(" · ");
   }
   return "";

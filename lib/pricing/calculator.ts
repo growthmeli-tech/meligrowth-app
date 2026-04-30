@@ -1,5 +1,9 @@
 import type { MargenesRow } from "@/lib/ingestion/types";
 import {
+  resolveLogisticsOperatingCostBreakdown,
+  type LogisticsCostBreakdown
+} from "@/lib/pricing/logistics-operating-cost";
+import {
   type PriceBand,
   type ShippingCostInput,
   type ShippingCostEstimate,
@@ -24,6 +28,10 @@ export type SellerFinancialSettings = {
   fixedUnitCost?: number | null;
   additionalCostsPct?: number | null;
   additionalCostsFixed?: number | null;
+  /** Full — solo si persistidos / pasados explícitamente (sin inventar). */
+  fullFulfillmentCostPerUnit?: number | null;
+  fullStorageCostPerUnit?: number | null;
+  fullInboundCostPerUnit?: number | null;
 };
 
 export type FinancialCostBreakdown = {
@@ -45,7 +53,11 @@ export type FinancialCostBreakdown = {
 
   mlShippingAmount: number | null;
   fulfillmentAmount: number | null;
+  /** @deprecated Usar `logisticsOperating`; se mantiene para UI que resta “logística interna”. */
   internalLogisticsAmount: number | null;
+  /** Costo operativo por modo logístico (Full/Flex/Retiro); distinto del envío gratis (tabla ML). */
+  logisticsOperatingAmount: number | null;
+  logisticsOperating: LogisticsCostBreakdown;
 
   additionalCostsAmount: number | null;
 
@@ -182,7 +194,9 @@ export function calculateFinancialCostBreakdown(input: {
   financialSettings: SellerFinancialSettings | null | undefined;
   skuAdditionalFixedCost: number | null | undefined;
   /** Costo de envío absorbido (AR tabla / política envío gratis). Omisión → freeShipping=false. */
-  shipping?: ShippingCostInput;
+  shipping?: Omit<ShippingCostInput, "price">;
+  /** Costo interno Flex por SKU (prioridad sobre cuenta). */
+  rowInternalLogisticsCost?: number | null;
 }): FinancialCostBreakdown {
   const reasons: string[] = [];
   const missing: string[] = [];
@@ -190,6 +204,11 @@ export function calculateFinancialCostBreakdown(input: {
 
   if (!Number.isFinite(P) || P <= 0) {
     reasons.push("Precio de venta inválido o no informado.");
+    const lo = resolveLogisticsOperatingCostBreakdown({
+      logistica: input.logistica,
+      financialSettings: input.financialSettings ?? null,
+      rowInternalLogisticsCost: input.rowInternalLogisticsCost
+    });
     return {
       productCost: null,
       mlFeeAmount: null,
@@ -204,6 +223,8 @@ export function calculateFinancialCostBreakdown(input: {
       mlShippingAmount: null,
       fulfillmentAmount: null,
       internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: lo,
       additionalCostsAmount: null,
       totalCost: null,
       netProfit: null,
@@ -229,14 +250,38 @@ export function calculateFinancialCostBreakdown(input: {
 
   const iibbPct = fs?.iibbPct === null || fs?.iibbPct === undefined ? null : pctOrNull(fs.iibbPct);
   const taxPct = fs?.taxPct === null || fs?.taxPct === undefined ? null : pctOrNull(fs.taxPct);
-  const internalRaw = fs?.internalLogisticsCost;
-  const internalLogisticsAmount =
-    internalRaw === null || internalRaw === undefined || !Number.isFinite(internalRaw)
-      ? null
-      : roundMoney(internalRaw);
-  if (internalLogisticsAmount !== null) {
-    reasons.push("Logística interna: costo fijo por unidad configurado.");
+
+  const logisticsOperating = resolveLogisticsOperatingCostBreakdown({
+    logistica: input.logistica,
+    financialSettings: fs,
+    rowInternalLogisticsCost: input.rowInternalLogisticsCost
+  });
+  for (const r of logisticsOperating.reasons) {
+    if (!reasons.includes(r)) reasons.push(r);
   }
+  for (const m of logisticsOperating.missing) {
+    const tag = `logistics_${m}`;
+    if (!missing.includes(tag)) missing.push(tag);
+  }
+
+  const logisticsOperatingSubtract =
+    logisticsOperating.completeness === "complete" &&
+    logisticsOperating.operatingCost !== null &&
+    Number.isFinite(logisticsOperating.operatingCost)
+      ? roundMoney(logisticsOperating.operatingCost)
+      : 0;
+
+  const logisticsOperatingAmount =
+    logisticsOperating.completeness === "complete" &&
+    logisticsOperating.operatingCost !== null &&
+    Number.isFinite(logisticsOperating.operatingCost)
+      ? logisticsOperating.source === "retire_no_cost"
+        ? null
+        : roundMoney(logisticsOperating.operatingCost)
+      : null;
+
+  const internalLogisticsAmount =
+    logisticsOperatingSubtract > 0 ? logisticsOperatingSubtract : null;
 
   const fixedUnitRaw = fs?.fixedUnitCost;
   const fixedUnitCost =
@@ -365,6 +410,8 @@ export function calculateFinancialCostBreakdown(input: {
       mlShippingAmount: mlShippingOut,
       fulfillmentAmount: fulfillmentOut,
       internalLogisticsAmount,
+      logisticsOperatingAmount,
+      logisticsOperating,
       additionalCostsAmount,
       totalCost: null,
       netProfit: null,
@@ -379,7 +426,7 @@ export function calculateFinancialCostBreakdown(input: {
   if (fixedUnitCost !== null) parts.push(fixedUnitCost);
   if (iibbAmount !== null) parts.push(iibbAmount);
   if (taxAmount !== null) parts.push(taxAmount);
-  if (internalLogisticsAmount !== null) parts.push(internalLogisticsAmount);
+  if (logisticsOperatingSubtract > 0) parts.push(logisticsOperatingSubtract);
   if (additionalCostsAmount !== null) parts.push(additionalCostsAmount);
 
   const totalCost = roundMoney(parts.reduce((a, b) => a + b, 0));
@@ -400,6 +447,8 @@ export function calculateFinancialCostBreakdown(input: {
     mlShippingAmount: mlShippingOut,
     fulfillmentAmount: fulfillmentOut,
     internalLogisticsAmount,
+    logisticsOperatingAmount,
+    logisticsOperating,
     additionalCostsAmount,
     totalCost,
     netProfit,
@@ -417,6 +466,8 @@ export type SellingPriceInput = Pick<MargenesRow, "costo" | "logistica" | "publi
   skuAdditionalFixedCost?: number | null;
   /** Costo de envío absorbido por el vendedor a un precio candidato (tabla AR); sin callback → 0. */
   sellerShippingAtPrice?: (precio: number) => number;
+  /** Costo interno Flex por SKU (prioridad sobre cuenta). */
+  rowInternalLogisticsCost?: number | null;
 };
 
 export type SellingPriceResult = {
@@ -435,13 +486,20 @@ function sellingFinancialRates(fs: SellerFinancialSettings | null | undefined): 
 }
 
 function sellingFixedExtras(
+  logistica: LogisticaType,
   fs: SellerFinancialSettings | null | undefined,
-  skuAdditionalFixedCost: number | null | undefined
+  skuAdditionalFixedCost: number | null | undefined,
+  rowInternalLogisticsCost?: number | null
 ): number {
   let s = 0;
   if (fs?.fixedUnitCost !== null && fs?.fixedUnitCost !== undefined && Number.isFinite(fs.fixedUnitCost)) s += fs.fixedUnitCost;
-  if (fs?.internalLogisticsCost !== null && fs?.internalLogisticsCost !== undefined && Number.isFinite(fs.internalLogisticsCost)) {
-    s += fs.internalLogisticsCost;
+  const lo = resolveLogisticsOperatingCostBreakdown({
+    logistica,
+    financialSettings: fs,
+    rowInternalLogisticsCost
+  });
+  if (lo.completeness === "complete" && lo.operatingCost !== null && Number.isFinite(lo.operatingCost)) {
+    s += roundMoney(lo.operatingCost);
   }
   if (fs?.additionalCostsFixed !== null && fs?.additionalCostsFixed !== undefined && Number.isFinite(fs.additionalCostsFixed)) {
     s += fs.additionalCostsFixed;
@@ -464,7 +522,7 @@ export function calcSellingPrice(input: SellingPriceInput): SellingPriceResult {
   const comision = mlComisionRate(input.reputacion);
   const fs = input.financialSettings ?? null;
   const extraRate = sellingFinancialRates(fs);
-  const fixedExtras = sellingFixedExtras(fs, input.skuAdditionalFixedCost);
+  const fixedExtras = sellingFixedExtras(input.logistica, fs, input.skuAdditionalFixedCost, input.rowInternalLogisticsCost);
   const shipAt = input.sellerShippingAtPrice ?? ((_p: number) => 0);
 
   if (costo <= 0) {
@@ -529,6 +587,7 @@ export type CalcRealProfitInput = {
   financialSettings?: SellerFinancialSettings | null;
   skuAdditionalFixedCost?: number | null;
   shipping?: Omit<ShippingCostInput, "price">;
+  rowInternalLogisticsCost?: number | null;
 };
 
 /**
@@ -552,7 +611,8 @@ export function calcRealProfit(input: CalcRealProfitInput): RealProfitResult {
     publicidad_pct: input.publicidad_pct,
     financialSettings: input.financialSettings ?? null,
     skuAdditionalFixedCost: input.skuAdditionalFixedCost ?? null,
-    shipping: shippingMerged
+    shipping: shippingMerged,
+    rowInternalLogisticsCost: input.rowInternalLogisticsCost
   });
 
   if (!Number.isFinite(price_ml) || price_ml <= 0 || !Number.isFinite(productCost) || productCost < 0) {

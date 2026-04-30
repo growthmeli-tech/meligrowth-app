@@ -481,7 +481,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
     ) : decision.sync.calculationStatus === "error" ? (
       <div className="text-[10px] font-normal text-amber-800">Sin convergencia</div>
     ) : decision.sync.calculationStatus === "partial" ? (
-      <div className="text-[10px] font-normal text-amber-800">Cálculo parcial (fiscal incompleto)</div>
+      <div className="text-[10px] font-normal text-amber-800">Cálculo parcial (fiscal o logística incompleta)</div>
     ) : null;
 
   return (
@@ -511,7 +511,20 @@ const PricingEngineRow = memo(function PricingEngineRow({
           ) : null}
         </div>
         <div className="mt-1 max-w-[220px] text-xs font-normal leading-snug">{row.producto}</div>
-        {decision.decision.primaryInsight ? (
+        {decision.businessDecision.type !== "hold" ? (
+          <p
+            className={cn(
+              "mt-1 text-[10px] font-semibold leading-snug",
+              decision.businessDecision.priority === "critical" && "text-red-800",
+              decision.businessDecision.priority === "high" && "text-amber-900",
+              decision.businessDecision.priority === "medium" && "text-[#6B6B6B]",
+              decision.businessDecision.priority === "low" && "text-[#6B6B6B]"
+            )}
+          >
+            {decision.businessDecision.message}
+            <span className="block font-medium text-[#6B6B6B]">{decision.businessDecision.action}</span>
+          </p>
+        ) : decision.decision.primaryInsight ? (
           <p className="mt-1 text-[10px] font-medium leading-snug text-[#6B6B6B]">{decision.decision.primaryInsight}</p>
         ) : null}
         {error ? <p className="mt-1 text-[10px] font-semibold text-red-700">{error}</p> : null}

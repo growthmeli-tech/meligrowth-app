@@ -76,7 +76,7 @@ describe("account financial settings wiring", () => {
     const fs = {
       iibbPct: 0,
       taxPct: 0,
-      internalLogisticsCost: null as number | null,
+      internalLogisticsCost: 0 as number | null,
       additionalCostsPct: null as number | null,
       additionalCostsFixed: null as number | null
     };
@@ -100,14 +100,14 @@ describe("account financial settings wiring", () => {
     const zero = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}), {
       iibbPct: 0,
       taxPct: 0,
-      internalLogisticsCost: null,
+      internalLogisticsCost: 0,
       additionalCostsPct: null,
       additionalCostsFixed: null
     });
     const taxed = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}), {
       iibbPct: 0.02,
       taxPct: 0.03,
-      internalLogisticsCost: null,
+      internalLogisticsCost: 0,
       additionalCostsPct: null,
       additionalCostsFixed: null
     });

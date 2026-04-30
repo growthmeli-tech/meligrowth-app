@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
+import type { LogisticsCostBreakdown } from "@/lib/pricing/logistics-operating-cost";
 import { deriveSkuBusinessDecision, type SkuDecisionStateBase } from "@/lib/pricing/sku-decision-state";
+
+function logisticsRetireComplete(): LogisticsCostBreakdown {
+  return {
+    mode: "retire",
+    operatingCost: 0,
+    source: "retire_no_cost",
+    completeness: "complete",
+    missing: [],
+    reasons: []
+  };
+}
 
 function base(over: Partial<SkuDecisionStateBase> = {}): SkuDecisionStateBase {
   const d: SkuDecisionStateBase = {
@@ -98,6 +110,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       mlShippingAmount: 0,
       fulfillmentAmount: null,
       internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
       additionalCostsAmount: null,
       totalCost: 5000,
       netProfit: 100,
@@ -153,6 +167,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       mlShippingAmount: null,
       fulfillmentAmount: null,
       internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
       additionalCostsAmount: null,
       totalCost: 8000,
       netProfit: 2000,
@@ -196,6 +212,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       mlShippingAmount: 2000,
       fulfillmentAmount: null,
       internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
       additionalCostsAmount: null,
       totalCost: 12_000,
       netProfit: -2000,
@@ -246,6 +264,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       mlShippingAmount: 0,
       fulfillmentAmount: null,
       internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
       additionalCostsAmount: null,
       totalCost: 11_000,
       netProfit: -1000,
@@ -280,6 +300,113 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       })
     );
     expect(partial.impactAmount).toBeNull();
+  });
+
+  it("[2.5] flex logistics cost partial → complete_shipping_data", () => {
+    const lo: LogisticsCostBreakdown = {
+      mode: "flex",
+      operatingCost: null,
+      source: "missing_config",
+      completeness: "partial",
+      missing: ["flex_internal_logistics_cost"],
+      reasons: []
+    };
+    const ship = {
+      sellerShippingCost: 0,
+      source: "buyer_pays_shipping" as const,
+      completeness: "complete" as const,
+      priceBand: null,
+      weightBand: null,
+      reputationGroup: "unknown" as const,
+      missing: [] as string[],
+      reasons: [] as string[]
+    };
+    const b = {
+      productCost: 3000,
+      mlFeeAmount: 100,
+      mlFeePct: 0.1,
+      fixedUnitCost: null,
+      adsAmount: 0,
+      adsPct: 0,
+      iibbAmount: 0,
+      iibbPct: 0,
+      taxAmount: 0,
+      taxPct: 0,
+      mlShippingAmount: 0,
+      fulfillmentAmount: null,
+      internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: lo,
+      additionalCostsAmount: null,
+      totalCost: 4000,
+      netProfit: 6000,
+      netMarginPct: 0.6,
+      shipping: ship,
+      reasons: [],
+      missing: [] as string[]
+    };
+    const s = deriveSkuBusinessDecision(
+      base({
+        computed: {
+          ...base().computed,
+          financialBreakdown: b,
+          realProfit: 6000,
+          profitCompleteness: "net_partial"
+        }
+      })
+    );
+    expect(s.type).toBe("complete_shipping_data");
+    expect(s.message).toBe("Faltan costos logísticos");
+    expect(s.action).toBe("Configurar logística");
+  });
+
+  it("freeShipping false + package_weight listed does not trigger fix_shipping", () => {
+    const ship = {
+      sellerShippingCost: 0,
+      source: "buyer_pays_shipping" as const,
+      completeness: "complete" as const,
+      priceBand: null,
+      weightBand: null,
+      reputationGroup: "unknown" as const,
+      missing: ["package_weight"] as string[],
+      reasons: []
+    };
+    const b = {
+      productCost: 1000,
+      mlFeeAmount: 100,
+      mlFeePct: 0.1,
+      fixedUnitCost: null,
+      adsAmount: 0,
+      adsPct: 0,
+      iibbAmount: 0,
+      iibbPct: 0,
+      taxAmount: 0,
+      taxPct: 0,
+      mlShippingAmount: 0,
+      fulfillmentAmount: null,
+      internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
+      additionalCostsAmount: null,
+      totalCost: 2000,
+      netProfit: 8000,
+      netMarginPct: 0.8,
+      shipping: ship,
+      reasons: [],
+      missing: [] as string[]
+    };
+    const s = deriveSkuBusinessDecision(
+      base({
+        ml: { ...base().ml, freeShipping: false },
+        computed: {
+          ...base().computed,
+          financialBreakdown: b,
+          realProfit: 8000,
+          profitCompleteness: "net_full"
+        }
+      })
+    );
+    expect(s.type).not.toBe("fix_shipping");
   });
 
   it("[6] margin below target → fix_price medium", () => {

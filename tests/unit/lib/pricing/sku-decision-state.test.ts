@@ -4,7 +4,7 @@ import { buildSkuDecisionState } from "@/lib/pricing/sku-decision-state";
 function base(): Parameters<typeof buildSkuDecisionState>[0] {
   return {
     accountId: "acc-1",
-    financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+    financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 0 },
     ml: { itemId: "MLA1", title: "Producto test", sku: "SKU-1", freeShipping: false },
     inputs: { reputacion: "Verde / MercadoLíder" }
   };
@@ -194,5 +194,44 @@ describe("buildSkuDecisionState", () => {
       }
     });
     expect(s.decision.shippingMessage).not.toBe("Falta reputación ML");
+  });
+
+  it("Flex con costo interno cuenta vs Retiro aumenta costo total (misma publicación)", () => {
+    const fs = { iibbPct: 0, taxPct: 0, internalLogisticsCost: 1200 };
+    const ml = {
+      ...base().ml,
+      currentPrice: 22_000,
+      freeShipping: false,
+      packageWeightKg: 0.5,
+      condition: "new" as const
+    };
+    const flex = buildSkuDecisionState({
+      ...base(),
+      financialSettings: fs,
+      ml,
+      inputs: {
+        ...base().inputs,
+        productCost: 6000,
+        logistics: "Flex",
+        publicidadPct: 0,
+        targetMarginPct: 0.18
+      }
+    });
+    const retire = buildSkuDecisionState({
+      ...base(),
+      financialSettings: fs,
+      ml,
+      inputs: {
+        ...base().inputs,
+        productCost: 6000,
+        logistics: "Retiro domicilio",
+        publicidadPct: 0,
+        targetMarginPct: 0.18
+      }
+    });
+    expect(flex.computed.realProfit).not.toBeNull();
+    expect(retire.computed.realProfit).not.toBeNull();
+    expect((retire.computed.realProfit as number) - (flex.computed.realProfit as number)).toBeCloseTo(1200, 0);
+    expect((retire.computed.optimalPrice ?? 0) < (flex.computed.optimalPrice ?? 0)).toBe(true);
   });
 });

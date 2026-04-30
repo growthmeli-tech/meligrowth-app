@@ -82,6 +82,43 @@ describe("makeDecisionCacheKey", () => {
     };
     expect(makeDecisionCacheKey("sku-1", rated)).not.toBe(makeDecisionCacheKey("sku-1", noTier));
   });
+
+  it("changes when operator logistics (inputs.logistics) changes", () => {
+    const base = sampleInput();
+    const k0 = makeDecisionCacheKey("sku-1", base);
+    const retire: BuildSkuDecisionStateInput = {
+      ...base,
+      inputs: { ...base.inputs, logistics: "Retiro domicilio" }
+    };
+    expect(makeDecisionCacheKey("sku-1", retire)).not.toBe(k0);
+  });
+
+  it("changes when ml freeShipping changes", () => {
+    const base = sampleInput();
+    const k0 = makeDecisionCacheKey("sku-1", base);
+    const fsTrue: BuildSkuDecisionStateInput = {
+      ...base,
+      ml: { ...base.ml, freeShipping: true }
+    };
+    expect(makeDecisionCacheKey("sku-1", fsTrue)).not.toBe(k0);
+  });
+
+  it("changes when account financialSettings full cost fields change", () => {
+    const base = sampleInput();
+    const k0 = makeDecisionCacheKey("sku-1", base);
+    const withFull: BuildSkuDecisionStateInput = {
+      ...base,
+      financialSettings: {
+        iibbPct: 0,
+        taxPct: 0,
+        internalLogisticsCost: null,
+        fullFulfillmentCostPerUnit: 10,
+        fullStorageCostPerUnit: 20,
+        fullInboundCostPerUnit: 30
+      }
+    };
+    expect(makeDecisionCacheKey("sku-1", withFull)).not.toBe(k0);
+  });
 });
 
 describe("getCachedDecisionState", () => {

@@ -18,7 +18,10 @@ function financialSettingsKey(fs: SellerFinancialSettings | null | undefined): s
     keyNum(fs.internalLogisticsCost ?? undefined),
     keyNum(fs.fixedUnitCost ?? undefined),
     keyNum(fs.additionalCostsPct ?? undefined),
-    keyNum(fs.additionalCostsFixed ?? undefined)
+    keyNum(fs.additionalCostsFixed ?? undefined),
+    keyNum(fs.fullFulfillmentCostPerUnit ?? undefined),
+    keyNum(fs.fullStorageCostPerUnit ?? undefined),
+    keyNum(fs.fullInboundCostPerUnit ?? undefined)
   ].join("\x1e");
 }
 

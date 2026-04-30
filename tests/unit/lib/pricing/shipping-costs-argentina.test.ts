@@ -145,7 +145,6 @@ describe("Financial breakdown — shipping subtract", () => {
       financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
       skuAdditionalFixedCost: null,
       shipping: {
-        price: 40_000,
         packageWeightKg: 0.4,
         reputation: "yellow",
         shippingMode: "flex",
@@ -168,7 +167,6 @@ describe("Financial breakdown — shipping subtract", () => {
       financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
       skuAdditionalFixedCost: null,
       shipping: {
-        price: 40_000,
         packageWeightKg: null,
         reputation: "yellow",
         shippingMode: "flex",
@@ -187,7 +185,6 @@ describe("Financial breakdown — shipping subtract", () => {
       financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
       skuAdditionalFixedCost: null,
       shipping: {
-        price: 40_000,
         packageWeightKg: 0.4,
         reputation: "yellow",
         shippingMode: "flex",

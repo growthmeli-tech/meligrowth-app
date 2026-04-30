@@ -94,7 +94,8 @@ function buildInsights(items: UnifiedCatalogItem[]): string[] {
   const destroyers = items.filter((i) => i.decisionState.decision.profitabilityStatus === "loss" && i.price_ml !== null);
   if (destroyers.length) {
     const x = destroyers[0];
-    const ins = x.decisionState.decision.primaryInsight;
+    const bd = x.decisionState.businessDecision;
+    const ins = bd.type !== "hold" ? bd.message : x.decisionState.decision.primaryInsight;
     out.push(ins ?? `${x.item_id}: revisá precio o costo.`);
   }
   const sinCosto = items.filter((i) => !i.tiene_costo).length;

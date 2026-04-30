@@ -14,6 +14,7 @@ import {
   resolveSellerReputationForRow,
   type ShippingCostInput
 } from "@/lib/pricing/shipping-costs-argentina";
+import { resolveLogisticsOperatingCostBreakdown } from "@/lib/pricing/logistics-operating-cost";
 import { deriveSellerReputationStateFromPersistedAccount, type SellerReputationState } from "@/lib/pricing/seller-reputation-state";
 
 /** V3 forced single action — derived only from `SkuDecisionStateBase` (no recomputation). */
@@ -145,6 +146,8 @@ export type BuildSkuDecisionStateInput = {
     additionalCosts?: number | null;
     reputacion?: string | null;
     pesoKg?: number | null;
+    /** Costo interno Flex por unidad (SKU); prioridad sobre cuenta. */
+    rowInternalLogisticsCost?: number | null;
   };
 };
 
@@ -173,13 +176,19 @@ function mergeSellerFinancialSettings(
     internalLogisticsCost: base?.internalLogisticsCost ?? null,
     fixedUnitCost: base?.fixedUnitCost ?? null,
     additionalCostsPct: base?.additionalCostsPct ?? null,
-    additionalCostsFixed: base?.additionalCostsFixed ?? null
+    additionalCostsFixed: base?.additionalCostsFixed ?? null,
+    fullFulfillmentCostPerUnit: base?.fullFulfillmentCostPerUnit ?? null,
+    fullStorageCostPerUnit: base?.fullStorageCostPerUnit ?? null,
+    fullInboundCostPerUnit: base?.fullInboundCostPerUnit ?? null
   };
 }
 
 function netProfitCompleteFromBreakdown(b: FinancialCostBreakdown | null, freeShipping: boolean | null): boolean {
   if (!b) return false;
   const fiscalOk = !b.missing.includes("iibb") && !b.missing.includes("tax");
+  const logisticsOk =
+    b.logisticsOperating.completeness === "complete" || b.logisticsOperating.source === "retire_no_cost";
+  if (!logisticsOk) return false;
   if (freeShipping === false) {
     return fiscalOk;
   }
@@ -219,7 +228,8 @@ function solveBreakEvenPrice(
   logistica: LogisticaType,
   rep: string,
   publicidadPct: number | null | undefined,
-  shippingOmit: () => Omit<ShippingCostInput, "price">
+  shippingOmit: () => Omit<ShippingCostInput, "price">,
+  rowInternalLogisticsCost: number | null
 ): number | null {
   if (!Number.isFinite(productCost) || productCost <= 0) return null;
 
@@ -233,7 +243,8 @@ function solveBreakEvenPrice(
       peso_kg: null,
       financialSettings: financialMerged,
       skuAdditionalFixedCost,
-      shipping: shippingOmit()
+      shipping: shippingOmit(),
+      rowInternalLogisticsCost
     });
 
   let hi = Math.max(500, productCost * 4);
@@ -584,14 +595,25 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
     };
   }
 
+  const lo = b?.logisticsOperating;
+  if (lo && lo.completeness === "partial" && (lo.mode === "flex" || lo.mode === "full")) {
+    return {
+      type: "complete_shipping_data",
+      priority: "high",
+      message: "Faltan costos logísticos",
+      action: "Configurar logística",
+      impactAmount: null
+    };
+  }
+
   const freeTrue = state.ml.freeShipping === true;
   const missWeight = shipMiss.includes("package_weight");
   const missPriceBand = shipMiss.includes("price");
   const missReputationGroup = shipMiss.includes("ml_reputation");
   const shippingIncompleteForFree = freeTrue && (!ship || ship.completeness !== "complete");
 
-  // [3] SHIPPING MODEL VALIDATION (ML compliance)
-  if (shippingIncompleteForFree || missWeight || missPriceBand || missReputationGroup) {
+  // [3] SHIPPING MODEL VALIDATION (ML compliance) — datos tabla solo si envío gratis
+  if (shippingIncompleteForFree || (freeTrue && (missWeight || missPriceBand || missReputationGroup))) {
     return {
       type: "fix_shipping",
       priority: "high",
@@ -700,6 +722,13 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
         ? null
         : input.inputs.additionalCosts;
 
+  const rowInternalLogisticsCost =
+    input.inputs.rowInternalLogisticsCost !== undefined &&
+    input.inputs.rowInternalLogisticsCost !== null &&
+    Number.isFinite(input.inputs.rowInternalLogisticsCost)
+      ? Number(input.inputs.rowInternalLogisticsCost)
+      : null;
+
   const mergedFinancial = mergeSellerFinancialSettings(
     input.financialSettings ?? null,
     input.inputs.taxPct,
@@ -709,6 +738,14 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const logistica = resolveLogistics(input.inputs.logistics ?? null);
   const rep = coerceReputacion(input.inputs.reputacion ?? null);
   const pesoKg = input.inputs.pesoKg ?? null;
+
+  const loForOptimal = resolveLogisticsOperatingCostBreakdown({
+    logistica,
+    financialSettings: mergedFinancial,
+    rowInternalLogisticsCost
+  });
+  const logisticsIncompleteForOptimal =
+    loForOptimal.completeness === "partial" && (loForOptimal.mode === "flex" || loForOptimal.mode === "full");
 
   const acc = input.accountReputation;
   const accountReputationState = deriveSellerReputationStateFromPersistedAccount(
@@ -784,7 +821,12 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
 
   let optimalPrice: number | null = null;
   let sellResult: ReturnType<typeof calcSellingPrice> | null = null;
-  if (productCost !== null && productCost > 0 && targetMarginValid !== null) {
+  if (
+    productCost !== null &&
+    productCost > 0 &&
+    targetMarginValid !== null &&
+    !logisticsIncompleteForOptimal
+  ) {
     sellResult = calcSellingPrice({
       costo: productCost,
       logistica,
@@ -793,6 +835,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       reputacion: rep,
       financialSettings: mergedFinancial,
       skuAdditionalFixedCost: additionalCosts,
+      rowInternalLogisticsCost,
       sellerShippingAtPrice: (p) => {
         const e = estimateSellerShippingCostAr({ ...shippingOmit(), price: p });
         return e.completeness === "complete" && e.sellerShippingCost !== null ? e.sellerShippingCost : 0;
@@ -803,6 +846,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     } else if (calculationStatus === "valid") {
       calculationStatus = "error";
     }
+  } else if (productCost !== null && productCost > 0 && targetMarginValid !== null && logisticsIncompleteForOptimal) {
+    if (calculationStatus === "valid") calculationStatus = "partial";
   }
 
   let realProfit: number | null = null;
@@ -831,7 +876,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       peso_kg: pesoKg,
       financialSettings: mergedFinancial,
       skuAdditionalFixedCost: additionalCosts,
-      shipping: shippingOmit()
+      shipping: shippingOmit(),
+      rowInternalLogisticsCost
     });
     financialBreakdown = rp.breakdown;
     profitCompleteness = netProfitCompleteFromBreakdown(rp.breakdown, input.ml.freeShipping ?? null)
@@ -841,7 +887,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       calculationStatus === "valid" &&
       (rp.breakdown.missing.includes("iibb") ||
         rp.breakdown.missing.includes("tax") ||
-        rp.breakdown.missing.some((x) => x.startsWith("shipping_")))
+        rp.breakdown.missing.some((x) => x.startsWith("shipping_")) ||
+        rp.breakdown.missing.some((x) => x.startsWith("logistics_")))
     ) {
       calculationStatus = "partial";
     }
@@ -875,7 +922,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
           logistica,
           rep,
           publicidadPct,
-          shippingOmit
+          shippingOmit,
+          rowInternalLogisticsCost
         )
       : null;
 

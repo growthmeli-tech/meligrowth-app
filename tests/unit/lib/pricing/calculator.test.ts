@@ -249,6 +249,138 @@ describe("Motor ML — FinancialCostBreakdown / fiscal", () => {
   });
 });
 
+describe("Motor ML — logistics operating + shipping separation", () => {
+  const shipFree = {
+    packageWeightKg: 0.5 as number,
+    reputation: "yellow" as const,
+    shippingMode: "flex" as const,
+    freeShipping: true as const,
+    condition: "new" as const
+  };
+
+  it("Retiro → logistics operating 0; internalLogistics cuenta no aplica", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 30_000,
+      productCost: 10_000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 5000 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.logisticsOperating.source).toBe("retire_no_cost");
+    expect(b.logisticsOperatingAmount).toBeNull();
+    expect(b.internalLogisticsAmount).toBeNull();
+    expect(b.shipping.sellerShippingCost).toBe(0);
+  });
+
+  it("Flex + internalLogisticsCost 3000 → resta 3000 del total", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 30_000,
+      productCost: 10_000,
+      logistica: "Flex",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 3000 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.logisticsOperating.operatingCost).toBe(3000);
+    expect(b.totalCost).not.toBeNull();
+    expect(b.netProfit).not.toBeNull();
+    const fee = 30_000 * 0.1375;
+    expect(b.totalCost).toBeCloseTo(10_000 + fee + 3000, 0);
+  });
+
+  it("Flex sin internal → partial y missing logistics_", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 20_000,
+      productCost: 5000,
+      logistica: "Flex",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.logisticsOperating.completeness).toBe("partial");
+    expect(b.missing.some((m) => m.startsWith("logistics_"))).toBe(true);
+  });
+
+  it("freeShipping false + Flex → seller ship 0; operating Flex configurado", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 25_000,
+      productCost: 8000,
+      logistica: "Flex",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 500 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.shipping.source).toBe("buyer_pays_shipping");
+    expect(b.mlShippingAmount).toBe(0);
+    expect(b.logisticsOperating.operatingCost).toBe(500);
+  });
+
+  it("freeShipping true + Flex → sellerShipping + logisticsOperating", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 30_000,
+      productCost: 10_000,
+      logistica: "Flex",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 400 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: true }
+    });
+    expect(b.shipping.source).toBe("ml_ar_table_estimate");
+    expect(b.shipping.sellerShippingCost).not.toBeNull();
+    expect(b.logisticsOperating.operatingCost).toBe(400);
+    expect(b.totalCost).not.toBeNull();
+    expect((b.totalCost as number) > 10_000).toBe(true);
+  });
+
+  it("freeShipping false + Full sin costos Full → operating partial, seller ship 0", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 40_000,
+      productCost: 12_000,
+      logistica: "Full",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 999 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.shipping.sellerShippingCost).toBe(0);
+    expect(b.logisticsOperating.mode).toBe("full");
+    expect(b.logisticsOperating.completeness).toBe("partial");
+  });
+
+  it("Full con tres costos → suma en total", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 50_000,
+      productCost: 15_000,
+      logistica: "Full",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: {
+        iibbPct: 0,
+        taxPct: 0,
+        internalLogisticsCost: null,
+        fullFulfillmentCostPerUnit: 200,
+        fullStorageCostPerUnit: 50,
+        fullInboundCostPerUnit: 25
+      },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.logisticsOperating.operatingCost).toBe(275);
+    expect(b.totalCost).not.toBeNull();
+  });
+});
+
 describe("Motor ML — calcStockStatus", () => {
   it("stock 0 → crítico", () => {
     expect(calcStockStatus({ stock_actual: 0, ventas_30d: 30 }).status).toBe("critico");
