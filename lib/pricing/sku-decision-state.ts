@@ -16,7 +16,22 @@ import {
 } from "@/lib/pricing/shipping-costs-argentina";
 import { deriveSellerReputationStateFromPersistedAccount, type SellerReputationState } from "@/lib/pricing/seller-reputation-state";
 
-export type SkuDecisionState = {
+/** V3 forced single action — derived only from `SkuDecisionStateBase` (no recomputation). */
+export type SkuBusinessDecision = {
+  type:
+    | "configure_fiscal"
+    | "complete_shipping_data"
+    | "fix_shipping"
+    | "fix_price"
+    | "replenish_stock"
+    | "hold";
+  priority: "critical" | "high" | "medium" | "low";
+  message: string;
+  action: string;
+  impactAmount: number | null;
+};
+
+export type SkuDecisionStateBase = {
   ml: {
     accountId: string;
     itemId: string | null;
@@ -86,6 +101,10 @@ export type SkuDecisionState = {
   sync: {
     calculationStatus: "valid" | "partial" | "missing_inputs" | "error";
   };
+};
+
+export type SkuDecisionState = SkuDecisionStateBase & {
+  businessDecision: SkuBusinessDecision;
 };
 
 export type BuildSkuDecisionStateInput = {
@@ -534,6 +553,123 @@ function pickShippingShortSignal(
   return { msg: null, action: null };
 }
 
+/**
+ * V3 enterprise decision: exactly one outcome, strict precedence graph (directive).
+ * Read-only on orchestration outputs — no calculator / shipping / API calls.
+ */
+export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusinessDecision {
+  // [1] SYSTEM BLOCKERS
+  if (state.sync.calculationStatus === "error" || state.sync.calculationStatus === "missing_inputs") {
+    return {
+      type: "complete_shipping_data",
+      priority: "critical",
+      message: "No se puede calcular este producto",
+      action: "Completar datos",
+      impactAmount: null
+    };
+  }
+
+  const b = state.computed.financialBreakdown;
+  const ship = b?.shipping;
+  const shipMiss = ship?.missing ?? [];
+
+  // [2] FISCAL INTEGRITY
+  if (b && (b.missing.includes("iibb") || b.missing.includes("tax"))) {
+    return {
+      type: "configure_fiscal",
+      priority: "high",
+      message: "Falta configuración fiscal",
+      action: "Configurar impuestos",
+      impactAmount: null
+    };
+  }
+
+  const freeTrue = state.ml.freeShipping === true;
+  const missWeight = shipMiss.includes("package_weight");
+  const missPriceBand = shipMiss.includes("price");
+  const missReputationGroup = shipMiss.includes("ml_reputation");
+  const shippingIncompleteForFree = freeTrue && (!ship || ship.completeness !== "complete");
+
+  // [3] SHIPPING MODEL VALIDATION (ML compliance)
+  if (shippingIncompleteForFree || missWeight || missPriceBand || missReputationGroup) {
+    return {
+      type: "fix_shipping",
+      priority: "high",
+      message: "El envío gratis está mal configurado",
+      action: "Corregir envío",
+      impactAmount: null
+    };
+  }
+
+  const netProfit = state.computed.realProfit;
+
+  // [4] SHIPPING STRATEGY BREAK (strictly after [3] so “complete” path still evaluated)
+  if (freeTrue && netProfit !== null && netProfit < 0) {
+    return {
+      type: "fix_shipping",
+      priority: "critical",
+      message: "No podés vender con envío gratis",
+      action: "Quitar envío gratis",
+      impactAmount: null
+    };
+  }
+
+  const netFull = state.computed.profitCompleteness === "net_full";
+
+  // [5] PRICE FAILURE
+  if (netProfit !== null && netProfit < 0) {
+    return {
+      type: "fix_price",
+      priority: "critical",
+      message: "Estás perdiendo dinero",
+      action: "Subir precio",
+      impactAmount: netFull ? netProfit : null
+    };
+  }
+
+  const realMargin = state.computed.realMarginPct;
+  const targetMargin = state.inputs.targetMarginPct;
+
+  // [6] MARGIN OPTIMIZATION
+  if (
+    netProfit !== null &&
+    netProfit >= 0 &&
+    realMargin !== null &&
+    targetMargin !== null &&
+    Number.isFinite(realMargin) &&
+    Number.isFinite(targetMargin) &&
+    realMargin < targetMargin
+  ) {
+    return {
+      type: "fix_price",
+      priority: "medium",
+      message: "Margen bajo",
+      action: "Optimizar precio",
+      impactAmount: null
+    };
+  }
+
+  // [7] STOCK DECISION
+  if (state.decision.stockStatus === "critical") {
+    return {
+      type: "replenish_stock",
+      priority: "medium",
+      message: "Stock crítico",
+      action: "Reponer stock",
+      impactAmount: null
+    };
+  }
+
+  // [8] DEFAULT
+  return {
+    type: "hold",
+    priority: "low",
+    message: "Todo en orden",
+    action: "Mantener",
+    impactAmount: null
+  };
+}
+
 export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDecisionState {
   const accountId = input.accountId;
   const publicidadPct = input.inputs.publicidadPct ?? 0;
@@ -798,7 +934,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     realProfit
   });
 
-  return {
+  const base: SkuDecisionStateBase = {
     ml,
     inputs: inputsOut,
     computed: {
@@ -831,5 +967,10 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       shippingAction: shipSig.action
     },
     sync: { calculationStatus }
+  };
+
+  return {
+    ...base,
+    businessDecision: deriveSkuBusinessDecision(base)
   };
 }
