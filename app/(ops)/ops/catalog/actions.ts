@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { generateMasterCatalogExcel } from "@/lib/exports/master-catalog-export";
 import { getValidAccessToken } from "@/lib/ml/auth";
+import { pushPriceToML } from "@/lib/ml/endpoints/catalog";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
 import { linkPricingSkuToItem } from "@/lib/data-v2/unified-catalog";
@@ -191,6 +192,82 @@ export async function linkSkuToItem(mlAccountId: string, itemId: string, pricing
   revalidatePath("/ops/pricing");
   revalidatePath("/ops/dashboard");
   return { success: true, data: undefined };
+}
+
+export async function pushOptimalPriceToML(
+  mlAccountId: string,
+  itemId: string,
+  newPrice: number
+): Promise<ActionResult<{ item_id: string; new_price: number }>> {
+  const gate = await gateMlAccount(mlAccountId);
+  if (!gate.success) return gate;
+
+  if (!Number.isFinite(newPrice) || newPrice <= 0) {
+    return { success: false, error: "Precio objetivo inválido." };
+  }
+
+  const supabase = gate.data.supabase;
+  const { data: itemRow, error: itemErr } = await supabase
+    .from("ml_catalog_items")
+    .select("status, item_id")
+    .eq("ml_account_id", mlAccountId)
+    .eq("item_id", itemId)
+    .maybeSingle();
+
+  if (itemErr || !itemRow) {
+    return { success: false, error: "Publicación no encontrada." };
+  }
+  if (String(itemRow.status ?? "").toLowerCase() !== "active") {
+    return { success: false, error: "Solo se puede actualizar precio en publicaciones activas." };
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getValidAccessToken("", mlAccountId);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "No se pudo obtener token ML" };
+  }
+
+  const push = await pushPriceToML(itemId, newPrice, accessToken);
+  const nowIso = new Date().toISOString();
+
+  if (push.success && push.new_price !== null) {
+    const { error: updErr } = await supabase
+      .from("ml_catalog_items")
+      .update({
+        price: push.new_price,
+        last_price_push_at: nowIso,
+        last_price_push_value: push.new_price,
+        last_price_push_status: "success"
+      })
+      .eq("ml_account_id", mlAccountId)
+      .eq("item_id", itemId);
+
+    if (updErr) {
+      logServerError("catalog.pushOptimalPriceToML.db_success", updErr, { mlAccountId, itemId });
+    }
+    revalidatePath("/ops/catalog");
+    revalidatePath("/ops/pricing");
+    revalidatePath("/ops/dashboard");
+    return { success: true, data: { item_id: itemId, new_price: push.new_price } };
+  }
+
+  const { error: errUpd } = await supabase
+    .from("ml_catalog_items")
+    .update({
+      last_price_push_at: nowIso,
+      last_price_push_status: "error"
+    })
+    .eq("ml_account_id", mlAccountId)
+    .eq("item_id", itemId);
+
+  if (errUpd) {
+    logServerError("catalog.pushOptimalPriceToML.db_error", errUpd, { mlAccountId, itemId });
+  }
+
+  revalidatePath("/ops/catalog");
+  revalidatePath("/ops/pricing");
+  return { success: false, error: push.error ?? "Error al actualizar precio en ML" };
 }
 
 export async function bulkMarkNoAds(mlAccountId: string, pricingSkuIds: string[]): Promise<ActionResult<{ updated: number }>> {

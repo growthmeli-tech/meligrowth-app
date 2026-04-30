@@ -35,7 +35,8 @@ describe("computeUnifiedCatalogDerived", () => {
       pricing_sku_id: null,
       seller_custom_field: null,
       item_id: "MLA123",
-      sold_quantity: 0
+      sold_quantity: 0,
+      ventas_30d: null as number | null
     };
     const d = computeUnifiedCatalogDerived(ml, basePricing({}));
     expect(d.ganancia_real).not.toBeNull();
@@ -54,7 +55,8 @@ describe("computeUnifiedCatalogDerived", () => {
       pricing_sku_id: null,
       seller_custom_field: null,
       item_id: "MLA999",
-      sold_quantity: null
+      sold_quantity: null,
+      ventas_30d: null as number | null
     };
     const d = computeUnifiedCatalogDerived(ml, basePricing({ publicidad_pct: 10, margen_pct: 15 }));
     expect(d.publicidad_real).toBeCloseTo(3000, 1);
@@ -68,7 +70,8 @@ describe("computeUnifiedCatalogDerived", () => {
       pricing_sku_id: null,
       seller_custom_field: null,
       item_id: "MLA777",
-      sold_quantity: null
+      sold_quantity: null,
+      ventas_30d: null as number | null
     };
     const d = computeUnifiedCatalogDerived(ml, null);
     expect(d.tiene_costo).toBe(false);

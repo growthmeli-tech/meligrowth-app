@@ -1,4 +1,4 @@
-import { mlFetch } from "@/lib/ml/client";
+import { mlFetch, MlApiError } from "@/lib/ml/client";
 import type { MlItemCatalogBody, MlItemsMultiEntry, MlListingsSearchResponse } from "@/lib/ml/mappers/types";
 
 const SEARCH_PAGE = 50;
@@ -198,4 +198,72 @@ export async function getItemCatalog(
   });
 
   return catalog;
+}
+
+export interface PricePushResult {
+  item_id: string;
+  success: boolean;
+  new_price: number | null;
+  error: string | null;
+  ml_status: number | null;
+}
+
+/**
+ * Updates listing price via ML API. Never throws.
+ */
+export async function pushPriceToML(
+  itemId: string,
+  newPrice: number,
+  accessToken: string
+): Promise<PricePushResult> {
+  if (!Number.isFinite(newPrice) || newPrice <= 0) {
+    console.info("[ml-price-push]", { itemId, newPrice, success: false });
+    return {
+      item_id: itemId,
+      success: false,
+      new_price: null,
+      error: "Precio inválido",
+      ml_status: null
+    };
+  }
+
+  const rounded = Math.round(newPrice);
+
+  try {
+    await mlFetch<Record<string, unknown>>(`/items/${itemId}`, {
+      token: accessToken,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: rounded })
+    });
+    console.info("[ml-price-push]", { itemId, newPrice: rounded, success: true });
+    return {
+      item_id: itemId,
+      success: true,
+      new_price: rounded,
+      error: null,
+      ml_status: 200
+    };
+  } catch (e) {
+    const ml_status = e instanceof MlApiError ? e.statusCode : null;
+    let errorMsg = e instanceof Error ? e.message : String(e);
+    if (e instanceof MlApiError) {
+      try {
+        const raw = errorMsg.replace(/^ML API error \d+: /, "");
+        const parsed = JSON.parse(raw) as { message?: string; error?: string; cause?: unknown };
+        if (typeof parsed.message === "string") errorMsg = parsed.message;
+        else if (typeof parsed.error === "string") errorMsg = parsed.error;
+      } catch {
+        /* keep message */
+      }
+    }
+    console.info("[ml-price-push]", { itemId, newPrice: rounded, success: false });
+    return {
+      item_id: itemId,
+      success: false,
+      new_price: null,
+      error: errorMsg,
+      ml_status
+    };
+  }
 }

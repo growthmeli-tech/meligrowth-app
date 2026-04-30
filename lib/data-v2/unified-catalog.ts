@@ -108,6 +108,7 @@ type MlSlice = {
   seller_custom_field: string | null;
   item_id: string;
   sold_quantity: number | null;
+  ventas_30d: number | null;
 };
 
 /**
@@ -169,7 +170,10 @@ export function computeUnifiedCatalogDerived(
   }
 
   const stock = ml.available_quantity === null || ml.available_quantity === undefined ? null : Number(ml.available_quantity);
-  const ventas_30d: number | null = null;
+  const ventas_30d =
+    ml.ventas_30d === null || ml.ventas_30d === undefined || Number.isNaN(Number(ml.ventas_30d))
+      ? null
+      : Number(ml.ventas_30d);
 
   const stockInfo =
     stock === null
@@ -266,7 +270,9 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
         pricing_sku_id: row.pricing_sku_id,
         seller_custom_field: row.seller_custom_field,
         item_id: row.item_id,
-        sold_quantity: row.sold_quantity
+        sold_quantity: row.sold_quantity,
+        ventas_30d:
+          row.ventas_30d === null || row.ventas_30d === undefined ? null : Number(row.ventas_30d)
       },
       pricing
     );

@@ -1,4 +1,5 @@
 import { getItemCatalog } from "@/lib/ml/endpoints/catalog";
+import { getSalesLast30Days } from "@/lib/ml/endpoints/sales";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -60,6 +61,29 @@ export async function syncMlCatalog(
     }
   }
 
+  const salesData = await getSalesLast30Days(sellerId, accessToken).catch((err) => {
+    console.error("[ml-sales:sync_failed]", err);
+    return [];
+  });
+
+  if (salesData.length > 0) {
+    for (const sale of salesData) {
+      const { error: updSalesErr } = await supabase
+        .from("ml_catalog_items")
+        .update({
+          ventas_30d: sale.units_sold_30d,
+          revenue_30d: sale.revenue_30d,
+          last_sale_date: sale.last_sale_date
+        })
+        .eq("ml_account_id", mlAccountId)
+        .eq("item_id", sale.item_id);
+      if (updSalesErr) {
+        console.error("[ml-sales:update_row]", { mlAccountId, item_id: sale.item_id, message: updSalesErr.message });
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
   const durationMs = Date.now() - started;
 
   console.info("[ml-catalog:sync_complete]", {
@@ -68,7 +92,8 @@ export async function syncMlCatalog(
     synced,
     errors,
     durationMs,
-    fetched: items.length
+    fetched: items.length,
+    salesRows: salesData.length
   });
 
   return { synced, errors, durationMs };

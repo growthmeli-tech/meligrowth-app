@@ -10,12 +10,14 @@ import {
   bulkMarkNoAds,
   exportMasterCatalog,
   linkSkuToItem,
+  pushOptimalPriceToML,
   saveCostForItem,
   triggerCatalogSync
 } from "@/app/(ops)/ops/catalog/actions";
 import {
   calcRealProfit,
   calcSellingPrice,
+  calcStockStatus,
   coerceReputacion,
   mlComisionRate,
   normalizePct,
@@ -655,6 +657,31 @@ function CatalogRows({
 
   const [linkId, setLinkId] = useState("");
   const [hint, setHint] = useState<string | null>(null);
+  const [mlPushOpen, setMlPushOpen] = useState(false);
+
+  const stockIntel =
+    row.stock !== null && row.ventas_30d !== null && row.ventas_30d !== undefined
+      ? calcStockStatus({
+          stock_actual: row.stock,
+          ventas_30d: row.ventas_30d,
+          safety_pct: 0.2
+        })
+      : null;
+  const dailySales =
+    row.stock !== null && row.ventas_30d !== null && row.ventas_30d > 0 ? row.ventas_30d / 30 : null;
+  const daysStock =
+    dailySales !== null && dailySales > 0 && row.stock !== null
+      ? Math.round((row.stock / dailySales) * 100) / 100
+      : null;
+
+  const canPushMlPrice =
+    row.status === "active" &&
+    row.tiene_costo &&
+    row.precio_calculado !== null &&
+    row.price_ml !== null &&
+    Number.isFinite(row.precio_calculado) &&
+    Number.isFinite(row.price_ml) &&
+    Math.round(row.precio_calculado) !== Math.round(row.price_ml);
 
   const comisionPctLabel = `${(mlComisionRate(rep) * 100).toFixed(2)}%`;
   const envioLabel = row.logistic_type ?? row.logistica ?? "—";
@@ -707,37 +734,89 @@ function CatalogRows({
           <div className="text-xs text-[#6B6B6B]">{margenRealLabel}</div>
         </td>
         <td className="p-2 text-xs">
-          {rowAction.kind === "config_cost" ? (
-            <button
-              type="button"
-              className="font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
-              onClick={() => {
-                setInlineCostOpen(!inlineCostOpen);
-                setInlineCalcOpen(false);
-              }}
-            >
-              Configurar →
-            </button>
-          ) : rowAction.kind === "sin_stock" ? (
-            <span className="font-semibold text-amber-900">⚠ Sin stock</span>
-          ) : rowAction.kind === "calc" ? (
-            <button
-              type="button"
-              className={cn(
-                "font-semibold underline underline-offset-2",
-                rowAction.reason === "pierde" ? "text-red-800 decoration-red-800" : "text-[#1A1A1A] decoration-[#1A1A1A]"
-              )}
-              onClick={openCalculator}
-            >
-              {rowAction.reason === "pierde"
-                ? "🔴 Pierde dinero"
-                : rowAction.reason === "optimizar"
-                  ? "📈 Optimizar precio"
-                  : "↑ Subir precio"}
-            </button>
-          ) : (
-            <span className="text-[#6B6B6B]"> </span>
-          )}
+          <div className="flex flex-col gap-2">
+            {rowAction.kind === "config_cost" ? (
+              <button
+                type="button"
+                className="font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
+                onClick={() => {
+                  setInlineCostOpen(!inlineCostOpen);
+                  setInlineCalcOpen(false);
+                }}
+              >
+                Configurar →
+              </button>
+            ) : rowAction.kind === "sin_stock" ? (
+              <span className="font-semibold text-amber-900">⚠ Sin stock</span>
+            ) : rowAction.kind === "calc" ? (
+              <button
+                type="button"
+                className={cn(
+                  "font-semibold underline underline-offset-2",
+                  rowAction.reason === "pierde" ? "text-red-800 decoration-red-800" : "text-[#1A1A1A] decoration-[#1A1A1A]"
+                )}
+                onClick={openCalculator}
+              >
+                {rowAction.reason === "pierde"
+                  ? "🔴 Pierde dinero"
+                  : rowAction.reason === "optimizar"
+                    ? "📈 Optimizar precio"
+                    : "↑ Subir precio"}
+              </button>
+            ) : (
+              <span className="text-[#6B6B6B]"> </span>
+            )}
+
+            {canPushMlPrice && row.precio_calculado !== null && row.price_ml !== null ? (
+              <div className="border-t border-[#E8E8E2] pt-2">
+                {!mlPushOpen ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    className="rounded-lg border border-[#1A1A1A] bg-[#FFD600] px-2 py-1 font-semibold text-[#1A1A1A] disabled:opacity-50"
+                    onClick={() => setMlPushOpen(true)}
+                  >
+                    ↑ ML: {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
+                  </button>
+                ) : (
+                  <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-2">
+                    <p className="font-semibold text-[#1A1A1A]">¿Actualizar precio en ML?</p>
+                    <p className="tabular-nums">
+                      {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        className="rounded-lg bg-[#1A1A1A] px-2 py-1 font-semibold text-white disabled:opacity-50"
+                        onClick={() => {
+                          startTransition(async () => {
+                            const res = await pushOptimalPriceToML(mlAccountId, row.item_id, row.precio_calculado!);
+                            if (!res.success) {
+                              setHint(res.error ?? "Error al publicar precio");
+                              return;
+                            }
+                            setMlPushOpen(false);
+                            setHint(null);
+                            onSaved();
+                          });
+                        }}
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[#E8E8E2] px-2 py-1 font-semibold"
+                        onClick={() => setMlPushOpen(false)}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
         </td>
         <td className="p-2">
           <button type="button" onClick={onToggleExpand} className="grid place-items-center rounded border border-[#E8E8E2] p-1" aria-expanded={expanded}>
@@ -952,12 +1031,45 @@ function CatalogRows({
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Stock</p>
                 <p>Stock actual: {row.stock === null ? "—" : `${row.stock} unidad${row.stock === 1 ? "" : "es"}`}</p>
-                <p>Ventas 30d: {row.ventas_30d === null ? "Sin datos" : row.ventas_30d}</p>
-                <p className="text-[#6B6B6B]">
-                  {row.ventas_30d === null
-                    ? "Estado: Saludable (sin histórico de ventas en ítem)."
-                    : `Estado: ${row.stock_status ?? "—"} · Urgencia ${row.stock_urgency ?? "—"}`}
-                </p>
+                {row.ventas_30d !== null && row.ventas_30d !== undefined ? (
+                  <>
+                    <p>Ventas 30d: {row.ventas_30d} unidades</p>
+                    {row.stock !== null && dailySales !== null && dailySales > 0 ? (
+                      <>
+                        <p>Velocidad: {dailySales.toFixed(1)} und/día</p>
+                        {stockIntel && daysStock !== null ? (
+                          <p>
+                            Días de stock: {daysStock} →{" "}
+                            <span className="font-bold uppercase">
+                              {stockIntel.status === "critico"
+                                ? "CRÍTICO"
+                                : stockIntel.status === "reponer"
+                                  ? "REPONER"
+                                  : stockIntel.status === "exceso"
+                                    ? "EXCESO"
+                                    : "OK"}
+                            </span>
+                          </p>
+                        ) : null}
+                        {row.stock === 0 ? (
+                          <p>
+                            Días de stock: 0 → <span className="font-bold uppercase">CRÍTICO</span>
+                          </p>
+                        ) : null}
+                      </>
+                    ) : row.stock !== null ? (
+                      <p>Velocidad: 0 und/día (sin ventas en 30d)</p>
+                    ) : null}
+                    {row.stock !== null && stockIntel && stockIntel.units_to_buy > 0 ? (
+                      <p>Reponer: {stockIntel.units_to_buy} unidades</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <p>Ventas 30d: Sincronizando…</p>
+                    <p className="text-[#6B6B6B]">Estado: Se calculará tras el próximo sync</p>
+                  </>
+                )}
                 {row.permalink ? (
                   <p>
                     <a href={row.permalink} className="font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">

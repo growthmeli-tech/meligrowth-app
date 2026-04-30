@@ -4,8 +4,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { mapPricingSkusToMlLinks, listUnifiedCatalog, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
-import { weightedMargenPctFromPricingSkus } from "@/lib/pricing/stats";
-
 export default async function OpsPricingPage() {
   const accountResult = await getPrimaryAccountForOperator();
   if (!accountResult.success || !accountResult.data) {
@@ -27,7 +25,6 @@ export default async function OpsPricingPage() {
     : {};
 
   const rows = skusResult.data;
-  const weighted = weightedMargenPctFromPricingSkus(rows);
 
   if (rows.length === 0) {
     return (
@@ -53,7 +50,7 @@ export default async function OpsPricingPage() {
 
   return (
     <main>
-      <PricingEngineTable rows={rows} weightedMargenPct={weighted} mlLinks={mlLinksRecord} />
+      <PricingEngineTable rows={rows} mlLinks={mlLinksRecord} mlAccountId={accountResult.data.id} />
     </main>
   );
 }

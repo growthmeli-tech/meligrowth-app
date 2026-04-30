@@ -676,6 +676,12 @@ export type Database = {
           pricing_sku_id: string | null;
           last_synced_at: string;
           created_at: string;
+          ventas_30d: number | null;
+          revenue_30d: number | null;
+          last_sale_date: string | null;
+          last_price_push_at: string | null;
+          last_price_push_value: number | null;
+          last_price_push_status: "pending" | "success" | "error" | null;
         };
         Insert: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]> & {
           ml_account_id: string;
