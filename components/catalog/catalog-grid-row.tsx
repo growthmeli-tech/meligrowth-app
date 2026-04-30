@@ -4,6 +4,7 @@ import { memo, useRef, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { cn } from "@/lib/utils";
+import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -108,7 +109,11 @@ function CatalogGridRowInner({
         : "—";
 
   const margenRealLabel =
-    !row.tiene_costo || ds.computed.realMarginPct === null ? "—" : `${(ds.computed.realMarginPct * 100).toFixed(1)}% real`;
+    !row.tiene_costo || ds.computed.realMarginPct === null
+      ? "—"
+      : `${(ds.computed.realMarginPct * 100).toFixed(1)}% real${
+          netMarginDisplayLabel(ds.computed) ? ` · ${netMarginDisplayLabel(ds.computed)}` : ""
+        }`;
 
   const pierde = ds.decision.profitabilityStatus === "loss";
   const riesgoMargen = ds.decision.profitabilityStatus === "risk" || ds.decision.profitabilityStatus === "low_margin";

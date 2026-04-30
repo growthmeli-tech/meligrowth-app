@@ -8,6 +8,47 @@ export const COMISION_ML_NARANJA = 0.12;
 export type LogisticaType = MargenesRow["logistica"];
 export type ReputacionType = MargenesRow["reputacion"];
 
+/** Account-level fiscal / overhead inputs (no DB required — passed into `buildSkuDecisionState`). */
+export type SellerFinancialSettings = {
+  iibbPct: number | null;
+  taxPct: number | null;
+  internalLogisticsCost: number | null;
+  fixedUnitCost?: number | null;
+  additionalCostsPct?: number | null;
+  additionalCostsFixed?: number | null;
+};
+
+export type FinancialCostBreakdown = {
+  productCost: number | null;
+
+  mlFeeAmount: number | null;
+  mlFeePct: number | null;
+
+  fixedUnitCost: number | null;
+
+  adsAmount: number;
+  adsPct: number;
+
+  iibbAmount: number | null;
+  iibbPct: number | null;
+
+  taxAmount: number | null;
+  taxPct: number | null;
+
+  mlShippingAmount: number | null;
+  fulfillmentAmount: number | null;
+  internalLogisticsAmount: number | null;
+
+  additionalCostsAmount: number | null;
+
+  totalCost: number | null;
+  netProfit: number | null;
+  netMarginPct: number | null;
+
+  reasons: string[];
+  missing: string[];
+};
+
 export function normalizePct(v: number | null | undefined): number {
   if (v === null || v === undefined) return 0;
   return v > 1 ? v / 100 : v;
@@ -43,19 +84,249 @@ function fullFijoDePrecio(precio: number): number {
   return 2628;
 }
 
+export function mlLogisticsVariableRate(logistica: LogisticaType): number {
+  if (logistica === "Retiro domicilio") return 0;
+  return logistica === "Full" ? 0.1 : 0.07;
+}
+
+export function mlLogisticsFixedAtPrice(logistica: LogisticaType, precio: number): number {
+  if (logistica === "Retiro domicilio") return 0;
+  return logistica === "Full" ? fullFijoDePrecio(precio) : flexFijoDePrecio(precio);
+}
+
 /**
- * Costo de envío / logística que asume el vendedor a un precio de venta dado
+ * Costo de envío / logística ML que asume el vendedor a un precio de venta dado
  * (misma estructura que el motor de precio objetivo: % sobre P + tramo fijo).
  */
 export function calcShippingCostAtPrice(logistica: LogisticaType, precio: number): number {
   if (logistica === "Retiro domicilio") return 0;
-  const envPct = logistica === "Full" ? 0.1 : 0.07;
-  const fijo = logistica === "Full" ? fullFijoDePrecio(precio) : flexFijoDePrecio(precio);
-  return envPct * precio + fijo;
+  return mlLogisticsVariableRate(logistica) * precio + mlLogisticsFixedAtPrice(logistica, precio);
+}
+
+export function calcMlLogisticsSplit(
+  logistica: LogisticaType,
+  precio: number
+): { mlShippingAmount: number; fulfillmentAmount: number } {
+  if (logistica === "Retiro domicilio") return { mlShippingAmount: 0, fulfillmentAmount: 0 };
+  const mlShippingAmount = Math.round(mlLogisticsVariableRate(logistica) * precio * 100) / 100;
+  const fulfillmentAmount = Math.round(mlLogisticsFixedAtPrice(logistica, precio) * 100) / 100;
+  return { mlShippingAmount, fulfillmentAmount };
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function pctOrNull(v: number | null | undefined): number | null {
+  if (v === null || v === undefined || !Number.isFinite(v)) return null;
+  return normalizePct(v);
+}
+
+/**
+ * Desglose de costos y ganancia neta (única fuente de verdad para trazabilidad en UI).
+ * IIBB / impuestos / costos adicionales no configurados → `amount`/`pct` null y entradas en `missing` (no se asume 0).
+ */
+export function calculateFinancialCostBreakdown(input: {
+  salePrice: number;
+  productCost: number | null;
+  logistica: LogisticaType;
+  reputacion: ReputacionType | string | null | undefined;
+  /** null/undefined → 0% ads (INVARIANT-04). */
+  publicidad_pct: number | null | undefined;
+  financialSettings: SellerFinancialSettings | null | undefined;
+  skuAdditionalFixedCost: number | null | undefined;
+}): FinancialCostBreakdown {
+  const reasons: string[] = [];
+  const missing: string[] = [];
+  const { salePrice: P, logistica } = input;
+
+  if (!Number.isFinite(P) || P <= 0) {
+    reasons.push("Precio de venta inválido o no informado.");
+    return {
+      productCost: null,
+      mlFeeAmount: null,
+      mlFeePct: null,
+      fixedUnitCost: null,
+      adsAmount: 0,
+      adsPct: 0,
+      iibbAmount: null,
+      iibbPct: null,
+      taxAmount: null,
+      taxPct: null,
+      mlShippingAmount: null,
+      fulfillmentAmount: null,
+      internalLogisticsAmount: null,
+      additionalCostsAmount: null,
+      totalCost: null,
+      netProfit: null,
+      netMarginPct: null,
+      reasons,
+      missing: ["price"]
+    };
+  }
+
+  const fs = input.financialSettings ?? null;
+  const comisionRate = mlComisionRate(input.reputacion);
+  reasons.push(`Comisión ML ${(comisionRate * 100).toFixed(2)}% según reputación.`);
+
+  const pubExplicit = input.publicidad_pct !== null && input.publicidad_pct !== undefined;
+  const adsPct = pubExplicit ? normalizePct(input.publicidad_pct) : 0;
+  if (!pubExplicit) {
+    reasons.push("Publicidad: sin % informado → 0% (ACOS no modelado).");
+  } else {
+    reasons.push(`Publicidad: ${(adsPct * 100).toFixed(2)}% sobre precio de venta.`);
+  }
+  const adsAmount = roundMoney(P * adsPct);
+
+  const iibbPct = fs?.iibbPct === null || fs?.iibbPct === undefined ? null : pctOrNull(fs.iibbPct);
+  const taxPct = fs?.taxPct === null || fs?.taxPct === undefined ? null : pctOrNull(fs.taxPct);
+  const internalRaw = fs?.internalLogisticsCost;
+  const internalLogisticsAmount =
+    internalRaw === null || internalRaw === undefined || !Number.isFinite(internalRaw)
+      ? null
+      : roundMoney(internalRaw);
+  if (internalLogisticsAmount !== null) {
+    reasons.push("Logística interna: costo fijo por unidad configurado.");
+  }
+
+  const fixedUnitRaw = fs?.fixedUnitCost;
+  const fixedUnitCost =
+    fixedUnitRaw === null || fixedUnitRaw === undefined || !Number.isFinite(fixedUnitRaw)
+      ? null
+      : roundMoney(fixedUnitRaw);
+  if (fixedUnitCost !== null) reasons.push("Costo fijo por unidad (no ML) configurado.");
+
+  let iibbAmount: number | null = null;
+  if (iibbPct === null) {
+    missing.push("iibb");
+    reasons.push("IIBB: no configurado → no se incluye en costo total.");
+  } else {
+    iibbAmount = roundMoney(P * iibbPct);
+    reasons.push(`IIBB: ${(iibbPct * 100).toFixed(2)}% sobre precio de venta.`);
+  }
+
+  let taxAmount: number | null = null;
+  if (taxPct === null) {
+    missing.push("tax");
+    reasons.push("Impuestos adicionales: no configurados → no se incluyen en costo total.");
+  } else {
+    taxAmount = roundMoney(P * taxPct);
+    reasons.push(`Impuestos: ${(taxPct * 100).toFixed(2)}% sobre precio de venta.`);
+  }
+
+  const addPct = fs?.additionalCostsPct === null || fs?.additionalCostsPct === undefined ? null : pctOrNull(fs.additionalCostsPct);
+  const addFixedAcct =
+    fs?.additionalCostsFixed === null || fs?.additionalCostsFixed === undefined || !Number.isFinite(fs.additionalCostsFixed)
+      ? null
+      : roundMoney(fs.additionalCostsFixed);
+  const skuAdd =
+    input.skuAdditionalFixedCost === null ||
+    input.skuAdditionalFixedCost === undefined ||
+    !Number.isFinite(input.skuAdditionalFixedCost)
+      ? null
+      : roundMoney(input.skuAdditionalFixedCost);
+
+  const addFromPct = addPct !== null ? roundMoney(P * addPct) : null;
+  if (addPct !== null) reasons.push(`Costos adicionales: ${(addPct * 100).toFixed(2)}% sobre precio.`);
+  if (addFixedAcct !== null) reasons.push("Costos adicionales: monto fijo por unidad (cuenta).");
+  if (skuAdd !== null) reasons.push("Costos adicionales: monto fijo por unidad (SKU).");
+
+  let additionalCostsAmount: number | null = null;
+  const addParts: number[] = [];
+  if (addFromPct !== null) addParts.push(addFromPct);
+  if (addFixedAcct !== null) addParts.push(addFixedAcct);
+  if (skuAdd !== null) addParts.push(skuAdd);
+  if (addParts.length) {
+    additionalCostsAmount = roundMoney(addParts.reduce((a, b) => a + b, 0));
+  } else {
+    reasons.push("Costos adicionales: sin porcentaje ni montos fijos configurados (monto no aplicado).");
+  }
+
+  const { mlShippingAmount, fulfillmentAmount } = calcMlLogisticsSplit(logistica, P);
+  const mlShipTotal = roundMoney(mlShippingAmount + fulfillmentAmount);
+  if (logistica === "Retiro domicilio") {
+    reasons.push("Logística ML: retiro / sin envío modelado → 0.");
+  } else {
+    reasons.push(
+      `Logística ML (${logistica}): variable ${(mlLogisticsVariableRate(logistica) * 100).toFixed(0)}% sobre precio + tramo fijo estimado.`
+    );
+  }
+
+  const mlFeeAmount = roundMoney(P * comisionRate);
+  const productCost =
+    input.productCost === null || input.productCost === undefined || !Number.isFinite(input.productCost)
+      ? null
+      : roundMoney(input.productCost);
+  if (productCost !== null) reasons.push("Costo de producto informado por SKU.");
+
+  const mlFeePct = comisionRate;
+  const mlShippingOut = logistica === "Retiro domicilio" ? 0 : roundMoney(mlShippingAmount);
+  const fulfillmentOut = logistica === "Retiro domicilio" ? 0 : roundMoney(fulfillmentAmount);
+
+  if (productCost === null) {
+    missing.push("product_cost");
+    return {
+      productCost: null,
+      mlFeeAmount,
+      mlFeePct,
+      fixedUnitCost,
+      adsAmount,
+      adsPct,
+      iibbAmount,
+      iibbPct,
+      taxAmount,
+      taxPct,
+      mlShippingAmount: mlShippingOut,
+      fulfillmentAmount: fulfillmentOut,
+      internalLogisticsAmount,
+      additionalCostsAmount,
+      totalCost: null,
+      netProfit: null,
+      netMarginPct: null,
+      reasons,
+      missing
+    };
+  }
+
+  const parts: number[] = [productCost, mlFeeAmount, adsAmount, mlShipTotal];
+  if (fixedUnitCost !== null) parts.push(fixedUnitCost);
+  if (iibbAmount !== null) parts.push(iibbAmount);
+  if (taxAmount !== null) parts.push(taxAmount);
+  if (internalLogisticsAmount !== null) parts.push(internalLogisticsAmount);
+  if (additionalCostsAmount !== null) parts.push(additionalCostsAmount);
+
+  const totalCost = roundMoney(parts.reduce((a, b) => a + b, 0));
+  const netProfit = roundMoney(P - totalCost);
+  const netMarginPct = roundMoney((netProfit / P) * 10_000) / 10_000;
+
+  return {
+    productCost,
+    mlFeeAmount,
+    mlFeePct,
+    fixedUnitCost,
+    adsAmount,
+    adsPct,
+    iibbAmount,
+    iibbPct,
+    taxAmount,
+    taxPct,
+    mlShippingAmount: mlShippingOut,
+    fulfillmentAmount: fulfillmentOut,
+    internalLogisticsAmount,
+    additionalCostsAmount,
+    totalCost,
+    netProfit,
+    netMarginPct,
+    reasons,
+    missing
+  };
 }
 
 export type SellingPriceInput = Pick<MargenesRow, "costo" | "logistica" | "publicidad_pct" | "margen_pct"> & {
   reputacion?: ReputacionType | string | null;
+  financialSettings?: SellerFinancialSettings | null;
+  /** Costo fijo adicional por SKU (misma semántica que `buildSkuDecisionState` inputs.additionalCosts). */
+  skuAdditionalFixedCost?: number | null;
 };
 
 export type SellingPriceResult = {
@@ -65,27 +336,57 @@ export type SellingPriceResult = {
   converged: boolean;
 };
 
+function sellingFinancialRates(fs: SellerFinancialSettings | null | undefined): number {
+  if (!fs) return 0;
+  const i = fs.iibbPct === null || fs.iibbPct === undefined ? 0 : normalizePct(fs.iibbPct);
+  const t = fs.taxPct === null || fs.taxPct === undefined ? 0 : normalizePct(fs.taxPct);
+  const a = fs.additionalCostsPct === null || fs.additionalCostsPct === undefined ? 0 : normalizePct(fs.additionalCostsPct);
+  return i + t + a;
+}
+
+function sellingFixedExtras(
+  fs: SellerFinancialSettings | null | undefined,
+  skuAdditionalFixedCost: number | null | undefined
+): number {
+  let s = 0;
+  if (fs?.fixedUnitCost !== null && fs?.fixedUnitCost !== undefined && Number.isFinite(fs.fixedUnitCost)) s += fs.fixedUnitCost;
+  if (fs?.internalLogisticsCost !== null && fs?.internalLogisticsCost !== undefined && Number.isFinite(fs.internalLogisticsCost)) {
+    s += fs.internalLogisticsCost;
+  }
+  if (fs?.additionalCostsFixed !== null && fs?.additionalCostsFixed !== undefined && Number.isFinite(fs.additionalCostsFixed)) {
+    s += fs.additionalCostsFixed;
+  }
+  if (skuAdditionalFixedCost !== null && skuAdditionalFixedCost !== undefined && Number.isFinite(skuAdditionalFixedCost)) {
+    s += skuAdditionalFixedCost;
+  }
+  return s;
+}
+
 /**
- * Resuelve precio de venta objetivo a partir de costo, comisión (por reputación), envío, ads y margen.
+ * Resuelve precio de venta objetivo a partir de costo, comisión (por reputación), envío, ads, cargas fiscales configuradas y margen.
  * `publicidad_pct` y `margen_pct` pueden venir en 0–1 o 0–100; se normalizan con `normalizePct`.
+ * Tasas fiscales / IIBB / adicionales % omitidas (null) no entran en el denominador (mismo criterio que ganancia parcial).
  */
 export function calcSellingPrice(input: SellingPriceInput): SellingPriceResult {
   const { costo, logistica } = input;
   const pub = normalizePct(input.publicidad_pct);
   const marg = normalizePct(input.margen_pct ?? 0.15) || 0.15;
   const comision = mlComisionRate(input.reputacion);
+  const fs = input.financialSettings ?? null;
+  const extraRate = sellingFinancialRates(fs);
+  const fixedExtras = sellingFixedExtras(fs, input.skuAdditionalFixedCost);
 
   if (costo <= 0) {
     return { precio_venta: 0, ganancia_unit: 0, roi: 0, converged: true };
   }
 
-  const sumRates = (envPct: number) => 1 - comision - pub - marg - envPct;
+  const sumRates = (envPct: number) => 1 - comision - pub - marg - envPct - extraRate;
   if (logistica === "Retiro domicilio") {
     const d = sumRates(0);
     if (d <= 0.001) {
       return { precio_venta: Number.NaN, ganancia_unit: 0, roi: 0, converged: false };
     }
-    const p = costo / d;
+    const p = (costo + fixedExtras) / d;
     return finalize(p, costo, marg);
   }
 
@@ -99,7 +400,7 @@ export function calcSellingPrice(input: SellingPriceInput): SellingPriceResult {
     if (d <= 0.001) {
       return { precio_venta: Number.NaN, ganancia_unit: 0, roi: 0, converged: false };
     }
-    const pNext = (costo + fijo) / d;
+    const pNext = (costo + fijo + fixedExtras) / d;
     if (Number.isFinite(pNext) && Math.abs(pNext - p) < 0.5) {
       p = pNext;
       converged = true;
@@ -132,43 +433,58 @@ export interface RealProfitResult {
   publicidad_$: number;
   costo_total: number;
   converged: boolean;
+  breakdown: FinancialCostBreakdown;
 }
 
-/**
- * Ganancia real del vendedor al precio actual de ML (no el margen objetivo del precio teórico).
- * ganancia_real = price_ml - costo - comision_$ - envio_$ - publicidad_$
- */
-export function calcRealProfit(input: {
+export type CalcRealProfitInput = {
   price_ml: number;
-  costo: number;
+  /** Costo unitario del producto (sin sumar adicionales; van por breakdown). */
+  productCost: number;
   logistica: LogisticaType;
   reputacion: ReputacionType | string | null | undefined;
-  publicidad_pct: number;
-  /** Reservado para costos de envío por peso cuando el modelo lo incorpore. */
+  /** null/undefined → 0% ads (INVARIANT-04). */
+  publicidad_pct?: number | null;
   peso_kg: number | null;
-}): RealProfitResult {
-  const { price_ml, costo, logistica } = input;
-  const pub = normalizePct(input.publicidad_pct);
-  const comisionRate = mlComisionRate(input.reputacion);
-  if (!Number.isFinite(price_ml) || price_ml <= 0 || !Number.isFinite(costo) || costo < 0) {
+  financialSettings?: SellerFinancialSettings | null;
+  skuAdditionalFixedCost?: number | null;
+};
+
+/**
+ * Ganancia neta del vendedor al precio actual de ML.
+ * Única fuente numérica: `calculateFinancialCostBreakdown` + envío ML total en `envio_$` (variable + fijo).
+ */
+export function calcRealProfit(input: CalcRealProfitInput): RealProfitResult {
+  const { price_ml, productCost, logistica } = input;
+  const breakdown = calculateFinancialCostBreakdown({
+    salePrice: price_ml,
+    productCost,
+    logistica,
+    reputacion: input.reputacion,
+    publicidad_pct: input.publicidad_pct,
+    financialSettings: input.financialSettings ?? null,
+    skuAdditionalFixedCost: input.skuAdditionalFixedCost ?? null
+  });
+
+  if (!Number.isFinite(price_ml) || price_ml <= 0 || !Number.isFinite(productCost) || productCost < 0) {
     return {
       ganancia_real: Number.NaN,
       margen_real: Number.NaN,
       comision_$: Number.NaN,
       envio_$: Number.NaN,
       publicidad_$: Number.NaN,
-      costo_total: costo,
-      converged: false
+      costo_total: productCost,
+      converged: false,
+      breakdown
     };
   }
 
-  const comision_$ = Math.round(price_ml * comisionRate * 100) / 100;
-  const envio_$ = Math.round(calcShippingCostAtPrice(logistica, price_ml) * 100) / 100;
-  const publicidad_$ = Math.round(price_ml * pub * 100) / 100;
-  const costo_total = Math.round(costo * 100) / 100;
-  const ganancia_raw = price_ml - costo_total - comision_$ - envio_$ - publicidad_$;
-  const ganancia_real = Math.round(ganancia_raw * 100) / 100;
-  const margen_real = Math.round((ganancia_real / price_ml) * 10_000) / 10_000;
+  const split = calcMlLogisticsSplit(logistica, price_ml);
+  const envio_$ = roundMoney(split.mlShippingAmount + split.fulfillmentAmount);
+  const comision_$ = breakdown.mlFeeAmount ?? Number.NaN;
+  const publicidad_$ = breakdown.adsAmount;
+  const costo_total = breakdown.productCost ?? productCost;
+  const ganancia_real = breakdown.netProfit ?? Number.NaN;
+  const margen_real = breakdown.netMarginPct ?? Number.NaN;
 
   return {
     ganancia_real,
@@ -177,7 +493,12 @@ export function calcRealProfit(input: {
     envio_$,
     publicidad_$,
     costo_total,
-    converged: Number.isFinite(ganancia_real) && Number.isFinite(margen_real)
+    converged:
+      Number.isFinite(ganancia_real) &&
+      Number.isFinite(margen_real) &&
+      breakdown.netProfit !== null &&
+      breakdown.netMarginPct !== null,
+    breakdown
   };
 }
 

@@ -4,6 +4,7 @@ import { buildSkuDecisionState } from "@/lib/pricing/sku-decision-state";
 function base(): Parameters<typeof buildSkuDecisionState>[0] {
   return {
     accountId: "acc-1",
+    financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
     ml: { itemId: "MLA1", title: "Producto test", sku: "SKU-1" },
     inputs: { reputacion: "Verde / MercadoLíder" }
   };
@@ -142,5 +143,24 @@ describe("buildSkuDecisionState", () => {
     expect(s.decision.profitabilityStatus).toBe("healthy");
     expect(s.inputs.publicidadPct).toBe(0);
     expect(s.decision.primaryInsight).toContain("sin Ads");
+  });
+
+  it("sin configuración fiscal explícita → partial y aviso en insight", () => {
+    const b = base();
+    const s = buildSkuDecisionState({
+      ...b,
+      financialSettings: undefined,
+      ml: { ...b.ml, currentPrice: 30_000 },
+      inputs: {
+        ...b.inputs,
+        productCost: 10_000,
+        logistics: "Flex",
+        publicidadPct: 0,
+        targetMarginPct: 0.15
+      }
+    });
+    expect(s.sync.calculationStatus).toBe("partial");
+    expect(s.computed.financialBreakdown?.missing.some((m) => m === "iibb" || m === "tax")).toBe(true);
+    expect(s.decision.primaryInsight).toMatch(/IIBB|impuestos|parcial/i);
   });
 });

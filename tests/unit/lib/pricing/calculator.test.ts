@@ -5,6 +5,7 @@ import {
   calcSellingPrice,
   calcShippingCostAtPrice,
   calcStockStatus,
+  calculateFinancialCostBreakdown,
   coerceReputacion,
   mlComisionRate,
   normalizePct
@@ -85,11 +86,12 @@ describe("Motor ML — calcRealProfit", () => {
     const price_ml = 30_000;
     const r = calcRealProfit({
       price_ml,
-      costo: 15_600,
+      productCost: 15_600,
       logistica: "Flex",
       reputacion: "Verde / MercadoLíder",
       publicidad_pct: 0.1,
-      peso_kg: null
+      peso_kg: null,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null }
     });
     expect(r.converged).toBe(true);
     const envio = calcShippingCostAtPrice("Flex", price_ml);
@@ -104,11 +106,12 @@ describe("Motor ML — calcRealProfit", () => {
   it("usa comisión naranja", () => {
     const r = calcRealProfit({
       price_ml: 10_000,
-      costo: 5000,
+      productCost: 5000,
       logistica: "Retiro domicilio",
       reputacion: "Naranja o Roja",
       publicidad_pct: 0,
-      peso_kg: null
+      peso_kg: null,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null }
     });
     expect(r.comision_$).toBe(1200);
   });
@@ -125,6 +128,117 @@ describe("Motor ML — calcSellingPrice con % en escala 0–100", () => {
     });
     expect(r.converged).toBe(true);
     expect(r.precio_venta).toBeGreaterThan(20_000);
+  });
+
+  it("precio objetivo sube cuando hay IIBB e impuesto explícitos", () => {
+    const sinFiscal = calcSellingPrice({
+      costo: 10_000,
+      logistica: "Flex",
+      publicidad_pct: 0.08,
+      margen_pct: 0.15,
+      reputacion: "Verde / MercadoLíder"
+    });
+    const conFiscal = calcSellingPrice({
+      costo: 10_000,
+      logistica: "Flex",
+      publicidad_pct: 0.08,
+      margen_pct: 0.15,
+      reputacion: "Verde / MercadoLíder",
+      financialSettings: { iibbPct: 0.02, taxPct: 0.02, internalLogisticsCost: null }
+    });
+    expect(sinFiscal.converged && conFiscal.converged).toBe(true);
+    expect(conFiscal.precio_venta).toBeGreaterThan(sinFiscal.precio_venta);
+  });
+});
+
+describe("Motor ML — FinancialCostBreakdown / fiscal", () => {
+  it("IIBB null → missing incluye iibb, monto null", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 10_000,
+      productCost: 4000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: null,
+      financialSettings: { iibbPct: null, taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(b.missing).toContain("iibb");
+    expect(b.iibbAmount).toBeNull();
+    expect(b.adsAmount).toBe(0);
+  });
+
+  it("IIBB configurado → iibbAmount = precio * tasa", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 50_000,
+      productCost: 10_000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0.02, taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(b.iibbAmount).toBeCloseTo(1000, 1);
+    expect(b.missing).not.toContain("iibb");
+  });
+
+  it("impuesto configurado → taxAmount = precio * tasa", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 20_000,
+      productCost: 5000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0.05, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(b.taxAmount).toBe(1000);
+  });
+
+  it("costo adicional fijo SKU + cuenta + %", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 10_000,
+      productCost: 3000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: {
+        iibbPct: 0,
+        taxPct: 0,
+        internalLogisticsCost: null,
+        additionalCostsPct: 0.05,
+        additionalCostsFixed: 100
+      },
+      skuAdditionalFixedCost: 200
+    });
+    expect(b.additionalCostsAmount).toBeCloseTo(500 + 100 + 200, 1);
+  });
+
+  it("break-even sube con IIBB e impuesto", () => {
+    const base = (fs: Parameters<typeof calcRealProfit>[0]["financialSettings"]) => ({
+      productCost: 8000,
+      skuAdditionalFixedCost: null as number | null,
+      financialMerged: fs ?? { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+      logistica: "Retiro domicilio" as const,
+      rep: "Verde / MercadoLíder",
+      publicidadPct: 0 as number | null,
+      pesoKg: null as number | null
+    });
+    const profitAt = (p: number, fs: NonNullable<Parameters<typeof calcRealProfit>[0]["financialSettings"]>) =>
+      calcRealProfit({
+        price_ml: p,
+        productCost: base(fs).productCost,
+        logistica: base(fs).logistica,
+        reputacion: base(fs).rep,
+        publicidad_pct: base(fs).publicidadPct,
+        peso_kg: base(fs).pesoKg,
+        financialSettings: fs,
+        skuAdditionalFixedCost: null
+      }).ganancia_real;
+
+    const p0 = 20_000;
+    expect(profitAt(p0, { iibbPct: 0, taxPct: 0, internalLogisticsCost: null })).toBeGreaterThan(
+      profitAt(p0, { iibbPct: 0.03, taxPct: 0.02, internalLogisticsCost: null })
+    );
   });
 });
 

@@ -1,4 +1,4 @@
-import { normalizePct } from "@/lib/pricing/calculator";
+import { normalizePct, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { buildSkuDecisionState, type BuildSkuDecisionStateInput, type SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 
 const SEP = "\x1f";
@@ -7,6 +7,18 @@ const SEP = "\x1f";
 function keyNum(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "";
   return String(Math.round(v * 1_000_000) / 1_000_000);
+}
+
+function financialSettingsKey(fs: SellerFinancialSettings | null | undefined): string {
+  if (!fs) return "";
+  return [
+    keyNum(fs.iibbPct ?? undefined),
+    keyNum(fs.taxPct ?? undefined),
+    keyNum(fs.internalLogisticsCost ?? undefined),
+    keyNum(fs.fixedUnitCost ?? undefined),
+    keyNum(fs.additionalCostsPct ?? undefined),
+    keyNum(fs.additionalCostsFixed ?? undefined)
+  ].join("\x1e");
 }
 
 /**
@@ -30,7 +42,9 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
     target,
     String(i.logistics ?? ""),
     i.taxPct === null || i.taxPct === undefined ? "" : keyNum(i.taxPct),
-    i.additionalCosts === null || i.additionalCosts === undefined ? "" : keyNum(i.additionalCosts)
+    i.iibbPct === null || i.iibbPct === undefined ? "" : keyNum(i.iibbPct),
+    i.additionalCosts === null || i.additionalCosts === undefined ? "" : keyNum(i.additionalCosts),
+    financialSettingsKey(input.financialSettings)
   ].join(SEP);
 }
 

@@ -3,7 +3,9 @@ import {
   calcSellingPrice,
   coerceReputacion,
   normalizePct,
-  type LogisticaType
+  type FinancialCostBreakdown,
+  type LogisticaType,
+  type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
 
 export type SkuDecisionState = {
@@ -31,6 +33,7 @@ export type SkuDecisionState = {
     targetMarginPct: number | null;
     safetyStockPct: number;
     taxPct: number | null;
+    iibbPct: number | null;
     additionalCosts: number | null;
   };
 
@@ -39,12 +42,16 @@ export type SkuDecisionState = {
     /** Ganancia unitaria al precio óptimo (mismo `calcSellingPrice` que fija optimalPrice). */
     optimalGananciaUnit: number | null;
     optimalRoi: number | null;
+    /** Ganancia neta coherente con `financialBreakdown` (mismo número que `financialBreakdown.netProfit`). */
     realProfit: number | null;
     realMarginPct: number | null;
     realComisionAmount: number | null;
     realShippingAmount: number | null;
     realAdsAmount: number | null;
     realProductCostApplied: number | null;
+    financialBreakdown: FinancialCostBreakdown | null;
+    /** `net_full` = IIBB e impuestos explícitos en configuración; `net_partial` = falta al menos uno. */
+    profitCompleteness: "net_full" | "net_partial" | null;
     breakEvenPrice: number | null;
     priceDelta: number | null;
     idealStock: number | null;
@@ -63,12 +70,14 @@ export type SkuDecisionState = {
   };
 
   sync: {
-    calculationStatus: "valid" | "missing_inputs" | "error";
+    calculationStatus: "valid" | "partial" | "missing_inputs" | "error";
   };
 };
 
 export type BuildSkuDecisionStateInput = {
   accountId: string;
+  /** Config financiera de cuenta (sin persistencia obligatoria). */
+  financialSettings?: SellerFinancialSettings | null;
   ml: {
     itemId?: string | null;
     sku?: string | null;
@@ -91,6 +100,7 @@ export type BuildSkuDecisionStateInput = {
     targetMarginPct?: number | null;
     safetyStockPct?: number | null;
     taxPct?: number | null;
+    iibbPct?: number | null;
     additionalCosts?: number | null;
     reputacion?: string | null;
     pesoKg?: number | null;
@@ -102,11 +112,33 @@ function resolveLogistics(raw: string | null | undefined): LogisticaType {
   return "Flex";
 }
 
-function effectiveProductCost(productCost: number | null, additionalCosts: number | null): number | null {
-  if (productCost === null || productCost === undefined || !Number.isFinite(productCost)) return null;
-  if (additionalCosts === null || additionalCosts === undefined) return productCost;
-  if (!Number.isFinite(additionalCosts)) return null;
-  return productCost + additionalCosts;
+function mergeSellerFinancialSettings(
+  financial: SellerFinancialSettings | null | undefined,
+  taxPctInput: number | null | undefined,
+  iibbPctInput: number | null | undefined
+): SellerFinancialSettings {
+  const base = financial ?? null;
+  const taxPct =
+    taxPctInput !== null && taxPctInput !== undefined && Number.isFinite(taxPctInput)
+      ? taxPctInput
+      : (base?.taxPct ?? null);
+  const iibbPct =
+    iibbPctInput !== null && iibbPctInput !== undefined && Number.isFinite(iibbPctInput)
+      ? iibbPctInput
+      : (base?.iibbPct ?? null);
+  return {
+    iibbPct,
+    taxPct,
+    internalLogisticsCost: base?.internalLogisticsCost ?? null,
+    fixedUnitCost: base?.fixedUnitCost ?? null,
+    additionalCostsPct: base?.additionalCostsPct ?? null,
+    additionalCostsFixed: base?.additionalCostsFixed ?? null
+  };
+}
+
+function fiscalNetCompleteFromBreakdown(b: FinancialCostBreakdown | null): boolean {
+  if (!b) return false;
+  return !b.missing.includes("iibb") && !b.missing.includes("tax");
 }
 
 function normalizeCurrentPrice(v: number | null | undefined): number | null {
@@ -128,25 +160,29 @@ function normalizeVentas30d(v: number | null | undefined): number | null {
  * Precio de equilibrio (ganancia ≈ 0) usando solo `calcRealProfit` como fuente numérica.
  */
 function solveBreakEvenPrice(
-  costoEff: number,
+  productCost: number,
+  skuAdditionalFixedCost: number | null,
+  financialMerged: SellerFinancialSettings,
   logistica: LogisticaType,
   rep: string,
-  publicidadPct: number,
+  publicidadPct: number | null | undefined,
   pesoKg: number | null
 ): number | null {
-  if (!Number.isFinite(costoEff) || costoEff <= 0) return null;
+  if (!Number.isFinite(productCost) || productCost <= 0) return null;
 
   const profitAt = (p: number) =>
     calcRealProfit({
       price_ml: p,
-      costo: costoEff,
+      productCost,
       logistica,
       reputacion: rep,
       publicidad_pct: publicidadPct,
-      peso_kg: pesoKg
+      peso_kg: pesoKg,
+      financialSettings: financialMerged,
+      skuAdditionalFixedCost
     });
 
-  let hi = Math.max(500, costoEff * 4);
+  let hi = Math.max(500, productCost * 4);
   let foundPositive = false;
   for (let expand = 0; expand < 40; expand += 1) {
     const r = profitAt(hi);
@@ -239,11 +275,19 @@ function computeStockBranch(input: {
   return { velocity30d, idealStock, stockGap, daysOfStock, stockStatus: "healthy" };
 }
 
-function profitabilityFromReal(realProfit: number | null, realMarginPct: number | null, targetMarginPct: number | null): SkuDecisionState["decision"]["profitabilityStatus"] {
+function profitabilityFromReal(
+  realProfit: number | null,
+  realMarginPct: number | null,
+  targetMarginPct: number | null,
+  fiscalNetComplete: boolean
+): SkuDecisionState["decision"]["profitabilityStatus"] {
   if (realProfit === null || realMarginPct === null) return "unknown";
   if (realProfit < 0) return "loss";
   if (realMarginPct < 0) return "loss";
   if (realMarginPct < 0.1) return "risk";
+  if (!fiscalNetComplete) {
+    return "low_margin";
+  }
   if (targetMarginPct !== null && Number.isFinite(targetMarginPct) && realMarginPct < targetMarginPct) {
     return "low_margin";
   }
@@ -276,6 +320,15 @@ function unitsToReorder(stockGap: number | null): number {
   return Math.max(0, Math.ceil(stockGap));
 }
 
+function fiscalInsightFromMissing(missing: string[]): string | null {
+  const hasI = missing.includes("iibb");
+  const hasT = missing.includes("tax");
+  if (!hasI && !hasT) return null;
+  if (hasI && hasT) return "Margen parcial: faltan IIBB e impuestos para calcular ganancia neta real.";
+  if (hasI) return "Margen parcial: faltan IIBB para calcular ganancia neta real.";
+  return "Margen parcial: faltan impuestos para calcular ganancia neta real.";
+}
+
 function pickPrimaryInsight(input: {
   profitabilityStatus: SkuDecisionState["decision"]["profitabilityStatus"];
   pricingStatus: SkuDecisionState["decision"]["pricingStatus"];
@@ -287,6 +340,9 @@ function pickPrimaryInsight(input: {
   optimalPrice: number | null;
   targetMarginPct: number | null;
   stockGap: number | null;
+  fiscalNetComplete: boolean;
+  breakdownMissing: string[];
+  realMarginPct: number | null;
 }): { insight: string | null; action: string | null } {
   const {
     profitabilityStatus,
@@ -298,7 +354,10 @@ function pickPrimaryInsight(input: {
     currentPrice,
     optimalPrice,
     targetMarginPct,
-    stockGap
+    stockGap,
+    fiscalNetComplete,
+    breakdownMissing,
+    realMarginPct
   } = input;
 
   const reorder = unitsToReorder(stockGap);
@@ -308,17 +367,31 @@ function pickPrimaryInsight(input: {
       optimalPrice !== null && Number.isFinite(optimalPrice)
         ? ` Revisá costo o subir precio hacia ${Math.round(optimalPrice).toLocaleString("es-AR")}.`
         : " Revisá costo o subir precio.";
+    const fiscalNote = !fiscalNetComplete
+      ? " Resultado parcial: completá IIBB e impuestos para ver rentabilidad neta real."
+      : "";
     return {
-      insight: `Pierde plata al precio actual.${hint}`,
+      insight: `Pierde plata al precio actual.${fiscalNote}${hint}`,
       action: "Ajustar precio o costo antes de escalar ventas."
     };
   }
 
   if (pricingStatus === "below_break_even" && breakEvenPrice !== null && currentPrice !== null) {
+    const beNote = !fiscalNetComplete ? " Break-even parcial (sin fiscal completo)." : "";
     return {
-      insight: `Precio por debajo del punto de equilibrio (~$${Math.round(breakEvenPrice).toLocaleString("es-AR")}).`,
+      insight: `Precio por debajo del punto de equilibrio (~$${Math.round(breakEvenPrice).toLocaleString("es-AR")}).${beNote}`,
       action: "Subir precio por encima del break-even o bajar costos."
     };
+  }
+
+  if (!fiscalNetComplete && realProfit !== null && realProfit >= 0) {
+    const fi = fiscalInsightFromMissing(breakdownMissing);
+    if (fi) {
+      return {
+        insight: fi,
+        action: "Falta configurar IIBB para medir rentabilidad real."
+      };
+    }
   }
 
   if (stockStatus === "critical") {
@@ -334,8 +407,14 @@ function pickPrimaryInsight(input: {
   if (profitabilityStatus === "low_margin" || profitabilityStatus === "risk") {
     const tgt =
       targetMarginPct !== null ? `${(targetMarginPct * 100).toFixed(1)}%` : "objetivo";
+    if (!fiscalNetComplete) {
+      return {
+        insight: `${fiscalInsightFromMissing(breakdownMissing) ?? "Margen parcial."} Además, el margen queda bajo el ${tgt}.`,
+        action: "Completar configuración fiscal y revisar precio."
+      };
+    }
     return {
-      insight: `Margen bajo. Ajustar precio para alcanzar ${tgt}.`,
+      insight: `Margen neto bajo objetivo (${tgt}).`,
       action: optimalPrice !== null ? "Revisar precio óptimo vs. precio ML." : "Completar margen objetivo y costo para ver precio óptimo."
     };
   }
@@ -416,8 +495,18 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       ? null
       : productCostRaw;
 
-  const additionalCosts = input.inputs.additionalCosts;
-  const costoEff = effectiveProductCost(productCost, additionalCosts ?? null);
+  const additionalCosts =
+    input.inputs.additionalCosts === null || input.inputs.additionalCosts === undefined
+      ? null
+      : !Number.isFinite(input.inputs.additionalCosts)
+        ? null
+        : input.inputs.additionalCosts;
+
+  const mergedFinancial = mergeSellerFinancialSettings(
+    input.financialSettings ?? null,
+    input.inputs.taxPct,
+    input.inputs.iibbPct
+  );
 
   const logistica = resolveLogistics(input.inputs.logistics ?? null);
   const rep = coerceReputacion(input.inputs.reputacion ?? null);
@@ -454,30 +543,27 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     /** Null si el usuario no definió margen o el valor no es válido (> 0). Sin default 15%. */
     targetMarginPct: targetMarginValid,
     safetyStockPct,
-    taxPct:
-      input.inputs.taxPct === null || input.inputs.taxPct === undefined || !Number.isFinite(input.inputs.taxPct)
-        ? null
-        : input.inputs.taxPct,
-    additionalCosts:
-      additionalCosts === null || additionalCosts === undefined || !Number.isFinite(additionalCosts)
-        ? null
-        : additionalCosts
+    taxPct: mergedFinancial.taxPct,
+    iibbPct: mergedFinancial.iibbPct,
+    additionalCosts
   };
 
   let calculationStatus: SkuDecisionState["sync"]["calculationStatus"] = "valid";
-  if (costoEff === null) {
+  if (productCost === null) {
     calculationStatus = "missing_inputs";
   }
 
   let optimalPrice: number | null = null;
   let sellResult: ReturnType<typeof calcSellingPrice> | null = null;
-  if (costoEff !== null && costoEff > 0 && targetMarginValid !== null) {
+  if (productCost !== null && productCost > 0 && targetMarginValid !== null) {
     sellResult = calcSellingPrice({
-      costo: costoEff,
+      costo: productCost,
       logistica,
       publicidad_pct: publicidadPct,
       margen_pct: targetMarginValid,
-      reputacion: rep
+      reputacion: rep,
+      financialSettings: mergedFinancial,
+      skuAdditionalFixedCost: additionalCosts
     });
     if (sellResult.converged && Number.isFinite(sellResult.precio_venta) && sellResult.precio_venta > 0) {
       optimalPrice = Math.round(sellResult.precio_venta * 100) / 100;
@@ -492,34 +578,49 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   let realShippingAmount: number | null = null;
   let realAdsAmount: number | null = null;
   let realProductCostApplied: number | null = null;
+  let financialBreakdown: FinancialCostBreakdown | null = null;
+  let profitCompleteness: SkuDecisionState["computed"]["profitCompleteness"] = null;
 
   if (productCost === null) {
     realProfit = null;
     realMarginPct = null;
-  } else if (currentPrice === null || costoEff === null || !Number.isFinite(costoEff) || costoEff < 0) {
+  } else if (currentPrice === null || !Number.isFinite(productCost) || productCost < 0) {
     realProfit = null;
     realMarginPct = null;
     if (productCost !== null) calculationStatus = "missing_inputs";
   } else {
     const rp = calcRealProfit({
       price_ml: currentPrice,
-      costo: costoEff,
+      productCost,
       logistica,
       reputacion: rep,
-      publicidad_pct: publicidadPct,
-      peso_kg: pesoKg
+      publicidad_pct: input.inputs.publicidadPct ?? null,
+      peso_kg: pesoKg,
+      financialSettings: mergedFinancial,
+      skuAdditionalFixedCost: additionalCosts
     });
+    financialBreakdown = rp.breakdown;
+    profitCompleteness = fiscalNetCompleteFromBreakdown(rp.breakdown) ? "net_full" : "net_partial";
+    if (
+      calculationStatus === "valid" &&
+      (rp.breakdown.missing.includes("iibb") || rp.breakdown.missing.includes("tax"))
+    ) {
+      calculationStatus = "partial";
+    }
     if (rp.converged && Number.isFinite(rp.ganancia_real) && Number.isFinite(rp.margen_real)) {
-      realProfit = rp.ganancia_real;
-      realMarginPct = rp.margen_real;
+      realProfit = rp.breakdown.netProfit;
+      realMarginPct = rp.breakdown.netMarginPct;
       realComisionAmount = Number.isFinite(rp.comision_$) ? rp.comision_$ : null;
       realShippingAmount = Number.isFinite(rp.envio_$) ? rp.envio_$ : null;
       realAdsAmount = Number.isFinite(rp.publicidad_$) ? rp.publicidad_$ : null;
-      realProductCostApplied = Number.isFinite(rp.costo_total) ? rp.costo_total : null;
+      realProductCostApplied = rp.breakdown.productCost;
     } else {
       realProfit = null;
       realMarginPct = null;
-      if (calculationStatus === "valid") calculationStatus = "error";
+      profitCompleteness = null;
+      if (calculationStatus !== "missing_inputs") {
+        calculationStatus = "error";
+      }
     }
   }
 
@@ -528,7 +629,9 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const optimalRoi = sellResult && sellResult.converged && Number.isFinite(sellResult.roi) ? sellResult.roi : null;
 
   const breakEvenPrice =
-    costoEff !== null && costoEff > 0 ? solveBreakEvenPrice(costoEff, logistica, rep, publicidadPct, pesoKg) : null;
+    productCost !== null && productCost > 0
+      ? solveBreakEvenPrice(productCost, additionalCosts, mergedFinancial, logistica, rep, publicidadPct, pesoKg)
+      : null;
 
   const priceDelta =
     optimalPrice !== null && currentPrice !== null && currentPrice > 0
@@ -538,7 +641,13 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const stockBranch = computeStockBranch({ ventas30d, stock, safetyStockPct });
   const { velocity30d, idealStock, stockGap, daysOfStock, stockStatus } = stockBranch;
 
-  const profitabilityStatus = profitabilityFromReal(realProfit, realMarginPct, targetMarginValid);
+  const fiscalComplete = fiscalNetCompleteFromBreakdown(financialBreakdown);
+  const profitabilityStatus = profitabilityFromReal(
+    realProfit,
+    realMarginPct,
+    targetMarginValid,
+    fiscalComplete
+  );
 
   const pricingStatus = pricingStatusFrom(
     targetMarginValid,
@@ -558,7 +667,10 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     currentPrice,
     optimalPrice,
     targetMarginPct: targetMarginValid,
-    stockGap
+    stockGap,
+    fiscalNetComplete: fiscalComplete,
+    breakdownMissing: financialBreakdown?.missing ?? [],
+    realMarginPct
   });
 
   const priorityScore = priorityScoreFrom({
@@ -582,6 +694,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       realShippingAmount,
       realAdsAmount,
       realProductCostApplied,
+      financialBreakdown,
+      profitCompleteness,
       breakEvenPrice,
       priceDelta,
       idealStock,

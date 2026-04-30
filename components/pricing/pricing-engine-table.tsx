@@ -26,6 +26,7 @@ import {
   type PricingSkuRow
 } from "@/lib/pricing/pricing-row-model";
 import { normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
+import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
 import { cn } from "@/lib/utils";
@@ -424,6 +425,9 @@ const PricingEngineRow = memo(function PricingEngineRow({
             {ars.format(gananciaReal)}
           </div>
           <div className="text-xs">{(margenReal * 100).toFixed(1)}% real</div>
+          {netMarginDisplayLabel(decision.computed) ? (
+            <div className="text-[10px] text-amber-900">{netMarginDisplayLabel(decision.computed)}</div>
+          ) : null}
         </div>
       );
     }
@@ -447,6 +451,8 @@ const PricingEngineRow = memo(function PricingEngineRow({
       <div className="text-[10px] font-normal text-amber-800">Falta margen objetivo</div>
     ) : decision.sync.calculationStatus === "error" ? (
       <div className="text-[10px] font-normal text-amber-800">Sin convergencia</div>
+    ) : decision.sync.calculationStatus === "partial" ? (
+      <div className="text-[10px] font-normal text-amber-800">Cálculo parcial (fiscal incompleto)</div>
     ) : null;
 
   return (
