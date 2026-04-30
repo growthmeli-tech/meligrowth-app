@@ -69,7 +69,11 @@ export async function getPrimaryAccountForOperator(): Promise<ActionResult<MlAcc
   const userId = viewer.data.userId;
   const supabase = await createServerSupabaseClient();
 
-  if (role === "client_operator" || role === "internal_operator_meli_growth") {
+  if (
+    role === "client_operator" ||
+    role === "internal_operator_meli_growth" ||
+    role === "super_admin_meli_growth"
+  ) {
     const { data: accessRow, error: accessError } = await supabase
       .from("user_account_access")
       .select("ml_account_id")

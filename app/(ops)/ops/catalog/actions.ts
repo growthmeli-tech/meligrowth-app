@@ -6,7 +6,7 @@ import { getValidAccessToken } from "@/lib/ml/auth";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
 import { linkPricingSkuToItem } from "@/lib/data-v2/unified-catalog";
-import { calcSellingPrice, normalizePct } from "@/lib/pricing/calculator";
+import { calcSellingPrice, coerceReputacion, normalizePct } from "@/lib/pricing/calculator";
 import type { ActionResult } from "@/lib/types/api";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
@@ -80,6 +80,7 @@ export async function saveCostForItem(
     logistica: "Full" | "Flex" | "Retiro domicilio";
     margen_pct: number;
     publicidad_pct: number;
+    reputacion?: string | null;
   }
 ): Promise<ActionResult<{ pricing_sku_id: string }>> {
   const gate = await gateMlAccount(mlAccountId);
@@ -94,65 +95,89 @@ export async function saveCostForItem(
   }
 
   const sku = row.seller_custom_field?.trim() || row.item_id;
-  const pub = normalizePct(input.publicidad_pct);
-  const marg = normalizePct(input.margen_pct) || 0.15;
+  const pub = normalizePct(input.publicidad_pct ?? 0);
+  const margRaw = normalizePct(input.margen_pct);
+  if (!Number.isFinite(margRaw) || margRaw <= 0) {
+    return { success: false, error: "Ingresá un margen objetivo válido (mayor que 0)." };
+  }
+  const repResolved = coerceReputacion(input.reputacion);
   const calc = calcSellingPrice({
     costo: input.costo,
     logistica: input.logistica,
     publicidad_pct: pub,
-    margen_pct: marg,
-    reputacion: "Verde / MercadoLíder"
+    margen_pct: margRaw,
+    reputacion: repResolved
   });
 
-  const { data: inserted, error: insErr } = await supabase
-    .from("pricing_skus")
-    .insert({
-      ml_account_id: mlAccountId,
-      sku,
-      producto: row.title,
-      costo: input.costo,
-      peso_kg: null,
-      logistica: input.logistica,
-      reputacion: "Verde / MercadoLíder",
-      publicidad_pct: pub,
-      margen_pct: marg,
-      precio_venta: calc.converged ? calc.precio_venta : null,
-      ganancia_unit: calc.converged ? calc.ganancia_unit : null,
-      roi: calc.converged ? calc.roi : null,
-      source_file: "ops_catalog_inline"
-    })
-    .select("id")
-    .single();
+  const pricingPayload = {
+    producto: row.title,
+    costo: input.costo,
+    logistica: input.logistica,
+    reputacion: repResolved,
+    publicidad_pct: pub,
+    margen_pct: margRaw,
+    precio_venta: calc.converged ? calc.precio_venta : null,
+    ganancia_unit: calc.converged ? calc.ganancia_unit : null,
+    roi: calc.converged ? calc.roi : null
+  };
 
-  if (insErr || !inserted) {
-    logServerError("catalog.saveCostForItem.insert", insErr ?? "missing_row", { mlAccountId, itemId });
-    return {
-      success: false,
-      error: insErr && isPostgresError(insErr) ? formatSupabaseError(insErr) : "No se pudo guardar el costo",
-      code: insErr?.code
-    };
-  }
+  let pricingId: string;
 
-  const { error: updErr } = await supabase
-    .from("ml_catalog_items")
-    .update({ pricing_sku_id: inserted.id })
-    .eq("ml_account_id", mlAccountId)
-    .eq("item_id", itemId);
+  if (row.pricing_sku_id) {
+    const { error: updSkuErr } = await supabase.from("pricing_skus").update(pricingPayload).eq("id", row.pricing_sku_id).eq("ml_account_id", mlAccountId);
+    if (updSkuErr) {
+      logServerError("catalog.saveCostForItem.updateSku", updSkuErr, { mlAccountId, itemId });
+      return {
+        success: false,
+        error: isPostgresError(updSkuErr) ? formatSupabaseError(updSkuErr) : "No se pudo actualizar la configuración",
+        code: updSkuErr.code
+      };
+    }
+    pricingId = row.pricing_sku_id;
+  } else {
+    const { data: inserted, error: insErr } = await supabase
+      .from("pricing_skus")
+      .insert({
+        ml_account_id: mlAccountId,
+        sku,
+        peso_kg: null,
+        source_file: "ops_catalog_inline",
+        ...pricingPayload
+      })
+      .select("id")
+      .single();
 
-  if (updErr) {
-    logServerError("catalog.saveCostForItem.link", updErr, { mlAccountId, itemId });
-    return {
-      success: false,
-      error: isPostgresError(updErr) ? formatSupabaseError(updErr) : "Costo guardado pero no se vinculó a la publicación",
-      code: updErr.code
-    };
+    if (insErr || !inserted) {
+      logServerError("catalog.saveCostForItem.insert", insErr ?? "missing_row", { mlAccountId, itemId });
+      return {
+        success: false,
+        error: insErr && isPostgresError(insErr) ? formatSupabaseError(insErr) : "No se pudo guardar el costo",
+        code: insErr?.code
+      };
+    }
+    pricingId = inserted.id;
+
+    const { error: updErr } = await supabase
+      .from("ml_catalog_items")
+      .update({ pricing_sku_id: pricingId })
+      .eq("ml_account_id", mlAccountId)
+      .eq("item_id", itemId);
+
+    if (updErr) {
+      logServerError("catalog.saveCostForItem.link", updErr, { mlAccountId, itemId });
+      return {
+        success: false,
+        error: isPostgresError(updErr) ? formatSupabaseError(updErr) : "Costo guardado pero no se vinculó a la publicación",
+        code: updErr.code
+      };
+    }
   }
 
   revalidatePath("/ops/catalog");
   revalidatePath("/ops/pricing");
   revalidatePath("/ops/dashboard");
 
-  return { success: true, data: { pricing_sku_id: inserted.id } };
+  return { success: true, data: { pricing_sku_id: pricingId } };
 }
 
 export async function linkSkuToItem(mlAccountId: string, itemId: string, pricingSkuId: string): Promise<ActionResult<void>> {

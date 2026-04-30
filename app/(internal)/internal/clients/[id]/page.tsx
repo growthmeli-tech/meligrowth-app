@@ -125,6 +125,11 @@ export default async function InternalClientDetailPage({
             </Link>
           </li>
           <li>
+            <Link href={`/internal/clients/${id}/catalog`} className="inline-flex rounded-lg px-3 py-2 hover:bg-[#F5F5F0]">
+              Catálogo
+            </Link>
+          </li>
+          <li>
             <Link href={`/internal/clients/${id}/files`} className="inline-flex rounded-lg px-3 py-2 hover:bg-[#F5F5F0]">
               Archivos
             </Link>

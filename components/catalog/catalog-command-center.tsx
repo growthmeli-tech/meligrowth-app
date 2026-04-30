@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Download, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Filter, RefreshCw } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { cn } from "@/lib/utils";
 import {
@@ -14,7 +13,15 @@ import {
   saveCostForItem,
   triggerCatalogSync
 } from "@/app/(ops)/ops/catalog/actions";
-import { calcRealProfit, calcSellingPrice, coerceReputacion, normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
+import {
+  calcRealProfit,
+  calcSellingPrice,
+  coerceReputacion,
+  mlComisionRate,
+  normalizePct,
+  type LogisticaType,
+  type ReputacionType
+} from "@/lib/pricing/calculator";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -54,6 +61,7 @@ function formatSyncLabel(iso: string | null) {
   return d.toLocaleString("es-AR");
 }
 
+/** Max 2 insights, solo accionables */
 function buildInsights(items: UnifiedCatalogItem[]): string[] {
   const out: string[] = [];
   const destroyers = items.filter(
@@ -62,23 +70,66 @@ function buildInsights(items: UnifiedCatalogItem[]): string[] {
   if (destroyers.length) {
     const x = destroyers[0];
     const m = x.margen_real_pct !== null ? (x.margen_real_pct * 100).toFixed(0) : "?";
-    const target = x.margen_pct !== null ? (x.margen_pct * 100).toFixed(0) : "15";
     out.push(
-      `${x.item_id} vende a ${x.price_ml !== null ? ars.format(x.price_ml) : "—"} pero con margen real de ${m}% — bajo tu objetivo del ${target}%`
+      `${x.item_id}: margen real ${m}% — ajustá precio o costo antes de seguir vendiendo.`
     );
   }
   const sinCosto = items.filter((i) => !i.tiene_costo).length;
-  if (sinCosto > 0 && out.length < 3) {
-    out.push(`${sinCosto} SKU${sinCosto > 1 ? "s" : ""} sin costo configurado — no podés medir rentabilidad`);
+  if (sinCosto > 0 && out.length < 2) {
+    out.push(`${sinCosto} publicación${sinCosto > 1 ? "es" : ""} sin costo — cargá costo para ver ganancia real.`);
   }
-  const crit = items.filter((i) => i.stock_status === "critico").length;
-  if (crit > 0 && out.length < 3) {
-    out.push(`Stock crítico en ${crit} SKU${crit > 1 ? "s" : ""} — riesgo de perder ventas esta semana`);
-  }
-  return out.slice(0, 3);
+  return out.slice(0, 2);
 }
 
-export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, pricingSkuChoices, loadError }: Props) {
+type PillKey = "critico" | "reponer" | "riesgo" | "ok";
+
+function isCriticoRow(row: UnifiedCatalogItem): boolean {
+  return row.stock_status === "critico" || (row.status === "active" && row.stock === 0);
+}
+
+function resolveRowAction(row: UnifiedCatalogItem):
+  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" }
+  | { kind: "sin_stock" }
+  | { kind: "config_cost" }
+  | { kind: "none" } {
+  if (row.tiene_costo && row.margen_real_pct !== null && row.margen_real_pct < 0) {
+    return { kind: "calc", reason: "pierde" };
+  }
+  if (row.status === "active" && row.stock === 0) {
+    return { kind: "sin_stock" };
+  }
+  if (!row.tiene_costo) {
+    return { kind: "config_cost" };
+  }
+  if (
+    row.tiene_costo &&
+    row.margen_real_pct !== null &&
+    row.margen_real_pct >= 0 &&
+    row.margen_real_pct < 0.1 &&
+    row.price_ml !== null
+  ) {
+    return { kind: "calc", reason: "optimizar" };
+  }
+  if (row.precio_vs_objetivo === "bajo") {
+    return { kind: "calc", reason: "subir" };
+  }
+  return { kind: "none" };
+}
+
+function margenObjDefaultForSimulator(row: UnifiedCatalogItem): number {
+  if (row.margen_pct !== null && row.margen_pct !== undefined) {
+    return normalizePct(row.margen_pct) || 0.15;
+  }
+  return 0.15;
+}
+
+export function CatalogCommandCenter({
+  mlAccountId,
+  initialItems,
+  lastSyncedAt,
+  pricingSkuChoices,
+  loadError
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const items = initialItems;
@@ -91,11 +142,12 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
   const [margenFilter, setMargenFilter] = useState<string>("all");
   const [costFilter, setCostFilter] = useState<string>("all");
   const [stockFilter, setStockFilter] = useState<string>("all");
-  const [pillPreset, setPillPreset] = useState<string | null>(null);
+  const [activePill, setActivePill] = useState<PillKey | null>(null);
+  const [advOpen, setAdvOpen] = useState(false);
 
   const [costForms, setCostForms] = useState<Record<string, { costo: string; logistica: string; margen: string; pub: string }>>({});
   const [inlineCostItemId, setInlineCostItemId] = useState<string | null>(null);
-  const [inlinePriceItemId, setInlinePriceItemId] = useState<string | null>(null);
+  const [inlineCalcItemId, setInlineCalcItemId] = useState<string | null>(null);
 
   const stale = useMemo(() => {
     if (!lastSyncedAt) return true;
@@ -116,17 +168,38 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
 
   const insights = useMemo(() => buildInsights(items), [items]);
 
+  const togglePill = (key: PillKey) => {
+    setActivePill((prev) => (prev === key ? null : key));
+  };
+
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return items.filter((row) => {
-      if (pillPreset === "sin_stock") {
-        if (row.stock !== 0) return false;
-      } else if (pillPreset === "sin_costo") {
-        if (row.tiene_costo) return false;
-      } else if (pillPreset === "precio_desviado") {
-        if (!row.precio_desviado) return false;
-      } else if (pillPreset === "ok") {
-        if (!row.tiene_costo || row.precio_desviado || row.stock_critico || row.margen_en_riesgo) return false;
+      if (activePill === "critico") {
+        if (!isCriticoRow(row)) return false;
+      } else if (activePill === "reponer") {
+        if (row.stock_status !== "reponer") return false;
+      } else if (activePill === "riesgo") {
+        if (
+          !(
+            row.tiene_costo &&
+            row.margen_real_pct !== null &&
+            row.margen_real_pct >= 0 &&
+            row.margen_real_pct < 0.1 &&
+            row.price_ml !== null
+          )
+        ) {
+          return false;
+        }
+      } else if (activePill === "ok") {
+        if (
+          !row.tiene_costo ||
+          isCriticoRow(row) ||
+          (row.margen_real_pct !== null && row.margen_real_pct < 0) ||
+          (row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1)
+        ) {
+          return false;
+        }
       }
 
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
@@ -150,26 +223,23 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       }
       return true;
     });
-  }, [items, q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, pillPreset]);
+  }, [items, q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, activePill]);
 
   const counts = useMemo(() => {
-    const sinStock = items.filter((i) => i.status === "active" && i.stock === 0).length;
-    const sinCosto = items.filter((i) => !i.tiene_costo).length;
-    const precioDesviado = items.filter((i) => i.precio_desviado).length;
-    const bien = items.filter((i) => i.tiene_costo && !i.precio_desviado && !i.stock_critico && !i.margen_en_riesgo).length;
-    const critStock = items.filter((i) => i.stock_status === "critico").length;
+    const critico = items.filter((i) => isCriticoRow(i)).length;
     const reponer = items.filter((i) => i.stock_status === "reponer").length;
     const margenRiesgo = items.filter(
       (i) => i.tiene_costo && i.margen_real_pct !== null && i.margen_real_pct >= 0 && i.margen_real_pct < 0.1 && i.price_ml !== null
     ).length;
-    const ok = items.filter(
-      (i) =>
-        i.tiene_costo &&
-        i.stock_status !== "critico" &&
-        !(i.margen_real_pct !== null && i.margen_real_pct < 0) &&
-        !(i.margen_real_pct !== null && i.margen_real_pct < 0.1)
-    ).length;
-    return { sinStock, sinCosto, precioDesviado, bien, critStock, reponer, margenRiesgo, ok };
+    const ok = items.filter((i) => {
+      if (!i.tiene_costo) return false;
+      if (isCriticoRow(i)) return false;
+      const m = i.margen_real_pct;
+      if (m !== null && m < 0) return false;
+      if (m !== null && m >= 0 && m < 0.1) return false;
+      return true;
+    }).length;
+    return { critico, reponer, margenRiesgo, ok };
   }, [items]);
 
   const toggleSelect = (itemId: string) => {
@@ -241,26 +311,16 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
     });
   };
 
-  const applyPill = (key: string | null) => {
-    setPillPreset(key);
-    setCostFilter("all");
-    setMargenFilter("all");
-    setStockFilter("all");
-    if (key === "sin_stock") setStatusFilter("active");
-  };
-
   return (
     <div className="space-y-4" id="mg-catalog-command-table">
-      <header className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+      <header className="sticky top-0 z-30 space-y-3 rounded-xl border border-[#E8E8E2] bg-white/95 p-4 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-xl font-black text-[#1A1A1A]">CATÁLOGO</h1>
+            <h1 className="text-xl font-black text-[#1A1A1A]">CATÁLOGO MELIGROWTH</h1>
             <p className="mt-1 text-sm text-[#6B6B6B]">
-              {items.length} SKUs · Margen real prom.: {promMargenReal === null ? "—" : `${(promMargenReal * 100).toFixed(1)}%`} · Sync:{" "}
+              {items.length} publicaciones · Margen real: {promMargenReal === null ? "—" : `${(promMargenReal * 100).toFixed(1)}%`} · Sync:{" "}
               {formatSyncLabel(lastSyncedAt)}
-              {stale ? (
-                <span className="ml-2 font-semibold text-amber-800">· Datos desactualizados · Sincronizá</span>
-              ) : null}
+              {stale ? <span className="ml-2 font-semibold text-amber-800">· Datos desactualizados</span> : null}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -285,143 +345,156 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-[#E8E8E2] pt-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="search"
-            placeholder="Buscar…"
+            placeholder="Buscar SKU o título…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="min-w-[160px] flex-1 rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm"
           />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
-          >
-            <option value="all">Estado (todos)</option>
-            <option value="active">active</option>
-            <option value="paused">paused</option>
-            <option value="closed">closed</option>
-          </select>
-          <select
-            value={stockFilter}
-            onChange={(e) => setStockFilter(e.target.value)}
-            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
-          >
-            <option value="all">Stock (todos)</option>
-            <option value="critico">Crítico</option>
-            <option value="reponer">Reponer</option>
-            <option value="saludable">Saludable</option>
-            <option value="exceso">Exceso</option>
-          </select>
-          <select
-            value={logFilter}
-            onChange={(e) => setLogFilter(e.target.value)}
-            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
-          >
-            <option value="all">Logística ML (todas)</option>
-            <option value="fulfillment">fulfillment</option>
-            <option value="xd_drop_off">xd_drop_off</option>
-            <option value="cross_docking">cross_docking</option>
-            <option value="self_service">self_service</option>
-          </select>
-          <select
-            value={margenFilter}
-            onChange={(e) => setMargenFilter(e.target.value)}
-            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
-          >
-            <option value="all">Margen real (todos)</option>
-            <option value="pierde">Pierde dinero</option>
-            <option value="riesgo">&lt;10% en riesgo</option>
-            <option value="ok">≥10%</option>
-          </select>
-          <select
-            value={costFilter}
-            onChange={(e) => setCostFilter(e.target.value)}
-            className="rounded-lg border border-[#E8E8E2] px-2 py-2 text-sm font-semibold"
-          >
-            <option value="all">Costo (todos)</option>
-            <option value="sin">Sin costo</option>
-            <option value="con">Con costo</option>
-          </select>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-[#E8E8E2] pt-3 text-xs font-semibold">
-          <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-red-900">
-            {counts.critStock} críticos
-          </span>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-950">
-            {counts.reponer} reponer
-          </span>
-          <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-orange-950">
-            {counts.margenRiesgo} margen riesgo
-          </span>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-900">
-            {counts.ok} ok
-          </span>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => applyPill("sin_stock")}
-            className={cn(
-              "rounded-full px-3 py-1",
-              pillPreset === "sin_stock" ? "bg-red-600 text-white" : "bg-red-50 text-red-900 border border-red-200"
-            )}
-          >
-            {counts.sinStock} sin stock
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPill("sin_costo")}
-            className={cn(
-              "rounded-full px-3 py-1",
-              pillPreset === "sin_costo" ? "bg-amber-400 text-[#1A1A1A]" : "bg-amber-50 text-amber-950 border border-amber-200"
-            )}
-          >
-            {counts.sinCosto} sin costo
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPill("precio_desviado")}
-            className={cn(
-              "rounded-full px-3 py-1",
-              pillPreset === "precio_desviado" ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-950 border border-orange-200"
-            )}
-          >
-            {counts.precioDesviado} precio desviado
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPill("ok")}
-            className={cn(
-              "rounded-full px-3 py-1",
-              pillPreset === "ok" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-900 border border-emerald-200"
-            )}
-          >
-            {counts.bien} bien configurados
-          </button>
-          {pillPreset ? (
-            <button type="button" onClick={() => applyPill(null)} className="rounded-full border border-[#E8E8E2] px-3 py-1 text-[#6B6B6B]">
-              Limpiar filtros rápidos
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAdvOpen(!advOpen)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A] sm:w-auto"
+            >
+              <Filter className="h-4 w-4" />
+              Filtros
+              <ChevronDown className={cn("h-4 w-4 transition", advOpen && "rotate-180")} />
             </button>
-          ) : null}
+            {advOpen ? (
+              <div className="absolute right-0 z-40 mt-1 w-full min-w-[280px] rounded-lg border border-[#E8E8E2] bg-white p-3 shadow-lg sm:w-max">
+                <div className="grid gap-2 text-sm">
+                  <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
+                    Estado
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="active">active</option>
+                      <option value="paused">paused</option>
+                      <option value="closed">closed</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
+                    Stock ML
+                    <select
+                      value={stockFilter}
+                      onChange={(e) => setStockFilter(e.target.value)}
+                      className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="critico">Crítico</option>
+                      <option value="reponer">Reponer</option>
+                      <option value="saludable">Saludable</option>
+                      <option value="exceso">Exceso</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
+                    Logística ML
+                    <select
+                      value={logFilter}
+                      onChange={(e) => setLogFilter(e.target.value)}
+                      className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
+                    >
+                      <option value="all">Todas</option>
+                      <option value="fulfillment">fulfillment</option>
+                      <option value="xd_drop_off">xd_drop_off</option>
+                      <option value="cross_docking">cross_docking</option>
+                      <option value="self_service">self_service</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
+                    Margen real
+                    <select
+                      value={margenFilter}
+                      onChange={(e) => setMargenFilter(e.target.value)}
+                      className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="pierde">Pierde dinero</option>
+                      <option value="riesgo">&lt;10%</option>
+                      <option value="ok">≥10%</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
+                    Costo
+                    <select
+                      value={costFilter}
+                      onChange={(e) => setCostFilter(e.target.value)}
+                      className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="sin">Sin costo</option>
+                      <option value="con">Con costo</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => togglePill("critico")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1.5",
+              activePill === "critico" ? "border-red-600 bg-red-600 text-white" : "border-red-200 bg-red-50 text-red-900"
+            )}
+          >
+            <span aria-hidden>🔴</span>
+            {counts.critico} crítico
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePill("reponer")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1.5",
+              activePill === "reponer" ? "border-amber-500 bg-amber-500 text-[#1A1A1A]" : "border-amber-200 bg-amber-50 text-amber-950"
+            )}
+          >
+            <span aria-hidden>🟡</span>
+            {counts.reponer} reponer
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePill("riesgo")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1.5",
+              activePill === "riesgo" ? "border-orange-500 bg-orange-500 text-white" : "border-orange-200 bg-orange-50 text-orange-950"
+            )}
+          >
+            <span aria-hidden>🟠</span>
+            {counts.margenRiesgo} riesgo
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePill("ok")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1.5",
+              activePill === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            )}
+          >
+            <span aria-hidden>✅</span>
+            {counts.ok} ok
+          </button>
         </div>
 
         {insights.length > 0 ? (
-          <div className="mt-4 space-y-1 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-3 text-sm text-[#1A1A1A]">
+          <div className="space-y-1 border-l-4 border-amber-400 bg-amber-50/80 px-3 py-2 text-xs text-[#1A1A1A]">
             {insights.map((t, i) => (
-              <p key={i} className="flex gap-2">
-                <span aria-hidden>💡</span>
-                <span>{t}</span>
-              </p>
+              <p key={i}>{t}</p>
             ))}
           </div>
         ) : null}
 
-        {loadError ? <p className="mt-3 text-sm text-red-700">{loadError}</p> : null}
-        {syncHint ? <p className="mt-3 text-sm text-red-700">{syncHint}</p> : null}
+        {loadError ? <p className="text-sm text-red-700">{loadError}</p> : null}
+        {syncHint ? <p className="text-sm text-red-700">{syncHint}</p> : null}
       </header>
 
       {selected.size > 0 ? (
@@ -437,10 +510,10 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
       ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[1020px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]">
-              <th className="p-2 w-8">
+              <th className="w-8 p-2">
                 <input
                   type="checkbox"
                   aria-label="Seleccionar todas"
@@ -449,20 +522,19 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
                 />
               </th>
               <th className="p-2">IMG</th>
-              <th className="p-2">Título / MLA</th>
+              <th className="p-2">Producto + MLA</th>
               <th className="p-2">Stock</th>
               <th className="p-2">Precio ML</th>
               <th className="p-2">Costo</th>
-              <th className="p-2">Ganancia real</th>
-              <th className="p-2">Margen</th>
+              <th className="p-2">Ganancia</th>
               <th className="p-2">Acción</th>
-              <th className="p-2 w-8" />
+              <th className="w-8 p-2" />
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-6 text-center">
+                <td colSpan={9} className="p-6 text-center">
                   <p className="font-medium text-[#1A1A1A]">No hay publicaciones sincronizadas.</p>
                   <button type="button" disabled={pending} onClick={onSync} className="mt-4 rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold">
                     Sincronizar con Mercado Libre
@@ -487,8 +559,10 @@ export function CatalogCommandCenter({ mlAccountId, initialItems, lastSyncedAt, 
                   startTransition={startTransition}
                   inlineCostOpen={inlineCostItemId === row.item_id}
                   setInlineCostOpen={(v) => setInlineCostItemId(v ? row.item_id : null)}
-                  inlinePriceOpen={inlinePriceItemId === row.item_id}
-                  setInlinePriceOpen={(v) => setInlinePriceItemId(v ? row.item_id : null)}
+                  inlineCalcOpen={inlineCalcItemId === row.item_id}
+                  setInlineCalcOpen={(v) => setInlineCalcItemId(v ? row.item_id : null)}
+                  rowAction={resolveRowAction(row)}
+                  margenObjSimulatorDefault={margenObjDefaultForSimulator(row)}
                 />
               ))
             )}
@@ -514,8 +588,10 @@ function CatalogRows({
   startTransition,
   inlineCostOpen,
   setInlineCostOpen,
-  inlinePriceOpen,
-  setInlinePriceOpen
+  inlineCalcOpen,
+  setInlineCalcOpen,
+  rowAction,
+  margenObjSimulatorDefault
 }: {
   row: UnifiedCatalogItem;
   expanded: boolean;
@@ -531,34 +607,24 @@ function CatalogRows({
   startTransition: (cb: () => Promise<void>) => void;
   inlineCostOpen: boolean;
   setInlineCostOpen: (open: boolean) => void;
-  inlinePriceOpen: boolean;
-  setInlinePriceOpen: (open: boolean) => void;
+  inlineCalcOpen: boolean;
+  setInlineCalcOpen: (open: boolean) => void;
+  rowAction: ReturnType<typeof resolveRowAction>;
+  margenObjSimulatorDefault: number;
 }) {
-  const logistica = (row.logistica ?? "Flex") as LogisticaType;
+  const logisticaRow = (row.logistica ?? "Flex") as LogisticaType;
   const rep = coerceReputacion(row.reputacion);
-  const pubN = normalizePct(row.publicidad_pct);
-  const margN = normalizePct(row.margen_pct ?? 0.15) || 0.15;
+  const pubN = normalizePct(row.publicidad_pct ?? 0);
 
   const liveReal =
     row.tiene_costo && row.price_ml !== null && row.costo !== null && row.costo > 0
       ? calcRealProfit({
           price_ml: row.price_ml,
           costo: row.costo,
-          logistica,
+          logistica: logisticaRow,
           reputacion: rep,
           publicidad_pct: pubN,
           peso_kg: row.peso_kg
-        })
-      : null;
-
-  const liveTarget =
-    row.tiene_costo && row.costo !== null && row.costo > 0
-      ? calcSellingPrice({
-          costo: row.costo,
-          logistica,
-          publicidad_pct: pubN,
-          margen_pct: margN,
-          reputacion: rep
         })
       : null;
 
@@ -570,36 +636,42 @@ function CatalogRows({
         : "—";
 
   const margenRealLabel =
-    !row.tiene_costo || row.margen_real_pct === null ? (row.tiene_costo ? "—" : "—") : `${(row.margen_real_pct * 100).toFixed(1)}%`;
+    !row.tiene_costo || row.margen_real_pct === null ? "—" : `${(row.margen_real_pct * 100).toFixed(1)}% real`;
 
   const pierde = row.margen_real_pct !== null && row.margen_real_pct < 0;
-  const riesgoMargen = row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1;
+  const riesgoMargen = row.tiene_costo && row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1;
 
-  const rowBg = !row.tiene_costo
-    ? "bg-neutral-50"
-    : pierde
-      ? "bg-red-100/90"
-      : riesgoMargen
-        ? "bg-amber-50"
-        : "";
+  const stockEsCriticoVisual = isCriticoRow(row);
 
-  const borderLeft = row.stock_status === "critico" ? "border-l-4 border-l-red-600" : "border-l-4 border-l-transparent";
+  const rowBg = !row.tiene_costo ? "bg-neutral-50/80" : pierde ? "bg-red-50" : "";
 
-  const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-100 font-semibold text-orange-950" : "";
+  const borderLeft = stockEsCriticoVisual
+    ? "border-l-4 border-l-red-500"
+    : riesgoMargen && !pierde
+      ? "border-l-4 border-l-amber-400"
+      : "border-l-4 border-l-transparent";
+
+  const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-50 font-semibold text-orange-950" : "";
 
   const [linkId, setLinkId] = useState("");
   const [hint, setHint] = useState<string | null>(null);
 
-  const action =
-    !row.tiene_costo
-      ? { kind: "cost" as const }
-      : pierde
-        ? { kind: "price" as const }
-        : row.precio_vs_objetivo === "bajo"
-          ? { kind: "bajo" as const }
-          : row.stock_status === "critico"
-            ? { kind: "stock" as const }
-            : { kind: "none" as const };
+  const comisionPctLabel = `${(mlComisionRate(rep) * 100).toFixed(2)}%`;
+  const envioLabel = row.logistic_type ?? row.logistica ?? "—";
+
+  const openCalculator = () => {
+    setInlineCalcOpen(true);
+    setInlineCostOpen(false);
+  };
+
+  const stockBadgeClass =
+    row.status === "active" && row.stock === 0
+      ? "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white"
+      : row.stock_status === "critico"
+        ? "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white"
+        : row.stock_status === "reponer"
+          ? "rounded bg-amber-500 px-2 py-0.5 text-xs font-bold text-white"
+          : "";
 
   return (
     <>
@@ -616,7 +688,7 @@ function CatalogRows({
           )}
         </td>
         <td className="p-2">
-          <div className="font-semibold text-[#1A1A1A]">{row.title}</div>
+          <div className="font-semibold leading-snug text-[#1A1A1A]">{row.title}</div>
           <div className="mt-1 font-mono text-xs text-[#6B6B6B]">{row.item_id}</div>
           {row.sku ? <div className="text-xs text-[#6B6B6B]">SKU costos: {row.sku}</div> : null}
           {!row.tiene_costo ? (
@@ -626,54 +698,50 @@ function CatalogRows({
           ) : null}
         </td>
         <td className="p-2">
-          <span
-            className={cn(
-              row.stock_status === "critico" && "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white",
-              row.stock_status === "reponer" && "rounded bg-amber-500 px-2 py-0.5 text-xs font-bold text-white"
-            )}
-          >
-            {row.stock === null ? "—" : row.stock}
-          </span>
+          <span className={cn(stockBadgeClass)}>{row.stock === null ? "—" : row.stock}</span>
         </td>
         <td className={cn("p-2 tabular-nums", precioCellClass)}>{row.price_ml === null ? "—" : ars.format(row.price_ml)}</td>
         <td className="p-2 tabular-nums">{row.costo === null ? "—" : ars.format(row.costo)}</td>
-        <td className="p-2 tabular-nums font-medium">{gananciaRealLabel}</td>
-        <td className="p-2 tabular-nums">{!row.tiene_costo ? "—" : margenRealLabel}</td>
+        <td className="p-2 tabular-nums">
+          <div className="font-medium">{gananciaRealLabel}</div>
+          <div className="text-xs text-[#6B6B6B]">{margenRealLabel}</div>
+        </td>
         <td className="p-2 text-xs">
-          {action.kind === "cost" ? (
+          {rowAction.kind === "config_cost" ? (
             <button
               type="button"
-              className="font-semibold text-blue-700 underline"
+              className="font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
               onClick={() => {
                 setInlineCostOpen(!inlineCostOpen);
-                setInlinePriceOpen(false);
+                setInlineCalcOpen(false);
               }}
             >
-              Configurar costo
+              Configurar →
             </button>
-          ) : action.kind === "price" ? (
+          ) : rowAction.kind === "sin_stock" ? (
+            <span className="font-semibold text-amber-900">⚠ Sin stock</span>
+          ) : rowAction.kind === "calc" ? (
             <button
               type="button"
-              className="font-semibold text-red-800 underline"
-              onClick={() => {
-                setInlinePriceOpen(!inlinePriceOpen);
-                setInlineCostOpen(false);
-              }}
+              className={cn(
+                "font-semibold underline underline-offset-2",
+                rowAction.reason === "pierde" ? "text-red-800 decoration-red-800" : "text-[#1A1A1A] decoration-[#1A1A1A]"
+              )}
+              onClick={openCalculator}
             >
-              Ajustar precio
+              {rowAction.reason === "pierde"
+                ? "🔴 Pierde dinero"
+                : rowAction.reason === "optimizar"
+                  ? "📈 Optimizar precio"
+                  : "↑ Subir precio"}
             </button>
-          ) : action.kind === "bajo" ? (
-            <span className="font-semibold text-orange-800">Precio bajo objetivo</span>
-          ) : action.kind === "stock" ? (
-            <Link href="/ops/catalog#mg-catalog-command-table" className="font-semibold text-red-800 underline">
-              Reponer urgente
-            </Link>
           ) : (
-            "—"
+            <span className="text-[#6B6B6B]"> </span>
           )}
         </td>
         <td className="p-2">
-          <button type="button" onClick={onToggleExpand} className="grid place-items-center rounded border border-[#E8E8E2] p-1">
+          <button type="button" onClick={onToggleExpand} className="grid place-items-center rounded border border-[#E8E8E2] p-1" aria-expanded={expanded}>
+            <span className="sr-only">Detalle</span>
             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
         </td>
@@ -681,8 +749,8 @@ function CatalogRows({
 
       {inlineCostOpen && !row.tiene_costo ? (
         <tr className="border-b border-[#E8E8E2] bg-neutral-50">
-          <td colSpan={10} className="p-4">
-            <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo (inline)</p>
+          <td colSpan={9} className="p-4">
+            <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-xs font-semibold text-[#6B6B6B]">
                 Costo $
@@ -696,8 +764,8 @@ function CatalogRows({
                       [row.item_id]: {
                         costo: e.target.value,
                         logistica: prev[row.item_id]?.logistica ?? "Flex",
-                        margen: prev[row.item_id]?.margen ?? "15",
-                        pub: prev[row.item_id]?.pub ?? "10"
+                        margen: prev[row.item_id]?.margen ?? "",
+                        pub: prev[row.item_id]?.pub ?? "0"
                       }
                     }))
                   }
@@ -714,8 +782,8 @@ function CatalogRows({
                       [row.item_id]: {
                         costo: prev[row.item_id]?.costo ?? "",
                         logistica: e.target.value,
-                        margen: prev[row.item_id]?.margen ?? "15",
-                        pub: prev[row.item_id]?.pub ?? "10"
+                        margen: prev[row.item_id]?.margen ?? "",
+                        pub: prev[row.item_id]?.pub ?? "0"
                       }
                     }))
                   }
@@ -731,14 +799,14 @@ function CatalogRows({
                   type="number"
                   step="0.01"
                   className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.pub ?? "10"}
+                  value={costForms[row.item_id]?.pub ?? "0"}
                   onChange={(e) =>
                     setCostForms((prev) => ({
                       ...prev,
                       [row.item_id]: {
                         costo: prev[row.item_id]?.costo ?? "",
                         logistica: prev[row.item_id]?.logistica ?? "Flex",
-                        margen: prev[row.item_id]?.margen ?? "15",
+                        margen: prev[row.item_id]?.margen ?? "",
                         pub: e.target.value
                       }
                     }))
@@ -746,12 +814,13 @@ function CatalogRows({
                 />
               </label>
               <label className="text-xs font-semibold text-[#6B6B6B]">
-                % Margen objetivo (0–100 o 0–1)
+                % Margen objetivo (requerido)
                 <input
                   type="number"
                   step="0.01"
                   className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.margen ?? "15"}
+                  value={costForms[row.item_id]?.margen ?? ""}
+                  placeholder="Ej. 15"
                   onChange={(e) =>
                     setCostForms((prev) => ({
                       ...prev,
@@ -759,7 +828,7 @@ function CatalogRows({
                         costo: prev[row.item_id]?.costo ?? "",
                         logistica: prev[row.item_id]?.logistica ?? "Flex",
                         margen: e.target.value,
-                        pub: prev[row.item_id]?.pub ?? "10"
+                        pub: prev[row.item_id]?.pub ?? "0"
                       }
                     }))
                   }
@@ -779,9 +848,18 @@ function CatalogRows({
                     setHint("Ingresá un costo válido.");
                     return;
                   }
+                  const margenStr = f?.margen?.trim() ?? "";
+                  if (margenStr === "") {
+                    setHint("Ingresá un margen objetivo para calcular el precio.");
+                    return;
+                  }
+                  const margen_pct = normalizePct(Number(margenStr));
+                  if (!Number.isFinite(margen_pct) || margen_pct <= 0) {
+                    setHint("Ingresá un margen objetivo para calcular el precio.");
+                    return;
+                  }
+                  const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
                   const logisticaIns = (f?.logistica ?? "Flex") as "Full" | "Flex" | "Retiro domicilio";
-                  const margen_pct = normalizePct(Number(f?.margen ?? 15));
-                  const publicidad_pct = normalizePct(Number(f?.pub ?? 10));
                   setHint(null);
                   startTransition(async () => {
                     const res = await saveCostForItem(mlAccountId, row.item_id, {
@@ -801,7 +879,11 @@ function CatalogRows({
               >
                 Guardar
               </button>
-              <button type="button" className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold" onClick={() => setInlineCostOpen(false)}>
+              <button
+                type="button"
+                className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold"
+                onClick={() => setInlineCostOpen(false)}
+              >
                 Cancelar
               </button>
             </div>
@@ -809,47 +891,58 @@ function CatalogRows({
         </tr>
       ) : null}
 
-      {inlinePriceOpen && row.tiene_costo ? (
-        <tr className="border-b border-[#E8E8E2] bg-red-50/80">
-          <td colSpan={10} className="p-4 text-sm">
-            <p className="font-semibold text-[#1A1A1A]">Ajustar precio en Mercado Libre</p>
-            <p className="mt-1 text-[#6B6B6B]">
-              Precio objetivo calculado (margen deseado):{" "}
-              {liveTarget && liveTarget.converged ? (
-                <span className="font-mono font-semibold text-[#1A1A1A]">{ars.format(liveTarget.precio_venta)}</span>
-              ) : (
-                "—"
-              )}
-              . Actualizá el precio en la publicación; la app no puede modificar ML por API en este entorno.
-            </p>
-            {row.permalink ? (
-              <Link href={row.permalink} className="mt-2 inline-block font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">
-                Abrir publicación en ML
-              </Link>
-            ) : null}
-            <button type="button" className="mt-2 ml-3 text-sm font-semibold text-[#6B6B6B] underline" onClick={() => setInlinePriceOpen(false)}>
-              Cerrar
-            </button>
+      {inlineCalcOpen && row.tiene_costo ? (
+        <tr className="border-b border-[#E8E8E2] bg-[#FAFAF8]">
+          <td colSpan={9} className="p-4">
+            <InlinePriceCalculator
+              row={row}
+              mlAccountId={mlAccountId}
+              pending={pending}
+              margenObjDefault={margenObjSimulatorDefault}
+              onClose={() => setInlineCalcOpen(false)}
+              onSaved={onSaved}
+              startTransition={startTransition}
+              setHint={setHint}
+            />
+            {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
           </td>
         </tr>
       ) : null}
 
       {expanded ? (
         <tr className={cn("border-b border-[#E8E8E2] bg-[#FAFAF8]", rowBg)}>
-          <td colSpan={10} className="p-4">
+          <td colSpan={9} className="p-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
-                <p className="font-bold text-[#1A1A1A]">Desglose rentabilidad</p>
+                <p className="font-bold text-[#1A1A1A]">Desglose</p>
                 {row.price_ml !== null && row.tiene_costo && liveReal && liveReal.converged ? (
                   <ul className="space-y-1 font-mono text-xs leading-relaxed">
-                    <li>Precio ML: {ars.format(row.price_ml)}</li>
-                    <li>- Comisión ML: − {ars.format(liveReal.comision_$)}</li>
-                    <li>- Costo envío ({row.logistica ?? "Flex"}): − {ars.format(liveReal.envio_$)}</li>
-                    <li>- Publicidad ({(pubN * 100).toFixed(0)}%): − {ars.format(liveReal.publicidad_$)}</li>
-                    <li>- Costo producto: − {ars.format(liveReal.costo_total)}</li>
-                    <li className="border-t border-[#E8E8E2] pt-1 font-semibold">
-                      Ganancia real: {liveReal.ganancia_real >= 0 ? "+" : ""}
-                      {ars.format(liveReal.ganancia_real)} ({((liveReal.ganancia_real / row.price_ml) * 100).toFixed(1)}%)
+                    <li className="flex justify-between gap-4">
+                      <span>Precio ML actual:</span>
+                      <span>{ars.format(row.price_ml)}</span>
+                    </li>
+                    <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                      <span>− Comisión ML {comisionPctLabel}:</span>
+                      <span>− {ars.format(liveReal.comision_$)}</span>
+                    </li>
+                    <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                      <span>− Envío ({envioLabel}):</span>
+                      <span>− {ars.format(liveReal.envio_$)}</span>
+                    </li>
+                    <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                      <span>− Publicidad ({(pubN * 100).toFixed(0)}%):</span>
+                      <span>− {ars.format(liveReal.publicidad_$)}</span>
+                    </li>
+                    <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                      <span>− Costo producto:</span>
+                      <span>− {ars.format(liveReal.costo_total)}</span>
+                    </li>
+                    <li className="flex justify-between gap-4 border-t border-[#E8E8E2] pt-1 font-semibold text-[#1A1A1A]">
+                      <span>Ganancia real:</span>
+                      <span>
+                        {liveReal.ganancia_real >= 0 ? "+" : ""}
+                        {ars.format(liveReal.ganancia_real)} ({(liveReal.margen_real * 100).toFixed(1)}%)
+                      </span>
                     </li>
                   </ul>
                 ) : (
@@ -859,18 +952,17 @@ function CatalogRows({
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Stock</p>
                 <p>Stock actual: {row.stock === null ? "—" : `${row.stock} unidad${row.stock === 1 ? "" : "es"}`}</p>
-                <p>Ventas 30d: {row.ventas_30d === null ? "N/A" : row.ventas_30d}</p>
+                <p>Ventas 30d: {row.ventas_30d === null ? "Sin datos" : row.ventas_30d}</p>
                 <p className="text-[#6B6B6B]">
-                  Estado:{" "}
                   {row.ventas_30d === null
-                    ? "Sin datos de ventas (sync ML aún no expone ventas 30d por ítem)."
-                    : `${row.stock_status ?? "—"} · Urgencia ${row.stock_urgency ?? "—"}`}
+                    ? "Estado: Saludable (sin histórico de ventas en ítem)."
+                    : `Estado: ${row.stock_status ?? "—"} · Urgencia ${row.stock_urgency ?? "—"}`}
                 </p>
                 {row.permalink ? (
                   <p>
-                    <Link href={row.permalink} className="font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">
+                    <a href={row.permalink} className="font-semibold text-blue-700 underline" target="_blank" rel="noreferrer">
                       Abrir en ML
-                    </Link>
+                    </a>
                   </p>
                 ) : null}
               </div>
@@ -908,15 +1000,268 @@ function CatalogRows({
                       Vincular
                     </button>
                   </div>
-                  {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
                 </div>
               ) : (
-                <p className="text-xs text-[#6B6B6B]">Usá &quot;Configurar costo&quot; en la columna Acción para cargar costos sin salir de la tabla.</p>
+                <p className="text-xs text-[#6B6B6B]">Configurá costo desde la columna Acción.</p>
               )}
             </div>
           </td>
         </tr>
       ) : null}
     </>
+  );
+}
+
+const LOGISTICA_OPTIONS: LogisticaType[] = ["Flex", "Full", "Retiro domicilio"];
+const REP_OPTIONS: ReputacionType[] = ["Verde / MercadoLíder", "Naranja o Roja"];
+
+function InlinePriceCalculator({
+  row,
+  mlAccountId,
+  pending,
+  margenObjDefault,
+  onClose,
+  onSaved,
+  startTransition,
+  setHint
+}: {
+  row: UnifiedCatalogItem;
+  mlAccountId: string;
+  pending: boolean;
+  margenObjDefault: number;
+  onClose: () => void;
+  onSaved: () => void;
+  startTransition: (cb: () => Promise<void>) => void;
+  setHint: (s: string | null) => void;
+}) {
+  const defaultCost = row.costo !== null && row.costo > 0 ? String(Math.round(row.costo)) : "";
+  const defaultPub =
+    row.publicidad_pct !== null && row.publicidad_pct !== undefined
+      ? String(normalizePct(row.publicidad_pct) * 100)
+      : "0";
+  const defaultMarg =
+    row.margen_pct !== null && row.margen_pct !== undefined
+      ? String(Math.round(normalizePct(row.margen_pct) * 1000) / 10)
+      : String(Math.round(margenObjDefault * 1000) / 10);
+
+  const [costoStr, setCostoStr] = useState(defaultCost);
+  const [pubStr, setPubStr] = useState(defaultPub);
+  const [margStr, setMargStr] = useState(defaultMarg);
+  const [logistica, setLogistica] = useState<LogisticaType>((row.logistica ?? "Flex") as LogisticaType);
+  const [reputacion, setReputacion] = useState<ReputacionType>(coerceReputacion(row.reputacion));
+
+  const sim = useMemo(() => {
+    const costo = Number(costoStr.replace(",", "."));
+    const pub = normalizePct(Number(pubStr.replace(",", ".")));
+    const marg = normalizePct(Number(margStr.replace(",", ".")));
+    if (!Number.isFinite(costo) || costo <= 0) {
+      return null;
+    }
+    const sell = calcSellingPrice({
+      costo,
+      logistica,
+      publicidad_pct: pub,
+      margen_pct: marg > 0 ? marg : 0.15,
+      reputacion
+    });
+    const realAtMl =
+      row.price_ml !== null && Number.isFinite(row.price_ml)
+        ? calcRealProfit({
+            price_ml: row.price_ml,
+            costo,
+            logistica,
+            reputacion,
+            publicidad_pct: pub,
+            peso_kg: row.peso_kg
+          })
+        : null;
+    return { sell, realAtMl, costo, pub, marg: marg > 0 ? marg : 0.15 };
+  }, [costoStr, pubStr, margStr, logistica, reputacion, row.price_ml, row.peso_kg]);
+
+  const deltaVsMl =
+    sim?.sell.converged && row.price_ml !== null && Number.isFinite(row.price_ml)
+      ? row.price_ml - sim.sell.precio_venta
+      : null;
+
+  const margenRealSim =
+    sim?.sell.converged && Number.isFinite(sim.sell.precio_venta) && sim.costo > 0
+      ? calcRealProfit({
+          price_ml: sim.sell.precio_venta,
+          costo: sim.costo,
+          logistica,
+          reputacion,
+          publicidad_pct: sim.pub,
+          peso_kg: row.peso_kg
+        })
+      : null;
+
+  return (
+    <div className="rounded-xl border border-[#E8E8E2] bg-white p-4">
+      <p className="text-xs font-bold uppercase tracking-wider text-[#6B6B6B]">Calculadora de precio</p>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-[#6B6B6B]">Entradas</p>
+          <label className="block text-xs font-semibold text-[#6B6B6B]">
+            Costo
+            <input
+              type="number"
+              className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
+              value={costoStr}
+              onChange={(e) => setCostoStr(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs font-semibold text-[#6B6B6B]">
+            Publicidad %
+            <input
+              type="number"
+              step="0.1"
+              className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
+              value={pubStr}
+              onChange={(e) => setPubStr(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs font-semibold text-[#6B6B6B]">
+            Margen obj. %
+            <input
+              type="number"
+              step="0.1"
+              className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
+              value={margStr}
+              onChange={(e) => setMargStr(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs font-semibold text-[#6B6B6B]">
+            Logística
+            <select
+              className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
+              value={logistica}
+              onChange={(e) => setLogistica(e.target.value as LogisticaType)}
+            >
+              {LOGISTICA_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-[#6B6B6B]">
+            Reputación
+            <select
+              className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
+              value={reputacion}
+              onChange={(e) => setReputacion(e.target.value as ReputacionType)}
+            >
+              {REP_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="space-y-2 rounded-lg bg-[#F5F5F0] p-3 text-sm">
+          <p className="text-xs font-semibold text-[#6B6B6B]">Resultado (simulación)</p>
+          {sim?.sell.converged && Number.isFinite(sim.sell.precio_venta) ? (
+            <>
+              <p className="flex justify-between">
+                <span>Precio de venta</span>
+                <span className="font-mono font-semibold">{ars.format(sim.sell.precio_venta)}</span>
+              </p>
+              <p className="flex justify-between text-[#6B6B6B]">
+                <span>Ganancia (objetivo)</span>
+                <span className="font-mono">{ars.format(sim.sell.ganancia_unit)}</span>
+              </p>
+              <p className="flex justify-between text-[#6B6B6B]">
+                <span>Margen real (a ese precio)</span>
+                <span className="font-mono">
+                  {margenRealSim?.converged ? `${(margenRealSim.margen_real * 100).toFixed(1)}%` : "—"}
+                </span>
+              </p>
+              <p className="flex justify-between text-[#6B6B6B]">
+                <span>ROI</span>
+                <span className="font-mono">{sim.sell.roi.toFixed(1)}%</span>
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-[#6B6B6B]">Ingresá un costo válido para ver el resultado.</p>
+          )}
+          {deltaVsMl !== null && Number.isFinite(deltaVsMl) && row.price_ml !== null ? (
+            <p className="mt-2 border-t border-[#E8E8E2] pt-2 text-xs text-[#1A1A1A]">
+              vs. precio ML actual: ML {ars.format(row.price_ml)}{" "}
+              {deltaVsMl > 0 ? (
+                <span className="text-orange-800">
+                  ↑ {ars.format(Math.abs(deltaVsMl))} más alto que el objetivo
+                </span>
+              ) : deltaVsMl < 0 ? (
+                <span className="text-emerald-800">
+                  ↓ {ars.format(Math.abs(deltaVsMl))} más bajo que el objetivo
+                </span>
+              ) : (
+                <span>— alineado</span>
+              )}
+            </p>
+          ) : null}
+          {row.price_ml !== null && sim?.realAtMl?.converged ? (
+            <p className="text-xs text-[#6B6B6B]">
+              Ganancia a precio ML actual: {ars.format(sim.realAtMl.ganancia_real)} (
+              {(sim.realAtMl.margen_real * 100).toFixed(1)}%)
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[#E8E8E2] pt-3">
+        <div className="flex flex-wrap gap-2">
+          {row.permalink ? (
+            <a
+              href={row.permalink}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-semibold text-blue-700 underline"
+            >
+              Abrir publicación en ML →
+            </a>
+          ) : null}
+          <button type="button" className="text-sm font-semibold text-[#6B6B6B] underline" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+        <button
+          type="button"
+          disabled={pending}
+          className="rounded-lg bg-[#FFD600] px-3 py-2 text-sm font-semibold text-[#1A1A1A] disabled:opacity-60"
+          onClick={() => {
+            const costo = Number(costoStr.replace(",", "."));
+            if (!Number.isFinite(costo) || costo <= 0) {
+              setHint("Ingresá un costo válido para guardar.");
+              return;
+            }
+            const margen_pct = normalizePct(Number(margStr.replace(",", ".")));
+            if (!Number.isFinite(margen_pct) || margen_pct <= 0) {
+              setHint("Ingresá un margen objetivo para calcular el precio.");
+              return;
+            }
+            const publicidad_pct = normalizePct(Number(pubStr.replace(",", ".")));
+            setHint(null);
+            startTransition(async () => {
+              const res = await saveCostForItem(mlAccountId, row.item_id, {
+                costo,
+                logistica,
+                margen_pct,
+                publicidad_pct,
+                reputacion
+              });
+              if (!res.success) {
+                setHint(res.error ?? "No se pudo guardar");
+                return;
+              }
+              onClose();
+              onSaved();
+            });
+          }}
+        >
+          Guardar configuración
+        </button>
+      </div>
+    </div>
   );
 }
