@@ -4,6 +4,8 @@ import type { Database } from "@/lib/supabase/database.types";
 
 type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
 
+const ML_ACCOUNT = "00000000-0000-4000-8000-000000000099";
+
 function basePricing(over: Partial<PricingSkuRow>): PricingSkuRow {
   return {
     id: "00000000-0000-4000-8000-000000000001",
@@ -36,15 +38,17 @@ describe("computeUnifiedCatalogDerived", () => {
       seller_custom_field: null,
       item_id: "MLA123",
       sold_quantity: 0,
-      ventas_30d: null as number | null
+      ventas_30d: null as number | null,
+      title: "T"
     };
-    const d = computeUnifiedCatalogDerived(ml, basePricing({}));
+    const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}));
     expect(d.ganancia_real).not.toBeNull();
     expect(d.margen_real_pct).not.toBeNull();
     expect(d.ganancia_real).toBeGreaterThan(0);
     expect(d.comision_real).not.toBeNull();
     expect(d.envio_real).not.toBeNull();
     expect(d.publicidad_real).not.toBeNull();
+    expect(d.decisionState.computed.realProfit).toBe(d.ganancia_real);
   });
 
   it("normaliza publicidad_pct = 10 como 10%", () => {
@@ -56,9 +60,10 @@ describe("computeUnifiedCatalogDerived", () => {
       seller_custom_field: null,
       item_id: "MLA999",
       sold_quantity: null,
-      ventas_30d: null as number | null
+      ventas_30d: null as number | null,
+      title: "T"
     };
-    const d = computeUnifiedCatalogDerived(ml, basePricing({ publicidad_pct: 10, margen_pct: 15 }));
+    const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({ publicidad_pct: 10, margen_pct: 15 }));
     expect(d.publicidad_real).toBeCloseTo(3000, 1);
   });
 
@@ -71,11 +76,46 @@ describe("computeUnifiedCatalogDerived", () => {
       seller_custom_field: null,
       item_id: "MLA777",
       sold_quantity: null,
-      ventas_30d: null as number | null
+      ventas_30d: null as number | null,
+      title: "T"
     };
-    const d = computeUnifiedCatalogDerived(ml, null);
+    const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, null);
     expect(d.tiene_costo).toBe(false);
     expect(d.ganancia_real).toBeNull();
     expect(d.margen_real_pct).toBeNull();
+  });
+
+  it("margen_pct null → sin precio_calculado", () => {
+    const ml = {
+      price: 25_000,
+      available_quantity: 3,
+      status: "active",
+      pricing_sku_id: null,
+      seller_custom_field: null,
+      item_id: "MLA-NM",
+      sold_quantity: 0,
+      ventas_30d: 10,
+      title: "T"
+    };
+    const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({ margen_pct: null as unknown as number }));
+    expect(d.precio_calculado).toBeNull();
+    expect(d.decisionState.computed.optimalPrice).toBeNull();
+  });
+
+  it("ventas_30d null → stock syncing en decisionState", () => {
+    const ml = {
+      price: 20_000,
+      available_quantity: 5,
+      status: "active",
+      pricing_sku_id: null,
+      seller_custom_field: null,
+      item_id: "MLA-SYNC",
+      sold_quantity: 0,
+      ventas_30d: null,
+      title: "T"
+    };
+    const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}));
+    expect(d.decisionState.decision.stockStatus).toBe("syncing");
+    expect(d.stock_status).toBeNull();
   });
 });

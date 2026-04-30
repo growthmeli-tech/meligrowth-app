@@ -7,7 +7,7 @@ import { listAlertsByAccount } from "@/lib/data-v2/alerts";
 import { getLatestIngestionRunByAccount } from "@/lib/data-v2/ingestion-runs";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { listTasksByAccount } from "@/lib/data-v2/tasks";
-import { getCatalogHealthSummary } from "@/lib/data-v2/unified-catalog";
+import { getCatalogHealthSummary } from "@/lib/data-v2/unified-catalog.server";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 import { getOperationalPriorityCopy } from "@/lib/ops/copy";
 import { countPricingRiskAlerts } from "@/lib/pricing/pricing-sku-computed";

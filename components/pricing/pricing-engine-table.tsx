@@ -1,30 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AlertTriangle, Search } from "lucide-react";
-import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
+import { getCachedDecisionState, invalidateDecisionCacheBySkuId, makeDecisionCacheKey } from "@/lib/pricing/decision-state-cache";
 import {
-  calcRealProfit,
-  calcSellingPrice,
-  coerceReputacion,
-  normalizePct,
-  type LogisticaType
-} from "@/lib/pricing/calculator";
+  selectFilteredPricingRowIds,
+  selectHeaderMetrics,
+  selectVisiblePricingRows,
+  pricingTierFromDecision
+} from "@/lib/pricing/pricing-engine-selectors";
+import {
+  buildPricingRowInput,
+  mergePricingMlLink,
+  makeDraftImpactKey,
+  makeMlLinksImpactKey,
+  makeMlOverrideImpactKey,
+  makePricingFilterImpactKey,
+  pricingDraftFieldsEqual,
+  pricingMlLinkFieldsEqual,
+  pricingSkuRowFieldsEqual,
+  rowToDraft,
+  type PricingDraft,
+  type PricingSkuRow
+} from "@/lib/pricing/pricing-row-model";
+import { normalizePct, type LogisticaType } from "@/lib/pricing/calculator";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
 import { cn } from "@/lib/utils";
-
-type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
-
-type Draft = {
-  costo: number;
-  logistica: LogisticaType;
-  publicidad_pct: number;
-  margen_pct: number;
-};
 
 type Props = {
   rows: PricingSkuRow[];
@@ -33,17 +37,6 @@ type Props = {
 };
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
-
-function rowToDraft(r: PricingSkuRow): Draft {
-  return {
-    costo: Number(r.costo),
-    logistica: r.logistica as LogisticaType,
-    publicidad_pct:
-      r.publicidad_pct === null || r.publicidad_pct === undefined ? 0 : normalizePct(Number(r.publicidad_pct)),
-    margen_pct:
-      r.margen_pct === null || r.margen_pct === undefined ? 0.15 : normalizePct(Number(r.margen_pct)) || 0.15
-  };
-}
 
 function pctLabel(v: number | null): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
@@ -58,23 +51,53 @@ function resultadoTone(ganancia: number, margenReal: number): string {
 }
 
 export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [q, setQ] = useState("");
   const [riskFilter, setRiskFilter] = useState<"all" | "destroy" | "risk">("all");
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const savedSnapshot = useRef<Record<string, Draft>>({});
+  const [drafts, setDrafts] = useState<Record<string, PricingDraft>>({});
+  const savedSnapshot = useRef<Record<string, PricingDraft>>({});
   const [savedFlashId, setSavedFlashId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ skuId: string; field: keyof Draft } | null>(null);
+  const [editing, setEditing] = useState<{ skuId: string; field: keyof PricingDraft } | null>(null);
+  const [mlPriceOverrideBySku, setMlPriceOverrideBySku] = useState<Record<string, number>>({});
+  const [saveErrors, setSaveErrors] = useState<Record<string, string | null>>({});
+
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+
+  const rowsById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const rowsByIdRef = useRef(rowsById);
+  rowsByIdRef.current = rowsById;
 
   useEffect(() => {
-    const next: Record<string, Draft> = {};
+    const next: Record<string, PricingDraft> = {};
     for (const r of rows) {
       next[r.id] = rowToDraft(r);
     }
     setDrafts(next);
     savedSnapshot.current = { ...next };
+    setMlPriceOverrideBySku({});
+    setSaveErrors({});
   }, [rows]);
+
+  const getDraft = useCallback((id: string) => draftsRef.current[id], []);
+
+  const draftImpactKey = useMemo(() => makeDraftImpactKey(rows, drafts), [rows, drafts]);
+  const mlOverrideKey = useMemo(() => makeMlOverrideImpactKey(mlPriceOverrideBySku), [mlPriceOverrideBySku]);
+  const mlLinksKey = useMemo(() => makeMlLinksImpactKey(mlLinks), [mlLinks]);
+  const filterImpactKey = useMemo(() => makePricingFilterImpactKey(q, riskFilter), [q, riskFilter]);
+
+  const filteredIds = useMemo(
+    () =>
+      selectFilteredPricingRowIds(rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, q, riskFilter),
+    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, filterImpactKey, mlLinksKey, mlOverrideKey, draftImpactKey]
+  );
+
+  const visibleRows = useMemo(() => selectVisiblePricingRows(rowsById, filteredIds), [rowsById, filteredIds]);
+
+  const headerMetrics = useMemo(
+    () => selectHeaderMetrics(rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId),
+    [rows, getDraft, mlLinks, mlPriceOverrideBySku, mlAccountId, mlLinksKey, mlOverrideKey, draftImpactKey]
+  );
 
   const isDirty = useCallback(
     (id: string) => {
@@ -91,108 +114,61 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
     [drafts]
   );
 
-  const weightedMargenObj = useMemo(() => {
-    let w = 0;
-    let acc = 0;
-    for (const r of rows) {
-      const d = drafts[r.id];
-      if (!d) continue;
-      const c = d.costo;
-      if (!Number.isFinite(c) || c <= 0) continue;
-      w += c;
-      acc += d.margen_pct * c;
-    }
-    if (w <= 0) return null;
-    return acc / w;
-  }, [rows, drafts]);
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
 
-  const weightedReal = useMemo(() => {
-    let w = 0;
-    let acc = 0;
-    for (const r of rows) {
-      const d = drafts[r.id];
-      if (!d) continue;
-      const priceMl = mlLinks?.[r.id]?.price_ml;
-      if (priceMl === null || priceMl === undefined || !Number.isFinite(priceMl) || priceMl <= 0) continue;
-      const rep = coerceReputacion(r.reputacion);
-      const rp = calcRealProfit({
-        price_ml: priceMl,
-        costo: d.costo,
-        logistica: d.logistica,
-        reputacion: rep,
-        publicidad_pct: d.publicidad_pct,
-        peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
+  const patchRowDraft = useCallback((id: string, patch: Partial<PricingDraft>) => {
+    setDrafts((prev) => {
+      const cur = prev[id];
+      if (!cur) return prev;
+      const next = { ...cur, ...patch };
+      if (pricingDraftFieldsEqual(cur, next)) return prev;
+      return { ...prev, [id]: next };
+    });
+  }, []);
+
+  const saveRowById = useCallback(
+    (rowId: string) => {
+      const r = rowsByIdRef.current.get(rowId);
+      const d = draftsRef.current[rowId];
+      if (!r || !d) return;
+      startTransition(() => {
+        void (async () => {
+          const snap = savedSnapshot.current[rowId];
+          const res = await savePricingSkuInputs(rowId, mlAccountId, {
+            costo: d.costo,
+            logistica: d.logistica,
+            publicidad_pct: d.publicidad_pct,
+            margen_pct: d.margen_pct
+          });
+          if (!res.success) {
+            if (snap) {
+              setDrafts((prev) => {
+                const cur = prev[rowId];
+                if (!cur) return prev;
+                if (pricingDraftFieldsEqual(cur, snap)) return prev;
+                return { ...prev, [rowId]: { ...snap } };
+              });
+            }
+            setSaveErrors((prev) => ({ ...prev, [rowId]: res.error ?? "No se pudo guardar" }));
+            invalidateDecisionCacheBySkuId(rowId);
+            return;
+          }
+          savedSnapshot.current[rowId] = { ...d };
+          setSaveErrors((prev) => ({ ...prev, [rowId]: null }));
+          invalidateDecisionCacheBySkuId(rowId);
+          setSavedFlashId(rowId);
+          window.setTimeout(() => setSavedFlashId((cur) => (cur === rowId ? null : cur)), 1800);
+        })();
       });
-      if (!rp.converged || !Number.isFinite(rp.margen_real)) continue;
-      w += d.costo;
-      acc += rp.margen_real * d.costo;
-    }
-    if (w <= 0) return null;
-    return acc / w;
-  }, [rows, drafts, mlLinks]);
+    },
+    [mlAccountId, startTransition]
+  );
 
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    return rows.filter((r) => {
-      const d = drafts[r.id];
-      if (!d) return false;
-      const priceMl = mlLinks?.[r.id]?.price_ml;
-      const rep = coerceReputacion(r.reputacion);
-      let margenReal: number | null = null;
-      if (priceMl !== null && priceMl !== undefined && Number.isFinite(priceMl) && priceMl > 0) {
-        const rp = calcRealProfit({
-          price_ml: priceMl,
-          costo: d.costo,
-          logistica: d.logistica,
-          reputacion: rep,
-          publicidad_pct: d.publicidad_pct,
-          peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
-        });
-        margenReal = rp.converged && Number.isFinite(rp.margen_real) ? rp.margen_real : null;
-      }
-      const tier =
-        margenReal !== null && !Number.isNaN(margenReal)
-          ? margenReal < 0
-            ? "destroy"
-            : margenReal < 0.1
-              ? "risk"
-              : "ok"
-          : d.margen_pct < 0
-            ? "destroy"
-            : d.margen_pct < 0.1
-              ? "risk"
-              : "ok";
-      if (riskFilter === "destroy" && tier !== "destroy") return false;
-      if (riskFilter === "risk" && tier !== "risk") return false;
-      if (!qq) return true;
-      const sku = (r.sku ?? "").toLowerCase();
-      const prod = (r.producto ?? "").toLowerCase();
-      return sku.includes(qq) || prod.includes(qq);
-    });
-  }, [rows, q, riskFilter, mlLinks, drafts]);
-
-  const saveRow = (r: PricingSkuRow) => {
-    const d = drafts[r.id];
-    if (!d) return;
-    startTransition(() => {
-      void (async () => {
-        const res = await savePricingSkuInputs(r.id, mlAccountId, {
-          costo: d.costo,
-          logistica: d.logistica,
-          publicidad_pct: d.publicidad_pct,
-          margen_pct: d.margen_pct
-        });
-        if (!res.success) {
-          console.error(res.error);
-          return;
-        }
-        savedSnapshot.current[r.id] = { ...d };
-        setSavedFlashId(r.id);
-        window.setTimeout(() => setSavedFlashId((cur) => (cur === r.id ? null : cur)), 1800);
-        router.refresh();
-      })();
-    });
-  };
+  const onMlPushSuccess = useCallback((skuRowId: string, newPrice: number) => {
+    setMlPriceOverrideBySku((prev) => ({ ...prev, [skuRowId]: newPrice }));
+    invalidateDecisionCacheBySkuId(skuRowId);
+  }, []);
 
   const runTransitionAsync = useCallback((fn: () => Promise<void>) => {
     startTransition(() => {
@@ -200,23 +176,36 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
     });
   }, [startTransition]);
 
-  const revertRow = (r: PricingSkuRow) => {
-    const snap = savedSnapshot.current[r.id];
+  const revertRowById = useCallback((rowId: string) => {
+    const snap = savedSnapshot.current[rowId];
     if (!snap) return;
-    setDrafts((prev) => ({ ...prev, [r.id]: { ...snap } }));
-  };
+    setDrafts((prev) => {
+      const cur = prev[rowId];
+      if (!cur) return prev;
+      if (pricingDraftFieldsEqual(cur, snap)) return prev;
+      return { ...prev, [rowId]: { ...snap } };
+    });
+    invalidateDecisionCacheBySkuId(rowId);
+  }, []);
 
-  const onKeyDownRow = (e: React.KeyboardEvent, r: PricingSkuRow) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (isDirty(r.id)) saveRow(r);
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      revertRow(r);
-      setEditing(null);
-    }
-  };
+  const onKeyDownRow = useCallback(
+    (e: React.KeyboardEvent, rowId: string) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (isDirtyRef.current(rowId)) saveRowById(rowId);
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        revertRowById(rowId);
+        setEditing(null);
+      }
+    },
+    [revertRowById, saveRowById]
+  );
+
+  const onRequestEditField = useCallback((rowId: string, field: keyof PricingDraft) => {
+    setEditing({ skuId: rowId, field });
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -232,10 +221,10 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
             {rows.length} SKUs
           </span>
           <span className="rounded-lg border border-[#E8E8E2] bg-[#F5F5F0] px-3 py-1 font-semibold text-[#1A1A1A]">
-            Margen objetivo prom.: {weightedMargenObj === null ? "—" : pctLabel(weightedMargenObj)}
+            Margen objetivo prom.: {headerMetrics.weightedMargenObj === null ? "—" : pctLabel(headerMetrics.weightedMargenObj)}
           </span>
           <span className="rounded-lg border border-[#E8E8E2] bg-white px-3 py-1 font-semibold text-[#1A1A1A]">
-            Margen real prom.: {weightedReal === null ? "—" : pctLabel(weightedReal)}
+            Margen real prom.: {headerMetrics.weightedReal === null ? "—" : pctLabel(headerMetrics.weightedReal)}
           </span>
         </div>
       </div>
@@ -301,79 +290,33 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => {
+            {visibleRows.map((r) => {
               const d = drafts[r.id];
               if (!d) return null;
-              const rep = coerceReputacion(r.reputacion);
-              const target = calcSellingPrice({
-                costo: d.costo,
-                logistica: d.logistica,
-                publicidad_pct: d.publicidad_pct,
-                margen_pct: d.margen_pct,
-                reputacion: rep
-              });
-              const priceMl = mlLinks?.[r.id]?.price_ml;
-              const hasMlPrice = priceMl !== null && priceMl !== undefined && Number.isFinite(priceMl) && priceMl > 0;
-              const real = hasMlPrice
-                ? calcRealProfit({
-                    price_ml: priceMl,
-                    costo: d.costo,
-                    logistica: d.logistica,
-                    reputacion: rep,
-                    publicidad_pct: d.publicidad_pct,
-                    peso_kg: r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null
-                  })
-                : null;
-              const gananciaReal =
-                real && real.converged && Number.isFinite(real.ganancia_real) ? real.ganancia_real : null;
-              const margenReal = real && real.converged && Number.isFinite(real.margen_real) ? real.margen_real : null;
-              const tier =
-                margenReal !== null
-                  ? margenReal < 0
-                    ? "destroy"
-                    : margenReal < 0.1
-                      ? "risk"
-                      : "ok"
-                  : d.margen_pct < 0
-                    ? "destroy"
-                    : d.margen_pct < 0.1
-                      ? "risk"
-                      : "ok";
-              const ml = mlLinks?.[r.id];
+              const mlLink = mergePricingMlLink(r.id, mlLinks, mlPriceOverrideBySku);
+              const input = buildPricingRowInput(mlAccountId, r, d, mlLink);
+              const rowKey = makeDecisionCacheKey(r.id, input);
               const dirty = isDirty(r.id);
-              const optimal =
-                target.converged && Number.isFinite(target.precio_venta) ? Math.round(target.precio_venta) : null;
-              const showPush = Boolean(
-                hasMlPrice &&
-                  optimal !== null &&
-                  ml?.item_id &&
-                  Math.round(priceMl as number) !== optimal
-              );
-
+              const editingField = editing?.skuId === r.id ? editing.field : null;
               return (
-                <PricingRow
+                <PricingEngineRow
                   key={r.id}
-                  r={r}
-                  d={d}
-                  setDrafts={setDrafts}
-                  editing={editing}
-                  setEditing={setEditing}
+                  row={r}
+                  mlLink={mlLink}
+                  draftForRow={d}
+                  rowKey={rowKey}
+                  saveStatus={savedFlashId === r.id}
+                  error={saveErrors[r.id] ?? null}
                   dirty={dirty}
-                  tier={tier}
-                  ml={ml}
-                  hasMlPrice={hasMlPrice}
-                  priceMl={priceMl as number | undefined}
-                  target={target}
-                  gananciaReal={gananciaReal}
-                  margenReal={margenReal}
-                  optimal={optimal}
-                  showPush={showPush}
-                  savedFlash={savedFlashId === r.id}
-                  isPending={isPending}
+                  editingField={editingField}
                   mlAccountId={mlAccountId}
+                  isPending={isPending}
+                  patchRowDraft={patchRowDraft}
+                  setEditing={setEditing}
+                  onRequestEditField={onRequestEditField}
                   onKeyDownRow={onKeyDownRow}
-                  routerRefresh={() => router.refresh()}
                   runTransitionAsync={runTransitionAsync}
+                  onMlPushSuccess={onMlPushSuccess}
                 />
               );
             })}
@@ -381,63 +324,95 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId }: Props) {
         </table>
       </div>
 
-      {filtered.length === 0 && rows.length > 0 ? (
+      {filteredIds.length === 0 && rows.length > 0 ? (
         <p className="text-sm text-[#6B6B6B]">No hay filas con ese criterio.</p>
       ) : null}
     </div>
   );
 }
 
-function PricingRow({
-  r,
-  d,
-  setDrafts,
-  editing,
-  setEditing,
-  dirty,
-  tier,
-  ml,
-  hasMlPrice,
-  priceMl,
-  target,
-  gananciaReal,
-  margenReal,
-  optimal,
-  showPush,
-  savedFlash,
-  isPending,
-  mlAccountId,
-  onKeyDownRow,
-  routerRefresh,
-  runTransitionAsync
-}: {
-  r: PricingSkuRow;
-  d: Draft;
-  setDrafts: React.Dispatch<React.SetStateAction<Record<string, Draft>>>;
-  editing: { skuId: string; field: keyof Draft } | null;
-  setEditing: (v: { skuId: string; field: keyof Draft } | null) => void;
+type PricingEngineRowProps = {
+  row: PricingSkuRow;
+  mlLink?: MlPublicationLink;
+  draftForRow: PricingDraft;
+  rowKey: string;
+  saveStatus: boolean;
+  error: string | null;
   dirty: boolean;
-  tier: "destroy" | "risk" | "ok";
-  ml?: MlPublicationLink;
-  hasMlPrice: boolean;
-  priceMl?: number;
-  target: ReturnType<typeof calcSellingPrice>;
-  gananciaReal: number | null;
-  margenReal: number | null;
-  optimal: number | null;
-  showPush: boolean;
-  savedFlash: boolean;
-  isPending: boolean;
+  editingField: keyof PricingDraft | null;
   mlAccountId: string;
-  onKeyDownRow: (e: React.KeyboardEvent, r: PricingSkuRow) => void;
-  routerRefresh: () => void;
+  isPending: boolean;
+  patchRowDraft: (id: string, patch: Partial<PricingDraft>) => void;
+  setEditing: (v: { skuId: string; field: keyof PricingDraft } | null) => void;
+  onRequestEditField: (rowId: string, field: keyof PricingDraft) => void;
+  onKeyDownRow: (e: React.KeyboardEvent, rowId: string) => void;
   runTransitionAsync: (fn: () => Promise<void>) => void;
-}) {
+  onMlPushSuccess: (skuRowId: string, newPrice: number) => void;
+};
+
+function pricingEngineRowPropsEqual(p: Readonly<PricingEngineRowProps>, n: Readonly<PricingEngineRowProps>): boolean {
+  return (
+    p.rowKey === n.rowKey &&
+    pricingSkuRowFieldsEqual(p.row, n.row) &&
+    p.mlAccountId === n.mlAccountId &&
+    pricingDraftFieldsEqual(p.draftForRow, n.draftForRow) &&
+    pricingMlLinkFieldsEqual(p.mlLink, n.mlLink) &&
+    p.editingField === n.editingField &&
+    p.dirty === n.dirty &&
+    p.saveStatus === n.saveStatus &&
+    p.error === n.error &&
+    p.isPending === n.isPending &&
+    p.patchRowDraft === n.patchRowDraft &&
+    p.setEditing === n.setEditing &&
+    p.onRequestEditField === n.onRequestEditField &&
+    p.onKeyDownRow === n.onKeyDownRow &&
+    p.runTransitionAsync === n.runTransitionAsync &&
+    p.onMlPushSuccess === n.onMlPushSuccess
+  );
+}
+
+const PricingEngineRow = memo(function PricingEngineRow({
+  row,
+  mlLink,
+  draftForRow: d,
+  rowKey,
+  saveStatus,
+  error,
+  dirty,
+  editingField,
+  mlAccountId,
+  isPending,
+  patchRowDraft,
+  setEditing,
+  onRequestEditField,
+  onKeyDownRow,
+  runTransitionAsync,
+  onMlPushSuccess
+}: PricingEngineRowProps) {
   const [pushOpen, setPushOpen] = useState(false);
 
-  const update = (patch: Partial<Draft>) => {
-    setDrafts((prev) => ({ ...prev, [r.id]: { ...prev[r.id], ...patch } }));
+  const decision = useMemo(() => {
+    const input = buildPricingRowInput(mlAccountId, row, d, mlLink);
+    return getCachedDecisionState(row.id, input);
+  }, [rowKey]);
+
+  const tier = pricingTierFromDecision(decision.decision.profitabilityStatus);
+  const priceMl = decision.ml.currentPrice ?? undefined;
+  const hasMlPrice = priceMl !== undefined && priceMl > 0;
+  const optimal =
+    decision.computed.optimalPrice !== null && Number.isFinite(decision.computed.optimalPrice)
+      ? Math.round(decision.computed.optimalPrice)
+      : null;
+  const showPush = Boolean(hasMlPrice && optimal !== null && mlLink?.item_id && Math.round(priceMl as number) !== optimal);
+
+  const update = (patch: Partial<PricingDraft>) => {
+    patchRowDraft(row.id, patch);
   };
+
+  const gananciaReal = decision.computed.realProfit;
+  const margenReal = decision.computed.realMarginPct;
+  const ganObj = decision.computed.optimalGananciaUnit;
+  const margObj = decision.inputs.targetMarginPct;
 
   const resultadoBlock = (() => {
     if (hasMlPrice && gananciaReal !== null && margenReal !== null && !Number.isNaN(gananciaReal)) {
@@ -452,13 +427,12 @@ function PricingRow({
         </div>
       );
     }
-    if (target.converged && Number.isFinite(target.ganancia_unit) && Number.isFinite(target.precio_venta)) {
-      const margObj = d.margen_pct;
+    if (ganObj !== null && Number.isFinite(ganObj) && margObj !== null && optimal !== null) {
       return (
         <div className="space-y-0.5 tabular-nums text-[#6B6B6B]">
           <div className="font-semibold text-[#1A1A1A]">
-            {target.ganancia_unit >= 0 ? "+" : ""}
-            {ars.format(target.ganancia_unit)}
+            {ganObj >= 0 ? "+" : ""}
+            {ars.format(ganObj)}
           </div>
           <div className="text-xs">{(margObj * 100).toFixed(1)}% obj.</div>
           <div className="text-[10px] italic text-[#6B6B6B]">(objetivo)</div>
@@ -468,22 +442,29 @@ function PricingRow({
     return <span className="text-[#6B6B6B]">—</span>;
   })();
 
+  const optimalSubtitle =
+    d.margen_pct === null ? (
+      <div className="text-[10px] font-normal text-amber-800">Falta margen objetivo</div>
+    ) : decision.sync.calculationStatus === "error" ? (
+      <div className="text-[10px] font-normal text-amber-800">Sin convergencia</div>
+    ) : null;
+
   return (
     <tr
       tabIndex={0}
-      onKeyDown={(e) => onKeyDownRow(e, r)}
+      onKeyDown={(e) => onKeyDownRow(e, row.id)}
       className={cn(
         "border-b border-[#E8E8E2] align-top outline-none",
         dirty && "bg-amber-50/60",
         !dirty && tier === "destroy" && "bg-red-50",
         !dirty && tier === "risk" && "bg-amber-50/90",
         !dirty && tier === "ok" && "bg-white",
-        savedFlash && "ring-1 ring-emerald-300"
+        saveStatus && "ring-1 ring-emerald-300"
       )}
     >
       <td className="p-2 font-semibold text-[#1A1A1A]">
         <div className="flex items-start gap-2">
-          <span className="font-mono text-xs text-[#6B6B6B]">{r.sku ?? "—"}</span>
+          <span className="font-mono text-xs text-[#6B6B6B]">{row.sku ?? "—"}</span>
           {tier === "destroy" ? (
             <span title="Destruye margen" className="inline-flex shrink-0 text-red-600">
               <AlertTriangle className="h-4 w-4" />
@@ -494,30 +475,37 @@ function PricingRow({
             </span>
           ) : null}
         </div>
-        <div className="mt-1 max-w-[220px] text-xs font-normal leading-snug">{r.producto}</div>
-        {savedFlash ? <p className="mt-1 text-[10px] font-semibold text-emerald-700">✓ Guardado</p> : null}
+        <div className="mt-1 max-w-[220px] text-xs font-normal leading-snug">{row.producto}</div>
+        {decision.decision.primaryInsight ? (
+          <p className="mt-1 text-[10px] font-medium leading-snug text-[#6B6B6B]">{decision.decision.primaryInsight}</p>
+        ) : null}
+        {error ? <p className="mt-1 text-[10px] font-semibold text-red-700">{error}</p> : null}
+        {saveStatus ? <p className="mt-1 text-[10px] font-semibold text-emerald-700">✓ Guardado</p> : null}
       </td>
       <td className="p-2 text-xs">
-        {ml?.permalink ? (
+        {mlLink?.permalink ? (
           <div>
             <Link
-              href={ml.permalink}
+              href={mlLink.permalink}
               className="font-mono font-semibold text-blue-700 underline underline-offset-2"
               target="_blank"
               rel="noreferrer"
             >
-              {ml.item_id}
+              {mlLink.item_id}
             </Link>
             <div className="mt-1 text-[#6B6B6B]">
-              Stock: {ml?.stock === null || ml?.stock === undefined ? "—" : ml.stock}
+              Stock: {mlLink?.stock === null || mlLink?.stock === undefined ? "—" : mlLink.stock}
             </div>
+            {decision.decision.stockStatus === "syncing" ? (
+              <div className="mt-0.5 text-[10px] text-amber-800">Ventas: Sincronizando…</div>
+            ) : null}
           </div>
         ) : (
           <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-semibold text-neutral-700">Sin ML</span>
         )}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-1">
-        {editing?.skuId === r.id && editing.field === "costo" ? (
+        {editingField === "costo" ? (
           <input
             autoFocus
             type="number"
@@ -530,7 +518,7 @@ function PricingRow({
           <button
             type="button"
             className="w-full rounded px-1 py-1 text-left text-xs tabular-nums hover:bg-neutral-100"
-            onClick={() => setEditing({ skuId: r.id, field: "costo" })}
+            onClick={() => onRequestEditField(row.id, "costo")}
           >
             {Number.isFinite(d.costo) && d.costo > 0 ? ars.format(d.costo) : "—"}
           </button>
@@ -548,7 +536,7 @@ function PricingRow({
         </select>
       </td>
       <td className="p-1">
-        {editing?.skuId === r.id && editing.field === "publicidad_pct" ? (
+        {editingField === "publicidad_pct" ? (
           <input
             autoFocus
             type="number"
@@ -564,14 +552,14 @@ function PricingRow({
           <button
             type="button"
             className="w-full rounded px-1 py-1 text-left text-xs tabular-nums hover:bg-neutral-100"
-            onClick={() => setEditing({ skuId: r.id, field: "publicidad_pct" })}
+            onClick={() => onRequestEditField(row.id, "publicidad_pct")}
           >
             {(d.publicidad_pct * 100).toFixed(0)}%
           </button>
         )}
       </td>
       <td className="p-1">
-        {editing?.skuId === r.id && editing.field === "margen_pct" ? (
+        {editingField === "margen_pct" ? (
           <input
             autoFocus
             type="number"
@@ -579,29 +567,34 @@ function PricingRow({
             min={0}
             max={100}
             className="w-full min-w-[56px] rounded border border-[#E8E8E2] px-1 py-1 text-xs"
-            value={Math.round(d.margen_pct * 1000) / 10}
-            onChange={(e) => update({ margen_pct: normalizePct(Number(e.target.value)) || 0.01 })}
+            value={d.margen_pct === null ? "" : Math.round(d.margen_pct * 1000) / 10}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === "") update({ margen_pct: null });
+              else {
+                const n = normalizePct(Number(raw));
+                update({ margen_pct: n > 0 && n <= 1 ? n : null });
+              }
+            }}
             onBlur={() => setEditing(null)}
           />
         ) : (
           <button
             type="button"
             className="w-full rounded px-1 py-1 text-left text-xs tabular-nums hover:bg-neutral-100"
-            onClick={() => setEditing({ skuId: r.id, field: "margen_pct" })}
+            onClick={() => onRequestEditField(row.id, "margen_pct")}
           >
-            {(d.margen_pct * 100).toFixed(1)}%
+            {d.margen_pct === null ? "—" : `${(d.margen_pct * 100).toFixed(1)}%`}
           </button>
         )}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 tabular-nums text-sm font-semibold text-[#1A1A1A]">
         {optimal !== null ? ars.format(optimal) : "—"}
-        {target.converged ? null : (
-          <div className="text-[10px] font-normal text-amber-800">Sin convergencia</div>
-        )}
+        {optimalSubtitle}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 text-sm">{resultadoBlock}</td>
       <td className="p-2 align-top text-xs">
-        {showPush && ml?.item_id && optimal !== null && priceMl !== undefined ? (
+        {showPush && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
           <div className="space-y-2">
             {!pushOpen ? (
               <button
@@ -625,13 +618,13 @@ function PricingRow({
                     disabled={isPending}
                     onClick={() => {
                       runTransitionAsync(async () => {
-                        const res = await pushOptimalPriceToML(mlAccountId, ml.item_id, optimal);
+                        const res = await pushOptimalPriceToML(mlAccountId, mlLink.item_id, optimal);
                         if (!res.success) {
                           console.error(res.error);
                           return;
                         }
                         setPushOpen(false);
-                        routerRefresh();
+                        if (res.data) onMlPushSuccess(row.id, res.data.new_price);
                       });
                     }}
                   >
@@ -650,4 +643,4 @@ function PricingRow({
       </td>
     </tr>
   );
-}
+}, pricingEngineRowPropsEqual);

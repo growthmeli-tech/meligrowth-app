@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
-import { listUnifiedCatalog, type UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
+import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
+import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 
 const SHEET = "Catálogo Maestro";
 

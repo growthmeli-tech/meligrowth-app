@@ -6,7 +6,9 @@ import { getValidAccessToken } from "@/lib/ml/auth";
 import { pushPriceToML } from "@/lib/ml/endpoints/catalog";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
-import { linkPricingSkuToItem } from "@/lib/data-v2/unified-catalog";
+import { linkPricingSkuToItem, listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
+import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
+import { catalogStateFromItems, type CatalogState } from "@/lib/data-v2/catalog-state";
 import { calcSellingPrice, coerceReputacion, normalizePct } from "@/lib/pricing/calculator";
 import type { ActionResult } from "@/lib/types/api";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -83,7 +85,7 @@ export async function saveCostForItem(
     publicidad_pct: number;
     reputacion?: string | null;
   }
-): Promise<ActionResult<{ pricing_sku_id: string }>> {
+): Promise<ActionResult<{ pricing_sku_id: string; item?: UnifiedCatalogItem }>> {
   const gate = await gateMlAccount(mlAccountId);
   if (!gate.success) return gate;
 
@@ -178,10 +180,16 @@ export async function saveCostForItem(
   revalidatePath("/ops/pricing");
   revalidatePath("/ops/dashboard");
 
-  return { success: true, data: { pricing_sku_id: pricingId } };
+  const refreshed = await listUnifiedCatalog(mlAccountId);
+  const item = refreshed.success ? refreshed.data.find((i) => i.item_id === itemId) : undefined;
+  return { success: true, data: { pricing_sku_id: pricingId, item } };
 }
 
-export async function linkSkuToItem(mlAccountId: string, itemId: string, pricingSkuId: string): Promise<ActionResult<void>> {
+export async function linkSkuToItem(
+  mlAccountId: string,
+  itemId: string,
+  pricingSkuId: string
+): Promise<ActionResult<{ item?: UnifiedCatalogItem }>> {
   const gate = await gateMlAccount(mlAccountId);
   if (!gate.success) return gate;
 
@@ -191,7 +199,10 @@ export async function linkSkuToItem(mlAccountId: string, itemId: string, pricing
   revalidatePath("/ops/catalog");
   revalidatePath("/ops/pricing");
   revalidatePath("/ops/dashboard");
-  return { success: true, data: undefined };
+
+  const refreshed = await listUnifiedCatalog(mlAccountId);
+  const item = refreshed.success ? refreshed.data.find((i) => i.item_id === itemId) : undefined;
+  return { success: true, data: { item } };
 }
 
 export async function pushOptimalPriceToML(
@@ -270,7 +281,22 @@ export async function pushOptimalPriceToML(
   return { success: false, error: push.error ?? "Error al actualizar precio en ML" };
 }
 
-export async function bulkMarkNoAds(mlAccountId: string, pricingSkuIds: string[]): Promise<ActionResult<{ updated: number }>> {
+export async function loadUnifiedCatalogForAccount(mlAccountId: string): Promise<ActionResult<UnifiedCatalogItem[]>> {
+  const gate = await gateMlAccount(mlAccountId);
+  if (!gate.success) return gate;
+  return listUnifiedCatalog(mlAccountId);
+}
+
+export async function reloadCatalogState(mlAccountId: string): Promise<ActionResult<CatalogState>> {
+  const res = await listUnifiedCatalog(mlAccountId);
+  if (!res.success) return res;
+  return { success: true, data: catalogStateFromItems(res.data) };
+}
+
+export async function bulkMarkNoAds(
+  mlAccountId: string,
+  pricingSkuIds: string[]
+): Promise<ActionResult<{ updated: number; items: UnifiedCatalogItem[] }>> {
   const gate = await gateMlAccount(mlAccountId);
   if (!gate.success) return gate;
 
@@ -298,5 +324,12 @@ export async function bulkMarkNoAds(mlAccountId: string, pricingSkuIds: string[]
   revalidatePath("/ops/catalog");
   revalidatePath("/ops/pricing");
 
-  return { success: true, data: { updated: data?.length ?? 0 } };
+  const refreshed = await listUnifiedCatalog(mlAccountId);
+  const idSet = new Set(pricingSkuIds);
+  const items =
+    refreshed.success && refreshed.data.length
+      ? refreshed.data.filter((i) => i.pricing_sku_id !== null && idSet.has(i.pricing_sku_id as string))
+      : [];
+
+  return { success: true, data: { updated: data?.length ?? 0, items } };
 }

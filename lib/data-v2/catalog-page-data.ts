@@ -1,6 +1,7 @@
 import { getLatestCatalogSyncAt } from "@/lib/data-v2/ml-catalog-items";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
-import { listUnifiedCatalog, type UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
+import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
+import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 
 export type CatalogPricingChoice = { id: string; sku: string | null; producto: string };
 

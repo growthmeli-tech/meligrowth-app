@@ -32,7 +32,7 @@ export async function savePricingSkuInputs(
     costo?: number;
     logistica?: string;
     publicidad_pct?: number;
-    margen_pct?: number;
+    margen_pct?: number | null;
     reputacion?: string;
   }
 ): Promise<ActionResult<void>> {
@@ -67,11 +67,15 @@ export async function savePricingSkuInputs(
   }
 
   if (inputs.margen_pct !== undefined) {
-    const m = inputs.margen_pct;
-    if (!Number.isFinite(m) || m <= 0 || m > 1) {
-      return { success: false, error: "Margen debe estar entre 0 y 1 (ej. 0.15 = 15%)." };
+    if (inputs.margen_pct === null) {
+      patch.margen_pct = null;
+    } else {
+      const m = inputs.margen_pct;
+      if (!Number.isFinite(m) || m <= 0 || m > 1) {
+        return { success: false, error: "Margen debe estar entre 0 y 1 (ej. 0.15 = 15%), o null para sin objetivo." };
+      }
+      patch.margen_pct = normalizePct(m);
     }
-    patch.margen_pct = normalizePct(m);
   }
 
   if (inputs.reputacion !== undefined) {
@@ -93,30 +97,42 @@ export async function savePricingSkuInputs(
     return { success: false, error: "SKU no encontrado." };
   }
 
+  const mergedMargen =
+    patch.margen_pct !== undefined
+      ? patch.margen_pct === null
+        ? null
+        : normalizePct(patch.margen_pct)
+      : current.margen_pct === null || current.margen_pct === undefined
+        ? null
+        : normalizePct(current.margen_pct);
+
   const merged = {
     costo: patch.costo !== undefined ? Number(patch.costo) : Number(current.costo),
     logistica: (patch.logistica !== undefined ? patch.logistica : current.logistica) as LogisticaType,
     publicidad_pct: patch.publicidad_pct !== undefined ? Number(patch.publicidad_pct) : normalizePct(current.publicidad_pct),
-    margen_pct:
-      patch.margen_pct !== undefined
-        ? Number(patch.margen_pct)
-        : normalizePct(current.margen_pct ?? 0.15) || 0.15,
+    margen_pct: mergedMargen !== null && Number.isFinite(mergedMargen) && mergedMargen > 0 ? mergedMargen : null,
     reputacion: coerceReputacion(
       patch.reputacion !== undefined ? String(patch.reputacion) : current.reputacion
     )
   };
 
-  const calc = calcSellingPrice({
-    costo: merged.costo,
-    logistica: merged.logistica,
-    publicidad_pct: merged.publicidad_pct,
-    margen_pct: merged.margen_pct,
-    reputacion: merged.reputacion
-  });
-  if (calc.converged && Number.isFinite(calc.precio_venta)) {
-    patch.precio_venta = calc.precio_venta;
-    patch.ganancia_unit = calc.ganancia_unit;
-    patch.roi = calc.roi;
+  if (merged.margen_pct !== null) {
+    const calc = calcSellingPrice({
+      costo: merged.costo,
+      logistica: merged.logistica,
+      publicidad_pct: merged.publicidad_pct,
+      margen_pct: merged.margen_pct,
+      reputacion: merged.reputacion
+    });
+    if (calc.converged && Number.isFinite(calc.precio_venta)) {
+      patch.precio_venta = calc.precio_venta;
+      patch.ganancia_unit = calc.ganancia_unit;
+      patch.roi = calc.roi;
+    }
+  } else {
+    patch.precio_venta = null;
+    patch.ganancia_unit = null;
+    patch.roi = null;
   }
 
   const { error } = await supabase

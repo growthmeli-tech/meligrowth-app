@@ -2,7 +2,8 @@ import Link from "next/link";
 import { PricingEngineTable } from "@/components/pricing/pricing-engine-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
-import { mapPricingSkusToMlLinks, listUnifiedCatalog, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
+import { mapPricingSkusToMlLinks, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
+import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 export default async function OpsPricingPage() {
   const accountResult = await getPrimaryAccountForOperator();

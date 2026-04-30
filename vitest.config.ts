@@ -1,5 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+
+const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
@@ -28,7 +32,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": new URL("./", import.meta.url).pathname
+      "@": new URL("./", import.meta.url).pathname,
+      "server-only": path.join(root, "tests/mocks/server-only-stub.ts")
     }
   }
 });

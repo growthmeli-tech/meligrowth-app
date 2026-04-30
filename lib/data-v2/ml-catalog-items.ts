@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import type { ActionResult } from "@/lib/types/api";

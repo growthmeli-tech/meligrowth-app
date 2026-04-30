@@ -1,23 +1,43 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { ChevronDown, ChevronRight, Download, Filter, RefreshCw } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
-import { cn } from "@/lib/utils";
+import { mergeCatalogRowAfterCostSave, mergeCatalogRowAfterMlPricePush } from "@/lib/data-v2/unified-catalog";
+import { getCachedDecisionState, invalidateDecisionCacheBySkuId } from "@/lib/pricing/decision-state-cache";
+import type { BuildSkuDecisionStateInput } from "@/lib/pricing/sku-decision-state";
 import {
   bulkMarkNoAds,
   exportMasterCatalog,
   linkSkuToItem,
   pushOptimalPriceToML,
+  reloadCatalogState,
   saveCostForItem,
   triggerCatalogSync
 } from "@/app/(ops)/ops/catalog/actions";
 import {
-  calcRealProfit,
-  calcSellingPrice,
-  calcStockStatus,
+  catalogOrderedItems,
+  catalogStateFromItems,
+  reconcileItemReplace,
+  reconcileItemReplaces
+} from "@/lib/data-v2/catalog-state";
+import {
+  makeCatalogFilterImpactKey,
+  selectCatalogCounts,
+  selectCatalogFilteredIds,
+  selectCatalogPromMargenReal,
+  selectCatalogVisibleRows
+} from "@/lib/data-v2/catalog-selectors";
+import {
+  CatalogGridRowMemo,
+  CATALOG_GRID_ROW_CLASS,
+  CATALOG_MAIN_ROW_HEIGHT,
+  type CatalogGridRowAction
+} from "@/components/catalog/catalog-grid-row";
+import { cn } from "@/lib/utils";
+import {
   coerceReputacion,
   mlComisionRate,
   normalizePct,
@@ -66,15 +86,11 @@ function formatSyncLabel(iso: string | null) {
 /** Max 2 insights, solo accionables */
 function buildInsights(items: UnifiedCatalogItem[]): string[] {
   const out: string[] = [];
-  const destroyers = items.filter(
-    (i) => i.tiene_costo && i.margen_real_pct !== null && i.margen_real_pct < 0 && i.price_ml !== null
-  );
+  const destroyers = items.filter((i) => i.decisionState.decision.profitabilityStatus === "loss" && i.price_ml !== null);
   if (destroyers.length) {
     const x = destroyers[0];
-    const m = x.margen_real_pct !== null ? (x.margen_real_pct * 100).toFixed(0) : "?";
-    out.push(
-      `${x.item_id}: margen real ${m}% — ajustá precio o costo antes de seguir vendiendo.`
-    );
+    const ins = x.decisionState.decision.primaryInsight;
+    out.push(ins ?? `${x.item_id}: revisá precio o costo.`);
   }
   const sinCosto = items.filter((i) => !i.tiene_costo).length;
   if (sinCosto > 0 && out.length < 2) {
@@ -86,7 +102,11 @@ function buildInsights(items: UnifiedCatalogItem[]): string[] {
 type PillKey = "critico" | "reponer" | "riesgo" | "ok";
 
 function isCriticoRow(row: UnifiedCatalogItem): boolean {
-  return row.stock_status === "critico" || (row.status === "active" && row.stock === 0);
+  return (
+    row.decisionState.decision.stockStatus === "critical" ||
+    row.stock_status === "critico" ||
+    (row.status === "active" && row.stock === 0)
+  );
 }
 
 function resolveRowAction(row: UnifiedCatalogItem):
@@ -94,7 +114,8 @@ function resolveRowAction(row: UnifiedCatalogItem):
   | { kind: "sin_stock" }
   | { kind: "config_cost" }
   | { kind: "none" } {
-  if (row.tiene_costo && row.margen_real_pct !== null && row.margen_real_pct < 0) {
+  const d = row.decisionState.decision;
+  if (row.tiene_costo && d.profitabilityStatus === "loss") {
     return { kind: "calc", reason: "pierde" };
   }
   if (row.status === "active" && row.stock === 0) {
@@ -103,13 +124,7 @@ function resolveRowAction(row: UnifiedCatalogItem):
   if (!row.tiene_costo) {
     return { kind: "config_cost" };
   }
-  if (
-    row.tiene_costo &&
-    row.margen_real_pct !== null &&
-    row.margen_real_pct >= 0 &&
-    row.margen_real_pct < 0.1 &&
-    row.price_ml !== null
-  ) {
+  if (row.tiene_costo && (d.profitabilityStatus === "risk" || d.profitabilityStatus === "low_margin") && row.price_ml !== null) {
     return { kind: "calc", reason: "optimizar" };
   }
   if (row.precio_vs_objetivo === "bajo") {
@@ -118,11 +133,12 @@ function resolveRowAction(row: UnifiedCatalogItem):
   return { kind: "none" };
 }
 
-function margenObjDefaultForSimulator(row: UnifiedCatalogItem): number {
+function margenObjDefaultForSimulator(row: UnifiedCatalogItem): number | null {
   if (row.margen_pct !== null && row.margen_pct !== undefined) {
-    return normalizePct(row.margen_pct) || 0.15;
+    const n = normalizePct(row.margen_pct);
+    return n > 0 && n <= 1 ? n : null;
   }
-  return 0.15;
+  return null;
 }
 
 export function CatalogCommandCenter({
@@ -132,9 +148,83 @@ export function CatalogCommandCenter({
   pricingSkuChoices,
   loadError
 }: Props) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const items = initialItems;
+  /** Catalog dataset (indexed reconciliation). */
+  const [catalog, setCatalog] = useState(() => catalogStateFromItems(initialItems));
+
+  useEffect(() => {
+    setCatalog(catalogStateFromItems(initialItems));
+  }, [initialItems]);
+
+  const items = useMemo(() => catalogOrderedItems(catalog), [catalog]);
+
+  const partitionSkuCacheId = useCallback(
+    (row: UnifiedCatalogItem) => row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`,
+    [mlAccountId]
+  );
+
+  const onReconcileCostRow = useCallback(
+    (
+      itemId: string,
+      saved: {
+        pricing_sku_id: string;
+        costo: number;
+        logistica: LogisticaType;
+        margen_pct: number;
+        publicidad_pct: number;
+        reputacion: string | null;
+      },
+      serverItem?: UnifiedCatalogItem | null
+    ) => {
+      setCatalog((c) => {
+        if (serverItem && serverItem.item_id === itemId) {
+          if (serverItem.pricing_sku_id) invalidateDecisionCacheBySkuId(serverItem.pricing_sku_id);
+          const cid = serverItem.pricing_sku_id ?? `calc:${mlAccountId}:${itemId}`;
+          invalidateDecisionCacheBySkuId(cid);
+          invalidateDecisionCacheBySkuId(`${cid}:opt`);
+          return reconcileItemReplace(c, serverItem);
+        }
+        const i = c.itemsById[itemId];
+        if (!i) return c;
+        const cid = partitionSkuCacheId(i);
+        invalidateDecisionCacheBySkuId(cid);
+        invalidateDecisionCacheBySkuId(`${cid}:opt`);
+        invalidateDecisionCacheBySkuId(saved.pricing_sku_id);
+        const next = mergeCatalogRowAfterCostSave(mlAccountId, i, saved);
+        return reconcileItemReplace(c, next);
+      });
+    },
+    [mlAccountId, partitionSkuCacheId]
+  );
+
+  const onReconcileMlPrice = useCallback((itemId: string, newPrice: number) => {
+    setCatalog((c) => {
+      const cur = c.itemsById[itemId];
+      if (!cur) return c;
+      if (cur.pricing_sku_id) invalidateDecisionCacheBySkuId(cur.pricing_sku_id);
+      const next = mergeCatalogRowAfterMlPricePush(mlAccountId, cur, newPrice);
+      return reconcileItemReplace(c, next);
+    });
+  }, [mlAccountId]);
+
+  const onReconcileFromServer = useCallback(() => {
+    startTransition(async () => {
+      const res = await reloadCatalogState(mlAccountId);
+      if (res.success) setCatalog(res.data);
+    });
+  }, [mlAccountId, startTransition]);
+
+  const onReconcileLinkSkuRow = useCallback(
+    (prevPricingSkuId: string | null, item: UnifiedCatalogItem) => {
+      if (prevPricingSkuId) invalidateDecisionCacheBySkuId(prevPricingSkuId);
+      if (item.pricing_sku_id) invalidateDecisionCacheBySkuId(item.pricing_sku_id);
+      const cid = item.pricing_sku_id ?? `calc:${mlAccountId}:${item.item_id}`;
+      invalidateDecisionCacheBySkuId(cid);
+      invalidateDecisionCacheBySkuId(`${cid}:opt`);
+      setCatalog((c) => reconcileItemReplace(c, item));
+    },
+    [mlAccountId]
+  );
   const [syncHint, setSyncHint] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -151,98 +241,77 @@ export function CatalogCommandCenter({
   const [inlineCostItemId, setInlineCostItemId] = useState<string | null>(null);
   const [inlineCalcItemId, setInlineCalcItemId] = useState<string | null>(null);
 
+  /** Lifted row UI for virtual row memo boundaries (primitives only in list). */
+  const [rowHints, setRowHints] = useState<Record<string, string | null>>({});
+  const [linkSkuByItemId, setLinkSkuByItemId] = useState<Record<string, string>>({});
+  const [mlPushItemId, setMlPushItemId] = useState<string | null>(null);
+
+  const listBodyRef = useRef<HTMLDivElement>(null);
+  const [catalogListHeight, setCatalogListHeight] = useState(440);
+  useLayoutEffect(() => {
+    const el = listBodyRef.current;
+    if (!el) return;
+    const apply = () => setCatalogListHeight(Math.max(220, Math.min(640, Math.floor(el.clientHeight))));
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const stale = useMemo(() => {
     if (!lastSyncedAt) return true;
     return Date.now() - new Date(lastSyncedAt).getTime() > 6 * 60 * 60 * 1000;
   }, [lastSyncedAt]);
 
-  const promMargenReal = useMemo(() => {
-    let w = 0;
-    let acc = 0;
-    for (const row of items) {
-      if (!row.tiene_costo || row.margen_real_pct === null || row.costo === null || row.costo <= 0) continue;
-      w += row.costo;
-      acc += row.margen_real_pct * row.costo;
-    }
-    if (w <= 0) return null;
-    return acc / w;
-  }, [items]);
+  const filterKey = useMemo(
+    () =>
+      makeCatalogFilterImpactKey({
+        q,
+        statusFilter,
+        logFilter,
+        margenFilter,
+        costFilter,
+        stockFilter,
+        activePill
+      }),
+    [q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, activePill]
+  );
+
+  const filteredIds = useMemo(
+    () =>
+      selectCatalogFilteredIds(catalog, {
+        q,
+        statusFilter,
+        logFilter,
+        margenFilter,
+        costFilter,
+        stockFilter,
+        activePill
+      }),
+    [catalog, filterKey]
+  );
+
+  const filtered = useMemo(() => selectCatalogVisibleRows(catalog, filteredIds), [catalog, filteredIds]);
+
+  const counts = useMemo(() => selectCatalogCounts(catalog), [catalog]);
+
+  const promMargenReal = useMemo(() => selectCatalogPromMargenReal(catalog), [catalog]);
 
   const insights = useMemo(() => buildInsights(items), [items]);
+
+  const catalogDetailIdsSorted = useMemo(() => {
+    const want = new Set<string>();
+    if (expanded) want.add(expanded);
+    if (inlineCostItemId) want.add(inlineCostItemId);
+    if (inlineCalcItemId) want.add(inlineCalcItemId);
+    if (mlPushItemId) want.add(mlPushItemId);
+    if (want.size === 0) return [];
+    return filteredIds.filter((id) => want.has(id));
+  }, [expanded, inlineCostItemId, inlineCalcItemId, mlPushItemId, filteredIds]);
 
   const togglePill = (key: PillKey) => {
     setActivePill((prev) => (prev === key ? null : key));
   };
-
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    return items.filter((row) => {
-      if (activePill === "critico") {
-        if (!isCriticoRow(row)) return false;
-      } else if (activePill === "reponer") {
-        if (row.stock_status !== "reponer") return false;
-      } else if (activePill === "riesgo") {
-        if (
-          !(
-            row.tiene_costo &&
-            row.margen_real_pct !== null &&
-            row.margen_real_pct >= 0 &&
-            row.margen_real_pct < 0.1 &&
-            row.price_ml !== null
-          )
-        ) {
-          return false;
-        }
-      } else if (activePill === "ok") {
-        if (
-          !row.tiene_costo ||
-          isCriticoRow(row) ||
-          (row.margen_real_pct !== null && row.margen_real_pct < 0) ||
-          (row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1)
-        ) {
-          return false;
-        }
-      }
-
-      if (statusFilter !== "all" && row.status !== statusFilter) return false;
-      if (logFilter !== "all" && (row.logistic_type ?? "") !== logFilter) return false;
-      if (costFilter === "sin" && row.tiene_costo) return false;
-      if (costFilter === "con" && !row.tiene_costo) return false;
-
-      if (stockFilter !== "all" && (row.stock_status ?? "") !== stockFilter) return false;
-
-      if (margenFilter === "pierde" && !(row.margen_real_pct !== null && row.margen_real_pct < 0)) return false;
-      if (margenFilter === "riesgo" && !(row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1)) return false;
-      if (margenFilter === "ok") {
-        const m = row.margen_real_pct;
-        if (m !== null && m < 0) return false;
-        if (m !== null && m >= 0 && m < 0.1) return false;
-      }
-
-      if (qq) {
-        const blob = `${row.item_id} ${row.title} ${row.seller_custom_field ?? ""} ${row.sku ?? ""}`.toLowerCase();
-        if (!blob.includes(qq)) return false;
-      }
-      return true;
-    });
-  }, [items, q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, activePill]);
-
-  const counts = useMemo(() => {
-    const critico = items.filter((i) => isCriticoRow(i)).length;
-    const reponer = items.filter((i) => i.stock_status === "reponer").length;
-    const margenRiesgo = items.filter(
-      (i) => i.tiene_costo && i.margen_real_pct !== null && i.margen_real_pct >= 0 && i.margen_real_pct < 0.1 && i.price_ml !== null
-    ).length;
-    const ok = items.filter((i) => {
-      if (!i.tiene_costo) return false;
-      if (isCriticoRow(i)) return false;
-      const m = i.margen_real_pct;
-      if (m !== null && m < 0) return false;
-      if (m !== null && m >= 0 && m < 0.1) return false;
-      return true;
-    }).length;
-    return { critico, reponer, margenRiesgo, ok };
-  }, [items]);
 
   const toggleSelect = (itemId: string) => {
     setSelected((prev) => {
@@ -254,11 +323,11 @@ export function CatalogCommandCenter({
   };
 
   const toggleAllFiltered = () => {
-    if (selected.size === filtered.length && filtered.length > 0) {
+    if (selected.size === filteredIds.length && filteredIds.length > 0) {
       setSelected(new Set());
       return;
     }
-    setSelected(new Set(filtered.map((r) => r.item_id)));
+    setSelected(new Set(filteredIds));
   };
 
   const onSync = () => {
@@ -269,7 +338,12 @@ export function CatalogCommandCenter({
         setSyncHint(res.error ?? "No se pudo sincronizar");
         return;
       }
-      router.refresh();
+      const cat = await reloadCatalogState(mlAccountId);
+      if (!cat.success) {
+        setSyncHint(cat.error ?? "Sincronizado; no se pudo recargar el catálogo.");
+        return;
+      }
+      setCatalog(cat.data);
     });
   };
 
@@ -298,7 +372,12 @@ export function CatalogCommandCenter({
   };
 
   const onBulkAds = () => {
-    const ids = filtered.filter((r) => r.pricing_sku_id && selected.has(r.item_id)).map((r) => r.pricing_sku_id as string);
+    const ids: string[] = [];
+    for (const fid of filteredIds) {
+      if (!selected.has(fid)) continue;
+      const row = catalog.itemsById[fid];
+      if (row?.pricing_sku_id) ids.push(row.pricing_sku_id);
+    }
     if (!ids.length) {
       setSyncHint("Seleccioná filas con costo configurado.");
       return;
@@ -309,9 +388,114 @@ export function CatalogCommandCenter({
         setSyncHint(res.error ?? "No se pudo actualizar");
         return;
       }
-      router.refresh();
+      const serverItems = res.data?.items;
+      if (serverItems?.length) {
+        setCatalog((prev) => {
+          for (const row of serverItems) {
+            if (row.pricing_sku_id) invalidateDecisionCacheBySkuId(row.pricing_sku_id);
+            const cid = row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`;
+            invalidateDecisionCacheBySkuId(cid);
+            invalidateDecisionCacheBySkuId(`${cid}:opt`);
+          }
+          return reconcileItemReplaces(prev, serverItems);
+        });
+        return;
+      }
+      const idSet = new Set(ids);
+      setCatalog((prev) => {
+        const replaces: UnifiedCatalogItem[] = [];
+        for (const itemId of prev.orderedIds) {
+          const row = prev.itemsById[itemId];
+          if (!row?.pricing_sku_id || !idSet.has(row.pricing_sku_id) || !row.tiene_costo) continue;
+          const marg =
+            row.margen_pct !== null && row.margen_pct !== undefined ? normalizePct(Number(row.margen_pct)) : null;
+          if (marg === null || marg <= 0) continue;
+          if (row.pricing_sku_id) invalidateDecisionCacheBySkuId(row.pricing_sku_id);
+          const cid = row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`;
+          invalidateDecisionCacheBySkuId(cid);
+          invalidateDecisionCacheBySkuId(`${cid}:opt`);
+          replaces.push(
+            mergeCatalogRowAfterCostSave(mlAccountId, row, {
+              pricing_sku_id: row.pricing_sku_id,
+              costo: row.costo ?? 0,
+              logistica: (row.logistica ?? "Flex") as LogisticaType,
+              margen_pct: marg,
+              publicidad_pct: 0,
+              reputacion: row.reputacion
+            })
+          );
+        }
+        return reconcileItemReplaces(prev, replaces);
+      });
     });
   };
+
+  const renderCatalogVirtualRow = useCallback(
+    ({ index, style }: ListChildComponentProps<Record<string, never>>) => {
+      const rowId = filteredIds[index];
+      const row = catalog.itemsById[rowId];
+      if (!row) return null;
+      const draft = costForms[rowId];
+      const draftKey = draft
+        ? `${draft.costo}\x1f${draft.logistica}\x1f${draft.margen}\x1f${draft.pub}`
+        : "";
+      const mlKey = `${row.price_ml ?? "∅"}\x1f${row.stock ?? "∅"}\x1f${row.precio_calculado ?? "∅"}\x1f${row.decisionState.decision.profitabilityStatus}\x1f${row.decisionState.decision.stockStatus}`;
+      const rowKey = `${row.pricing_sku_id ?? ""}\x1f${row.last_synced_at}`;
+      const ra = resolveRowAction(row) as CatalogGridRowAction;
+      const rowActionKey = ra.kind === "calc" ? `calc:${ra.reason}` : ra.kind;
+      return (
+        <CatalogGridRowMemo
+          style={style}
+          rowId={rowId}
+          rowKey={rowKey}
+          draftKey={draftKey}
+          mlKey={mlKey}
+          saveStatus={pending ? "pending" : "idle"}
+          error={rowHints[rowId] ?? null}
+          row={row}
+          rowActionKey={rowActionKey}
+          rowAction={ra}
+          expanded={expanded === rowId}
+          selected={selected.has(rowId)}
+          pending={pending}
+          inlineCostOpen={inlineCostItemId === rowId}
+          inlineCalcOpen={inlineCalcItemId === rowId}
+          margenObjDefault={margenObjDefaultForSimulator(row)}
+          onToggleSelect={() => toggleSelect(rowId)}
+          onToggleExpand={() => {
+            setExpanded((e) => (e === rowId ? null : rowId));
+            setMlPushItemId(null);
+          }}
+          onToggleInlineCost={() => {
+            setInlineCostItemId((cur) => (cur === rowId ? null : rowId));
+            setInlineCalcItemId(null);
+            setMlPushItemId(null);
+          }}
+          onOpenInlineCalc={() => {
+            setInlineCalcItemId(rowId);
+            setInlineCostItemId(null);
+            setMlPushItemId(null);
+          }}
+          onOpenMlPushRow={(id) => {
+            setMlPushItemId(id);
+            setInlineCostItemId(null);
+            setInlineCalcItemId(null);
+          }}
+        />
+      );
+    },
+    [
+      filteredIds,
+      catalog,
+      costForms,
+      rowHints,
+      expanded,
+      selected,
+      pending,
+      inlineCostItemId,
+      inlineCalcItemId
+    ]
+  );
 
   return (
     <div className="space-y-4" id="mg-catalog-command-table">
@@ -512,64 +696,105 @@ export function CatalogCommandCenter({
       ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[980px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]">
-              <th className="w-8 p-2">
+        {filteredIds.length === 0 ? (
+          <div className="p-6 text-center">
+            <p className="font-medium text-[#1A1A1A]">No hay publicaciones sincronizadas.</p>
+            <button type="button" disabled={pending} onClick={onSync} className="mt-4 rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold">
+              Sincronizar con Mercado Libre
+            </button>
+          </div>
+        ) : (
+          <div role="table" aria-label="Catálogo" className="flex min-w-[980px] flex-col text-sm">
+            <div
+              role="row"
+              className={cn(
+                CATALOG_GRID_ROW_CLASS,
+                "border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]"
+              )}
+            >
+              <div role="columnheader" className="flex items-center p-2">
                 <input
                   type="checkbox"
                   aria-label="Seleccionar todas"
-                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  checked={filteredIds.length > 0 && selected.size === filteredIds.length}
                   onChange={toggleAllFiltered}
                 />
-              </th>
-              <th className="p-2">IMG</th>
-              <th className="p-2">Producto + MLA</th>
-              <th className="p-2">Stock</th>
-              <th className="p-2">Precio ML</th>
-              <th className="p-2">Costo</th>
-              <th className="p-2">Ganancia</th>
-              <th className="p-2">Acción</th>
-              <th className="w-8 p-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="p-6 text-center">
-                  <p className="font-medium text-[#1A1A1A]">No hay publicaciones sincronizadas.</p>
-                  <button type="button" disabled={pending} onClick={onSync} className="mt-4 rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold">
-                    Sincronizar con Mercado Libre
-                  </button>
-                </td>
-              </tr>
-            ) : (
-              filtered.map((row) => (
+              </div>
+              <div role="columnheader" className="p-2">
+                IMG
+              </div>
+              <div role="columnheader" className="p-2">
+                Producto + MLA
+              </div>
+              <div role="columnheader" className="p-2">
+                Stock
+              </div>
+              <div role="columnheader" className="p-2">
+                Precio ML
+              </div>
+              <div role="columnheader" className="p-2">
+                Costo
+              </div>
+              <div role="columnheader" className="p-2">
+                Ganancia
+              </div>
+              <div role="columnheader" className="p-2">
+                Acción
+              </div>
+              <div role="columnheader" className="w-8 p-2" />
+            </div>
+            <div ref={listBodyRef} className="h-[min(55vh,560px)] w-full shrink-0">
+              <FixedSizeList
+                height={catalogListHeight}
+                width="100%"
+                itemCount={filteredIds.length}
+                itemSize={CATALOG_MAIN_ROW_HEIGHT}
+                overscanCount={6}
+                itemKey={(index) => filteredIds[index] ?? String(index)}
+              >
+                {renderCatalogVirtualRow}
+              </FixedSizeList>
+            </div>
+            {catalogDetailIdsSorted.map((id) => {
+              const row = catalog.itemsById[id];
+              if (!row) return null;
+              return (
                 <CatalogRows
-                  key={row.item_id}
+                  key={id}
                   row={row}
-                  expanded={expanded === row.item_id}
-                  onToggleExpand={() => setExpanded(expanded === row.item_id ? null : row.item_id)}
+                  expanded={expanded === id}
+                  onToggleExpand={() => setExpanded(expanded === id ? null : id)}
                   pending={pending}
-                  selected={selected.has(row.item_id)}
-                  onToggleSelect={() => toggleSelect(row.item_id)}
                   mlAccountId={mlAccountId}
                   pricingSkuChoices={pricingSkuChoices}
                   costForms={costForms}
                   setCostForms={setCostForms}
-                  onSaved={() => router.refresh()}
+                  onReconcileCostRow={onReconcileCostRow}
+                  onReconcileMlPrice={onReconcileMlPrice}
+                  onReconcileLinkSkuRow={onReconcileLinkSkuRow}
+                  onReconcileFromServer={onReconcileFromServer}
                   startTransition={startTransition}
-                  inlineCostOpen={inlineCostItemId === row.item_id}
-                  setInlineCostOpen={(v) => setInlineCostItemId(v ? row.item_id : null)}
-                  inlineCalcOpen={inlineCalcItemId === row.item_id}
-                  setInlineCalcOpen={(v) => setInlineCalcItemId(v ? row.item_id : null)}
-                  rowAction={resolveRowAction(row)}
-                  margenObjSimulatorDefault={margenObjDefaultForSimulator(row)}
+                  inlineCostOpen={inlineCostItemId === id}
+                  setInlineCostOpen={(v) => setInlineCostItemId(v ? id : null)}
+                  inlineCalcOpen={inlineCalcItemId === id}
+                  setInlineCalcOpen={(v) => setInlineCalcItemId(v ? id : null)}
+                  margenObjDefault={margenObjDefaultForSimulator(row)}
+                  mlPushItemId={mlPushItemId}
+                  onCloseMlPush={() => setMlPushItemId(null)}
+                  rowHint={rowHints[id] ?? null}
+                  onRowHint={(msg) =>
+                    setRowHints((prev) => {
+                      if (prev[id] === msg) return prev;
+                      return { ...prev, [id]: msg };
+                    })
+                  }
+                  linkSkuValue={linkSkuByItemId[id] ?? ""}
+                  onLinkSkuValue={(v) => setLinkSkuByItemId((prev) => ({ ...prev, [id]: v }))}
                 />
-              ))
-            )}
-          </tbody>
-        </table>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -580,99 +805,74 @@ function CatalogRows({
   expanded,
   onToggleExpand,
   pending,
-  selected,
-  onToggleSelect,
   mlAccountId,
   pricingSkuChoices,
   costForms,
   setCostForms,
-  onSaved,
+  onReconcileCostRow,
+  onReconcileMlPrice,
+  onReconcileLinkSkuRow,
+  onReconcileFromServer,
   startTransition,
   inlineCostOpen,
   setInlineCostOpen,
   inlineCalcOpen,
   setInlineCalcOpen,
-  rowAction,
-  margenObjSimulatorDefault
+  margenObjDefault,
+  mlPushItemId,
+  onCloseMlPush,
+  rowHint,
+  onRowHint,
+  linkSkuValue,
+  onLinkSkuValue
 }: {
   row: UnifiedCatalogItem;
   expanded: boolean;
   onToggleExpand: () => void;
   pending: boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
   mlAccountId: string;
   pricingSkuChoices: PricingChoice[];
   costForms: Record<string, { costo: string; logistica: string; margen: string; pub: string }>;
   setCostForms: Dispatch<SetStateAction<Record<string, { costo: string; logistica: string; margen: string; pub: string }>>>;
-  onSaved: () => void;
+  onReconcileCostRow: (
+    itemId: string,
+    saved: {
+      pricing_sku_id: string;
+      costo: number;
+      logistica: LogisticaType;
+      margen_pct: number;
+      publicidad_pct: number;
+      reputacion: string | null;
+    },
+    serverItem?: UnifiedCatalogItem | null
+  ) => void;
+  onReconcileMlPrice: (itemId: string, newPrice: number) => void;
+  onReconcileLinkSkuRow: (prevPricingSkuId: string | null, item: UnifiedCatalogItem) => void;
+  onReconcileFromServer: () => void;
   startTransition: (cb: () => Promise<void>) => void;
   inlineCostOpen: boolean;
   setInlineCostOpen: (open: boolean) => void;
   inlineCalcOpen: boolean;
   setInlineCalcOpen: (open: boolean) => void;
-  rowAction: ReturnType<typeof resolveRowAction>;
-  margenObjSimulatorDefault: number;
+  margenObjDefault: number | null;
+  mlPushItemId: string | null;
+  onCloseMlPush: () => void;
+  rowHint: string | null;
+  onRowHint: (msg: string | null) => void;
+  linkSkuValue: string;
+  onLinkSkuValue: (v: string) => void;
 }) {
-  const logisticaRow = (row.logistica ?? "Flex") as LogisticaType;
+  const ds = row.decisionState;
   const rep = coerceReputacion(row.reputacion);
-  const pubN = normalizePct(row.publicidad_pct ?? 0);
+  const pubN = ds.inputs.publicidadPct;
 
-  const liveReal =
-    row.tiene_costo && row.price_ml !== null && row.costo !== null && row.costo > 0
-      ? calcRealProfit({
-          price_ml: row.price_ml,
-          costo: row.costo,
-          logistica: logisticaRow,
-          reputacion: rep,
-          publicidad_pct: pubN,
-          peso_kg: row.peso_kg
-        })
-      : null;
-
-  const gananciaRealLabel =
-    !row.tiene_costo || row.costo === null
-      ? "—"
-      : liveReal && liveReal.converged && Number.isFinite(liveReal.ganancia_real)
-        ? ars.format(liveReal.ganancia_real)
-        : "—";
-
-  const margenRealLabel =
-    !row.tiene_costo || row.margen_real_pct === null ? "—" : `${(row.margen_real_pct * 100).toFixed(1)}% real`;
-
-  const pierde = row.margen_real_pct !== null && row.margen_real_pct < 0;
-  const riesgoMargen = row.tiene_costo && row.margen_real_pct !== null && row.margen_real_pct >= 0 && row.margen_real_pct < 0.1;
-
-  const stockEsCriticoVisual = isCriticoRow(row);
-
-  const rowBg = !row.tiene_costo ? "bg-neutral-50/80" : pierde ? "bg-red-50" : "";
-
-  const borderLeft = stockEsCriticoVisual
-    ? "border-l-4 border-l-red-500"
-    : riesgoMargen && !pierde
-      ? "border-l-4 border-l-amber-400"
-      : "border-l-4 border-l-transparent";
-
-  const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-50 font-semibold text-orange-950" : "";
-
-  const [linkId, setLinkId] = useState("");
-  const [hint, setHint] = useState<string | null>(null);
-  const [mlPushOpen, setMlPushOpen] = useState(false);
-
-  const stockIntel =
-    row.stock !== null && row.ventas_30d !== null && row.ventas_30d !== undefined
-      ? calcStockStatus({
-          stock_actual: row.stock,
-          ventas_30d: row.ventas_30d,
-          safety_pct: 0.2
-        })
-      : null;
-  const dailySales =
-    row.stock !== null && row.ventas_30d !== null && row.ventas_30d > 0 ? row.ventas_30d / 30 : null;
-  const daysStock =
-    dailySales !== null && dailySales > 0 && row.stock !== null
-      ? Math.round((row.stock / dailySales) * 100) / 100
-      : null;
+  const dailySales = ds.computed.velocity30d;
+  const daysStock = ds.computed.daysOfStock;
+  const stockSt = ds.decision.stockStatus;
+  const unitsToBuy =
+    ds.computed.stockGap !== null && Number.isFinite(ds.computed.stockGap) && ds.computed.stockGap > 0
+      ? Math.ceil(ds.computed.stockGap)
+      : 0;
 
   const canPushMlPrice =
     row.status === "active" &&
@@ -686,149 +886,56 @@ function CatalogRows({
   const comisionPctLabel = `${(mlComisionRate(rep) * 100).toFixed(2)}%`;
   const envioLabel = row.logistic_type ?? row.logistica ?? "—";
 
-  const openCalculator = () => {
-    setInlineCalcOpen(true);
-    setInlineCostOpen(false);
-  };
-
-  const stockBadgeClass =
-    row.status === "active" && row.stock === 0
-      ? "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white"
-      : row.stock_status === "critico"
-        ? "rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white"
-        : row.stock_status === "reponer"
-          ? "rounded bg-amber-500 px-2 py-0.5 text-xs font-bold text-white"
-          : "";
+  const pierde = ds.decision.profitabilityStatus === "loss";
+  const rowBg = !row.tiene_costo ? "bg-neutral-50/80" : pierde ? "bg-red-50" : "";
+  const riesgoMargen = ds.decision.profitabilityStatus === "risk" || ds.decision.profitabilityStatus === "low_margin";
+  const stockEsCriticoVisual = isCriticoRow(row);
+  const borderLeft = stockEsCriticoVisual
+    ? "border-l-4 border-l-red-500"
+    : riesgoMargen && !pierde
+      ? "border-l-4 border-l-amber-400"
+      : "border-l-4 border-l-transparent";
 
   return (
     <>
-      <tr className={cn("border-b border-[#E8E8E2] align-top", rowBg, borderLeft)}>
-        <td className="p-2">
-          <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Seleccionar ${row.item_id}`} />
-        </td>
-        <td className="p-2">
-          {row.thumbnail ? (
-            // eslint-disable-next-line @next/next/no-img-element -- ML CDN thumbnails
-            <img src={row.thumbnail} alt="" width={40} height={40} className="h-10 w-10 rounded-md object-cover" />
-          ) : (
-            <span className="text-xs text-[#6B6B6B]">—</span>
-          )}
-        </td>
-        <td className="p-2">
-          <div className="font-semibold leading-snug text-[#1A1A1A]">{row.title}</div>
-          <div className="mt-1 font-mono text-xs text-[#6B6B6B]">{row.item_id}</div>
-          {row.sku ? <div className="text-xs text-[#6B6B6B]">SKU costos: {row.sku}</div> : null}
-          {!row.tiene_costo ? (
-            <span className="mt-2 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-semibold text-neutral-800">
-              Sin costo
-            </span>
-          ) : null}
-        </td>
-        <td className="p-2">
-          <span className={cn(stockBadgeClass)}>{row.stock === null ? "—" : row.stock}</span>
-        </td>
-        <td className={cn("p-2 tabular-nums", precioCellClass)}>{row.price_ml === null ? "—" : ars.format(row.price_ml)}</td>
-        <td className="p-2 tabular-nums">{row.costo === null ? "—" : ars.format(row.costo)}</td>
-        <td className="p-2 tabular-nums">
-          <div className="font-medium">{gananciaRealLabel}</div>
-          <div className="text-xs text-[#6B6B6B]">{margenRealLabel}</div>
-        </td>
-        <td className="p-2 text-xs">
-          <div className="flex flex-col gap-2">
-            {rowAction.kind === "config_cost" ? (
+      {mlPushItemId === row.item_id && canPushMlPrice ? (
+        <div className="border-b border-[#E8E8E2] bg-[#FAFAF8] p-4">
+          <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3">
+            <p className="font-semibold text-[#1A1A1A]">¿Actualizar precio en ML?</p>
+            <p className="tabular-nums text-sm">
+              {row.price_ml !== null ? ars.format(row.price_ml) : "—"} →{" "}
+              {row.precio_calculado !== null ? ars.format(row.precio_calculado) : "—"}
+            </p>
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
+                disabled={pending}
+                className="rounded-lg bg-[#1A1A1A] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={() => {
-                  setInlineCostOpen(!inlineCostOpen);
-                  setInlineCalcOpen(false);
+                  startTransition(async () => {
+                    const res = await pushOptimalPriceToML(mlAccountId, row.item_id, row.precio_calculado!);
+                    if (!res.success) {
+                      onRowHint(res.error ?? "Error al publicar precio");
+                      return;
+                    }
+                    onCloseMlPush();
+                    onRowHint(null);
+                    if (res.data) onReconcileMlPrice(row.item_id, res.data.new_price);
+                  });
                 }}
               >
-                Configurar →
+                Confirmar
               </button>
-            ) : rowAction.kind === "sin_stock" ? (
-              <span className="font-semibold text-amber-900">⚠ Sin stock</span>
-            ) : rowAction.kind === "calc" ? (
-              <button
-                type="button"
-                className={cn(
-                  "font-semibold underline underline-offset-2",
-                  rowAction.reason === "pierde" ? "text-red-800 decoration-red-800" : "text-[#1A1A1A] decoration-[#1A1A1A]"
-                )}
-                onClick={openCalculator}
-              >
-                {rowAction.reason === "pierde"
-                  ? "🔴 Pierde dinero"
-                  : rowAction.reason === "optimizar"
-                    ? "📈 Optimizar precio"
-                    : "↑ Subir precio"}
+              <button type="button" className="rounded-lg border border-[#E8E8E2] px-3 py-1.5 text-sm font-semibold" onClick={onCloseMlPush}>
+                Cancelar
               </button>
-            ) : (
-              <span className="text-[#6B6B6B]"> </span>
-            )}
-
-            {canPushMlPrice && row.precio_calculado !== null && row.price_ml !== null ? (
-              <div className="border-t border-[#E8E8E2] pt-2">
-                {!mlPushOpen ? (
-                  <button
-                    type="button"
-                    disabled={pending}
-                    className="rounded-lg border border-[#1A1A1A] bg-[#FFD600] px-2 py-1 font-semibold text-[#1A1A1A] disabled:opacity-50"
-                    onClick={() => setMlPushOpen(true)}
-                  >
-                    ↑ ML: {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
-                  </button>
-                ) : (
-                  <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-2">
-                    <p className="font-semibold text-[#1A1A1A]">¿Actualizar precio en ML?</p>
-                    <p className="tabular-nums">
-                      {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={pending}
-                        className="rounded-lg bg-[#1A1A1A] px-2 py-1 font-semibold text-white disabled:opacity-50"
-                        onClick={() => {
-                          startTransition(async () => {
-                            const res = await pushOptimalPriceToML(mlAccountId, row.item_id, row.precio_calculado!);
-                            if (!res.success) {
-                              setHint(res.error ?? "Error al publicar precio");
-                              return;
-                            }
-                            setMlPushOpen(false);
-                            setHint(null);
-                            onSaved();
-                          });
-                        }}
-                      >
-                        Confirmar
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[#E8E8E2] px-2 py-1 font-semibold"
-                        onClick={() => setMlPushOpen(false)}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : null}
+            </div>
           </div>
-        </td>
-        <td className="p-2">
-          <button type="button" onClick={onToggleExpand} className="grid place-items-center rounded border border-[#E8E8E2] p-1" aria-expanded={expanded}>
-            <span className="sr-only">Detalle</span>
-            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
-        </td>
-      </tr>
+        </div>
+      ) : null}
 
       {inlineCostOpen && !row.tiene_costo ? (
-        <tr className="border-b border-[#E8E8E2] bg-neutral-50">
-          <td colSpan={9} className="p-4">
+        <div className="border-b border-[#E8E8E2] bg-neutral-50 p-4">
             <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-xs font-semibold text-[#6B6B6B]">
@@ -914,7 +1021,7 @@ function CatalogRows({
                 />
               </label>
             </div>
-            {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
+            {rowHint ? <p className="mt-2 text-xs text-red-700">{rowHint}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -924,22 +1031,22 @@ function CatalogRows({
                   const f = costForms[row.item_id];
                   const costo = Number(f?.costo);
                   if (!Number.isFinite(costo) || costo <= 0) {
-                    setHint("Ingresá un costo válido.");
+                    onRowHint("Ingresá un costo válido.");
                     return;
                   }
                   const margenStr = f?.margen?.trim() ?? "";
                   if (margenStr === "") {
-                    setHint("Ingresá un margen objetivo para calcular el precio.");
+                    onRowHint("Ingresá un margen objetivo para calcular el precio.");
                     return;
                   }
                   const margen_pct = normalizePct(Number(margenStr));
                   if (!Number.isFinite(margen_pct) || margen_pct <= 0) {
-                    setHint("Ingresá un margen objetivo para calcular el precio.");
+                    onRowHint("Ingresá un margen objetivo para calcular el precio.");
                     return;
                   }
                   const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
                   const logisticaIns = (f?.logistica ?? "Flex") as "Full" | "Flex" | "Retiro domicilio";
-                  setHint(null);
+                  onRowHint(null);
                   startTransition(async () => {
                     const res = await saveCostForItem(mlAccountId, row.item_id, {
                       costo,
@@ -948,11 +1055,22 @@ function CatalogRows({
                       publicidad_pct
                     });
                     if (!res.success) {
-                      setHint(res.error ?? "No se pudo guardar");
+                      onRowHint(res.error ?? "No se pudo guardar");
                       return;
                     }
                     setInlineCostOpen(false);
-                    onSaved();
+                    onReconcileCostRow(
+                      row.item_id,
+                      {
+                        pricing_sku_id: res.data.pricing_sku_id,
+                        costo,
+                        logistica: logisticaIns,
+                        margen_pct,
+                        publicidad_pct,
+                        reputacion: row.reputacion
+                      },
+                      res.data.item
+                    );
                   });
                 }}
               >
@@ -966,35 +1084,31 @@ function CatalogRows({
                 Cancelar
               </button>
             </div>
-          </td>
-        </tr>
+        </div>
       ) : null}
 
       {inlineCalcOpen && row.tiene_costo ? (
-        <tr className="border-b border-[#E8E8E2] bg-[#FAFAF8]">
-          <td colSpan={9} className="p-4">
+        <div className="border-b border-[#E8E8E2] bg-[#FAFAF8] p-4">
             <InlinePriceCalculator
               row={row}
               mlAccountId={mlAccountId}
               pending={pending}
-              margenObjDefault={margenObjSimulatorDefault}
+                  margenObjDefault={margenObjDefault}
               onClose={() => setInlineCalcOpen(false)}
-              onSaved={onSaved}
+              onCostRowMerged={(patch, serverItem) => onReconcileCostRow(row.item_id, patch, serverItem)}
               startTransition={startTransition}
-              setHint={setHint}
+              setHint={onRowHint}
             />
-            {hint ? <p className="mt-2 text-xs text-red-700">{hint}</p> : null}
-          </td>
-        </tr>
+            {rowHint ? <p className="mt-2 text-xs text-red-700">{rowHint}</p> : null}
+        </div>
       ) : null}
 
       {expanded ? (
-        <tr className={cn("border-b border-[#E8E8E2] bg-[#FAFAF8]", rowBg)}>
-          <td colSpan={9} className="p-4">
+        <div className={cn("border-b border-[#E8E8E2] bg-[#FAFAF8] p-4", rowBg)}>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Desglose</p>
-                {row.price_ml !== null && row.tiene_costo && liveReal && liveReal.converged ? (
+                {row.price_ml !== null && row.tiene_costo && ds.computed.realProfit !== null && ds.computed.realComisionAmount !== null ? (
                   <ul className="space-y-1 font-mono text-xs leading-relaxed">
                     <li className="flex justify-between gap-4">
                       <span>Precio ML actual:</span>
@@ -1002,25 +1116,26 @@ function CatalogRows({
                     </li>
                     <li className="flex justify-between gap-4 text-[#6B6B6B]">
                       <span>− Comisión ML {comisionPctLabel}:</span>
-                      <span>− {ars.format(liveReal.comision_$)}</span>
+                      <span>− {ars.format(ds.computed.realComisionAmount)}</span>
                     </li>
                     <li className="flex justify-between gap-4 text-[#6B6B6B]">
                       <span>− Envío ({envioLabel}):</span>
-                      <span>− {ars.format(liveReal.envio_$)}</span>
+                      <span>− {ars.format(ds.computed.realShippingAmount ?? 0)}</span>
                     </li>
                     <li className="flex justify-between gap-4 text-[#6B6B6B]">
                       <span>− Publicidad ({(pubN * 100).toFixed(0)}%):</span>
-                      <span>− {ars.format(liveReal.publicidad_$)}</span>
+                      <span>− {ars.format(ds.computed.realAdsAmount ?? 0)}</span>
                     </li>
                     <li className="flex justify-between gap-4 text-[#6B6B6B]">
                       <span>− Costo producto:</span>
-                      <span>− {ars.format(liveReal.costo_total)}</span>
+                      <span>− {ars.format(ds.computed.realProductCostApplied ?? row.costo ?? 0)}</span>
                     </li>
                     <li className="flex justify-between gap-4 border-t border-[#E8E8E2] pt-1 font-semibold text-[#1A1A1A]">
                       <span>Ganancia real:</span>
                       <span>
-                        {liveReal.ganancia_real >= 0 ? "+" : ""}
-                        {ars.format(liveReal.ganancia_real)} ({(liveReal.margen_real * 100).toFixed(1)}%)
+                        {(ds.computed.realProfit ?? 0) >= 0 ? "+" : ""}
+                        {ars.format(ds.computed.realProfit ?? 0)} (
+                        {ds.computed.realMarginPct !== null ? `${(ds.computed.realMarginPct * 100).toFixed(1)}%` : "—"})
                       </span>
                     </li>
                   </ul>
@@ -1037,15 +1152,15 @@ function CatalogRows({
                     {row.stock !== null && dailySales !== null && dailySales > 0 ? (
                       <>
                         <p>Velocidad: {dailySales.toFixed(1)} und/día</p>
-                        {stockIntel && daysStock !== null ? (
+                        {daysStock !== null ? (
                           <p>
                             Días de stock: {daysStock} →{" "}
                             <span className="font-bold uppercase">
-                              {stockIntel.status === "critico"
+                              {stockSt === "critical"
                                 ? "CRÍTICO"
-                                : stockIntel.status === "reponer"
+                                : stockSt === "replenish"
                                   ? "REPONER"
-                                  : stockIntel.status === "exceso"
+                                  : stockSt === "overstock"
                                     ? "EXCESO"
                                     : "OK"}
                             </span>
@@ -1057,12 +1172,10 @@ function CatalogRows({
                           </p>
                         ) : null}
                       </>
-                    ) : row.stock !== null ? (
+                    ) : row.stock !== null && row.ventas_30d === 0 ? (
                       <p>Velocidad: 0 und/día (sin ventas en 30d)</p>
                     ) : null}
-                    {row.stock !== null && stockIntel && stockIntel.units_to_buy > 0 ? (
-                      <p>Reponer: {stockIntel.units_to_buy} unidades</p>
-                    ) : null}
+                    {row.stock !== null && unitsToBuy > 0 ? <p>Reponer: {unitsToBuy} unidades</p> : null}
                   </>
                 ) : (
                   <>
@@ -1085,7 +1198,11 @@ function CatalogRows({
                 <div>
                   <p className="text-sm font-semibold">Vincular a otro SKU de costos</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <select value={linkId} onChange={(e) => setLinkId(e.target.value)} className="rounded border border-[#E8E8E2] px-2 py-1 text-sm">
+                    <select
+                      value={linkSkuValue}
+                      onChange={(e) => onLinkSkuValue(e.target.value)}
+                      className="rounded border border-[#E8E8E2] px-2 py-1 text-sm"
+                    >
                       <option value="">Elegí SKU…</option>
                       {pricingSkuChoices.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -1095,17 +1212,19 @@ function CatalogRows({
                     </select>
                     <button
                       type="button"
-                      disabled={pending || !linkId}
+                      disabled={pending || !linkSkuValue}
                       className="rounded-lg bg-[#1A1A1A] px-3 py-1 text-sm font-semibold text-white disabled:opacity-50"
                       onClick={() => {
                         startTransition(async () => {
-                          const res = await linkSkuToItem(mlAccountId, row.item_id, linkId);
+                          const res = await linkSkuToItem(mlAccountId, row.item_id, linkSkuValue);
                           if (!res.success) {
-                            setHint(res.error ?? "No se pudo vincular");
+                            onRowHint(res.error ?? "No se pudo vincular");
                             return;
                           }
-                          setLinkId("");
-                          onSaved();
+                          onLinkSkuValue("");
+                          const it = res.data?.item;
+                          if (it) onReconcileLinkSkuRow(row.pricing_sku_id, it);
+                          else onReconcileFromServer();
                         });
                       }}
                     >
@@ -1117,8 +1236,7 @@ function CatalogRows({
                 <p className="text-xs text-[#6B6B6B]">Configurá costo desde la columna Acción.</p>
               )}
             </div>
-          </td>
-        </tr>
+        </div>
       ) : null}
     </>
   );
@@ -1133,16 +1251,26 @@ function InlinePriceCalculator({
   pending,
   margenObjDefault,
   onClose,
-  onSaved,
+  onCostRowMerged,
   startTransition,
   setHint
 }: {
   row: UnifiedCatalogItem;
   mlAccountId: string;
   pending: boolean;
-  margenObjDefault: number;
+  margenObjDefault: number | null;
   onClose: () => void;
-  onSaved: () => void;
+  onCostRowMerged: (
+    saved: {
+      pricing_sku_id: string;
+      costo: number;
+      logistica: LogisticaType;
+      margen_pct: number;
+      publicidad_pct: number;
+      reputacion: string | null;
+    },
+    serverItem?: UnifiedCatalogItem | null
+  ) => void;
   startTransition: (cb: () => Promise<void>) => void;
   setHint: (s: string | null) => void;
 }) {
@@ -1154,58 +1282,102 @@ function InlinePriceCalculator({
   const defaultMarg =
     row.margen_pct !== null && row.margen_pct !== undefined
       ? String(Math.round(normalizePct(row.margen_pct) * 1000) / 10)
-      : String(Math.round(margenObjDefault * 1000) / 10);
+      : margenObjDefault !== null
+        ? String(Math.round(margenObjDefault * 1000) / 10)
+        : "";
 
   const [costoStr, setCostoStr] = useState(defaultCost);
   const [pubStr, setPubStr] = useState(defaultPub);
   const [margStr, setMargStr] = useState(defaultMarg);
   const [logistica, setLogistica] = useState<LogisticaType>((row.logistica ?? "Flex") as LogisticaType);
   const [reputacion, setReputacion] = useState<ReputacionType>(coerceReputacion(row.reputacion));
+  const [debounced, setDebounced] = useState({ costoStr: defaultCost, pubStr: defaultPub, margStr: defaultMarg });
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebounced({ costoStr, pubStr, margStr }), 120);
+    return () => window.clearTimeout(t);
+  }, [costoStr, pubStr, margStr]);
 
   const sim = useMemo(() => {
-    const costo = Number(costoStr.replace(",", "."));
-    const pub = normalizePct(Number(pubStr.replace(",", ".")));
-    const marg = normalizePct(Number(margStr.replace(",", ".")));
+    const costo = Number(debounced.costoStr.replace(",", "."));
+    const pub = normalizePct(Number(debounced.pubStr.replace(",", ".")));
+    const margTrim = debounced.margStr.trim();
+    const margParsed = margTrim === "" ? null : normalizePct(Number(margTrim.replace(",", ".")));
     if (!Number.isFinite(costo) || costo <= 0) {
       return null;
     }
-    const sell = calcSellingPrice({
-      costo,
-      logistica,
-      publicidad_pct: pub,
-      margen_pct: marg > 0 ? marg : 0.15,
-      reputacion
-    });
-    const realAtMl =
-      row.price_ml !== null && Number.isFinite(row.price_ml)
-        ? calcRealProfit({
-            price_ml: row.price_ml,
-            costo,
-            logistica,
-            reputacion,
-            publicidad_pct: pub,
-            peso_kg: row.peso_kg
-          })
-        : null;
-    return { sell, realAtMl, costo, pub, marg: marg > 0 ? marg : 0.15 };
-  }, [costoStr, pubStr, margStr, logistica, reputacion, row.price_ml, row.peso_kg]);
+    const baseInput: BuildSkuDecisionStateInput = {
+      accountId: mlAccountId,
+      ml: {
+        itemId: row.item_id,
+        sku: row.sku,
+        title: row.title,
+        imageUrl: row.thumbnail,
+        currentPrice: row.price_ml,
+        stock: row.stock,
+        ventas30d: row.ventas_30d,
+        revenue30d: row.decisionState.ml.revenue30d,
+        lastSaleDate: row.decisionState.ml.lastSaleDate,
+        shippingMode: row.logistic_type,
+        listingType: null,
+        freeShipping: null,
+        categoryId: null
+      },
+      inputs: {
+        productCost: costo,
+        logistics: logistica,
+        publicidadPct: pub,
+        targetMarginPct: margParsed !== null && margParsed > 0 ? margParsed : null,
+        pesoKg: row.peso_kg,
+        reputacion
+      }
+    };
+    const cacheSkuId = row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`;
+    const base = getCachedDecisionState(cacheSkuId, baseInput);
+    let marginAtOptimal: number | null = null;
+    if (base.computed.optimalPrice !== null && base.computed.optimalPrice > 0) {
+      const altSkuId = `${cacheSkuId}:opt`;
+      const altInput: BuildSkuDecisionStateInput = {
+        ...baseInput,
+        ml: { ...baseInput.ml, currentPrice: base.computed.optimalPrice }
+      };
+      marginAtOptimal = getCachedDecisionState(altSkuId, altInput).computed.realMarginPct;
+    }
+    return { ds: base, marginAtOptimal, costo, pub };
+  }, [
+    debounced.costoStr,
+    debounced.pubStr,
+    debounced.margStr,
+    logistica,
+    reputacion,
+    mlAccountId,
+    row.item_id,
+    row.sku,
+    row.title,
+    row.thumbnail,
+    row.price_ml,
+    row.stock,
+    row.ventas_30d,
+    row.peso_kg,
+    row.logistic_type,
+    row.pricing_sku_id,
+    row.decisionState.ml.revenue30d,
+    row.decisionState.ml.lastSaleDate
+  ]);
 
-  const deltaVsMl =
-    sim?.sell.converged && row.price_ml !== null && Number.isFinite(row.price_ml)
-      ? row.price_ml - sim.sell.precio_venta
-      : null;
-
-  const margenRealSim =
-    sim?.sell.converged && Number.isFinite(sim.sell.precio_venta) && sim.costo > 0
-      ? calcRealProfit({
-          price_ml: sim.sell.precio_venta,
-          costo: sim.costo,
-          logistica,
-          reputacion,
-          publicidad_pct: sim.pub,
-          peso_kg: row.peso_kg
-        })
-      : null;
+  const deltaVsMl = (() => {
+    const opt = sim?.ds.computed.optimalPrice;
+    if (
+      opt === null ||
+      opt === undefined ||
+      row.price_ml === null ||
+      !Number.isFinite(row.price_ml) ||
+      !Number.isFinite(opt)
+    ) {
+      return null;
+    }
+    return row.price_ml - opt;
+  })();
 
   return (
     <div className="rounded-xl border border-[#E8E8E2] bg-white p-4">
@@ -1273,29 +1445,37 @@ function InlinePriceCalculator({
         </div>
         <div className="space-y-2 rounded-lg bg-[#F5F5F0] p-3 text-sm">
           <p className="text-xs font-semibold text-[#6B6B6B]">Resultado (simulación)</p>
-          {sim?.sell.converged && Number.isFinite(sim.sell.precio_venta) ? (
+          {sim && sim.ds.computed.optimalPrice !== null && Number.isFinite(sim.ds.computed.optimalPrice) ? (
             <>
               <p className="flex justify-between">
                 <span>Precio de venta</span>
-                <span className="font-mono font-semibold">{ars.format(sim.sell.precio_venta)}</span>
+                <span className="font-mono font-semibold">{ars.format(sim.ds.computed.optimalPrice)}</span>
               </p>
               <p className="flex justify-between text-[#6B6B6B]">
                 <span>Ganancia (objetivo)</span>
-                <span className="font-mono">{ars.format(sim.sell.ganancia_unit)}</span>
+                <span className="font-mono">
+                  {sim.ds.computed.optimalGananciaUnit !== null ? ars.format(sim.ds.computed.optimalGananciaUnit) : "—"}
+                </span>
               </p>
               <p className="flex justify-between text-[#6B6B6B]">
                 <span>Margen real (a ese precio)</span>
                 <span className="font-mono">
-                  {margenRealSim?.converged ? `${(margenRealSim.margen_real * 100).toFixed(1)}%` : "—"}
+                  {sim.marginAtOptimal !== null ? `${(sim.marginAtOptimal * 100).toFixed(1)}%` : "—"}
                 </span>
               </p>
               <p className="flex justify-between text-[#6B6B6B]">
                 <span>ROI</span>
-                <span className="font-mono">{sim.sell.roi.toFixed(1)}%</span>
+                <span className="font-mono">
+                  {sim.ds.computed.optimalRoi !== null ? `${sim.ds.computed.optimalRoi.toFixed(1)}%` : "—"}
+                </span>
               </p>
             </>
           ) : (
-            <p className="text-xs text-[#6B6B6B]">Ingresá un costo válido para ver el resultado.</p>
+            <p className="text-xs text-[#6B6B6B]">
+              {!Number.isFinite(Number(costoStr.replace(",", "."))) || Number(costoStr.replace(",", ".")) <= 0
+                ? "Ingresá un costo válido para ver el resultado."
+                : "Ingresá margen objetivo para ver precio de venta."}
+            </p>
           )}
           {deltaVsMl !== null && Number.isFinite(deltaVsMl) && row.price_ml !== null ? (
             <p className="mt-2 border-t border-[#E8E8E2] pt-2 text-xs text-[#1A1A1A]">
@@ -1313,10 +1493,10 @@ function InlinePriceCalculator({
               )}
             </p>
           ) : null}
-          {row.price_ml !== null && sim?.realAtMl?.converged ? (
+          {row.price_ml !== null && sim && sim.ds.computed.realProfit !== null && Number.isFinite(sim.ds.computed.realProfit) ? (
             <p className="text-xs text-[#6B6B6B]">
-              Ganancia a precio ML actual: {ars.format(sim.realAtMl.ganancia_real)} (
-              {(sim.realAtMl.margen_real * 100).toFixed(1)}%)
+              Ganancia a precio ML actual: {ars.format(sim.ds.computed.realProfit)} (
+              {sim.ds.computed.realMarginPct !== null ? `${(sim.ds.computed.realMarginPct * 100).toFixed(1)}%` : "—"})
             </p>
           ) : null}
         </div>
@@ -1366,8 +1546,18 @@ function InlinePriceCalculator({
                 setHint(res.error ?? "No se pudo guardar");
                 return;
               }
+              onCostRowMerged(
+                {
+                  pricing_sku_id: res.data.pricing_sku_id,
+                  costo,
+                  logistica,
+                  margen_pct,
+                  publicidad_pct,
+                  reputacion
+                },
+                res.data.item
+              );
               onClose();
-              onSaved();
             });
           }}
         >

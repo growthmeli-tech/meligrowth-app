@@ -1,3 +1,5 @@
+import "server-only";
+
 import { normalizePct } from "@/lib/pricing/calculator";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
