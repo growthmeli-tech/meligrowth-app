@@ -478,6 +478,29 @@ const PricingEngineRow = memo(function PricingEngineRow({
       operabilityStatus: mlLink?.operabilityStatus,
       optimalPrice: optimal
     });
+  const missingFinancial = decision.computed.financialBreakdown?.missing ?? [];
+  const mlPushBlockedReason =
+    !row.costo || row.costo <= 0
+      ? "Falta costo"
+      : decision.computed.profitCompleteness !== "net_full"
+        ? missingFinancial.some((x) => x.toLowerCase().includes("iibb"))
+          ? "Falta IIBB"
+          : missingFinancial.some((x) => x.toLowerCase().includes("shipping"))
+            ? "Falta envío completo"
+            : "Cálculo parcial"
+        : cashInDisplay.kind !== "real"
+          ? cashInDisplay.kind === "estimated"
+            ? "Cálculo parcial"
+            : "Falta envío completo"
+          : mlLink?.operabilityStatus !== "operable"
+            ? "Fila no operable"
+            : !mlLink?.item_id
+              ? "Falta item ML"
+              : optimal === null
+                ? "Falta precio óptimo"
+                : !hasMlPrice
+                  ? "Falta precio ML"
+                  : "Precio ya actualizado";
   const ganObj = decision.computed.optimalGananciaUnit;
   const margObj = decision.inputs.targetMarginPct;
 
@@ -725,7 +748,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
               onRequestEditField(row.id, "costo");
             }}
           >
-            Configurar
+            Configurar costo
           </button>
         ) : canPushMl && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
           <div className="space-y-2">
@@ -739,7 +762,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
                   setPushOpen(true);
                 }}
               >
-                ↑ ML: {ars.format(priceMl)} → {ars.format(optimal)}
+                Actualizar ML: {ars.format(priceMl)} → {ars.format(optimal)}
               </button>
             ) : (
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-2">
@@ -783,9 +806,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
             )}
           </div>
         ) : (
-          <span className="text-[#6B6B6B]">
-            {decision.computed.profitCompleteness === "net_full" ? "—" : "Completar datos"}
-          </span>
+          <span className="text-[#6B6B6B]">{mlPushBlockedReason}</span>
         )}
       </td>
     </tr>

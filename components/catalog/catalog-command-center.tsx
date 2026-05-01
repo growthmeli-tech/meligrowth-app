@@ -1,6 +1,5 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { ChevronDown, ChevronRight, Download, Filter, RefreshCw } from "lucide-react";
@@ -315,6 +314,7 @@ export function CatalogCommandCenter({
 
   /** Lifted row UI for virtual row memo boundaries (primitives only in list). */
   const [rowHints, setRowHints] = useState<Record<string, string | null>>({});
+  const [rowSaveState, setRowSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
   const [linkSkuByItemId, setLinkSkuByItemId] = useState<Record<string, string>>({});
   const [mlPushItemId, setMlPushItemId] = useState<string | null>(null);
 
@@ -554,6 +554,9 @@ export function CatalogCommandCenter({
           inlineCostOpen={inlineCostItemId === rowId}
           inlineCalcOpen={inlineCalcItemId === rowId}
           margenObjDefault={margenObjDefaultForSimulator(row)}
+          costForm={costForms[rowId] ?? null}
+          rowHint={rowHints[rowId] ?? null}
+          rowSaveState={rowSaveState[rowId] ?? "idle"}
           onToggleSelect={() => toggleSelect(rowId)}
           onToggleExpand={() => {
             setExpanded((e) => (e === rowId ? null : rowId));
@@ -606,6 +609,102 @@ export function CatalogCommandCenter({
               setInlineCalcItemId(null);
               setMlPushItemId(null);
             })();
+          }}
+          onInlineCostFieldChange={(patch) => {
+            setCostForms((prev) => {
+              const current = prev[rowId] ?? {
+                costo: "",
+                logistica: operatorLogisticaDefault(row),
+                margen: "",
+                pub: "0"
+              };
+              return { ...prev, [rowId]: { ...current, ...patch } };
+            });
+          }}
+          onInlineCostSave={() => {
+            const f = costForms[rowId];
+            const costo = Number(f?.costo);
+            if (!Number.isFinite(costo) || costo <= 0) {
+              setRowHints((prev) => ({ ...prev, [rowId]: "Ingresá un costo válido." }));
+              setRowSaveState((prev) => ({ ...prev, [rowId]: "error" }));
+              return;
+            }
+            const margenStr = f?.margen?.trim() ?? "";
+            if (margenStr === "") {
+              setRowHints((prev) => ({ ...prev, [rowId]: "Ingresá un margen objetivo para calcular el precio." }));
+              setRowSaveState((prev) => ({ ...prev, [rowId]: "error" }));
+              return;
+            }
+            const margen_pct = normalizePct(Number(margenStr));
+            if (!Number.isFinite(margen_pct) || margen_pct <= 0) {
+              setRowHints((prev) => ({ ...prev, [rowId]: "Ingresá un margen objetivo para calcular el precio." }));
+              setRowSaveState((prev) => ({ ...prev, [rowId]: "error" }));
+              return;
+            }
+            const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
+            const logisticaIns = (f?.logistica ?? operatorLogisticaDefault(row)) as "Full" | "Flex" | "Retiro domicilio";
+            setRowHints((prev) => ({ ...prev, [rowId]: null }));
+            setRowSaveState((prev) => ({ ...prev, [rowId]: "saving" }));
+            void (async () => {
+              const res = await saveCostForItem(mlAccountId, rowId, {
+                costo,
+                logistica: logisticaIns,
+                margen_pct,
+                publicidad_pct
+              });
+              if (!res.success) {
+                setRowHints((prev) => ({ ...prev, [rowId]: res.error ?? "No se pudo guardar" }));
+                setRowSaveState((prev) => ({ ...prev, [rowId]: "error" }));
+                return;
+              }
+              setRowSaveState((prev) => ({ ...prev, [rowId]: "saved" }));
+              window.setTimeout(() => {
+                setRowSaveState((prev) => ({ ...prev, [rowId]: prev[rowId] === "saved" ? "idle" : prev[rowId] }));
+              }, 1200);
+              setInlineCostItemId(null);
+              onReconcileCostRow(
+                rowId,
+                {
+                  pricing_sku_id: res.data.pricing_sku_id,
+                  costo,
+                  logistica: logisticaIns,
+                  margen_pct,
+                  publicidad_pct,
+                  reputacion: row.reputacion
+                },
+                res.data.item
+              );
+            })();
+          }}
+          onInlineCostCancel={() => {
+            const current = rowFor(rowId);
+            setCostForms((prev) => {
+              const mPct = current?.margen_pct;
+              const margenStr =
+                mPct !== null && mPct !== undefined && Number.isFinite(Number(mPct))
+                  ? String(Number(mPct) <= 1 ? Math.round(Number(mPct) * 10_000) / 100 : Number(mPct))
+                  : "";
+              const pPct = current?.publicidad_pct;
+              const pubStr =
+                pPct !== null && pPct !== undefined && Number.isFinite(Number(pPct))
+                  ? String(Number(pPct) <= 1 ? Math.round(Number(pPct) * 10_000) / 100 : Number(pPct))
+                  : "0";
+              return {
+                ...prev,
+                [rowId]: {
+                  costo:
+                    current?.costo !== null && current?.costo !== undefined && Number.isFinite(Number(current.costo))
+                      ? String(current.costo)
+                      : "",
+                  logistica: current ? operatorLogisticaDefault(current) : operatorLogisticaDefault(row),
+                  margen: margenStr,
+                  pub: pubStr
+                }
+              };
+            });
+            setRowHints((prev) => ({ ...prev, [rowId]: null }));
+            setRowSaveState((prev) => ({ ...prev, [rowId]: "idle" }));
+            setInlineCostItemId(null);
           }}
           onOpenInlineCalc={() => {
             setInlineCalcItemId(rowId);
@@ -921,15 +1020,11 @@ export function CatalogCommandCenter({
                   pending={pending}
                   mlAccountId={mlAccountId}
                   pricingSkuChoices={pricingSkuChoices}
-                  costForms={costForms}
-                  setCostForms={setCostForms}
                   onReconcileCostRow={onReconcileCostRow}
                   onReconcileMlPrice={onReconcileMlPrice}
                   onReconcileLinkSkuRow={onReconcileLinkSkuRow}
                   onReconcileFromServer={onReconcileFromServer}
                   startTransition={startTransition}
-                  inlineCostOpen={inlineCostItemId === id}
-                  setInlineCostOpen={(v) => setInlineCostItemId(v ? id : null)}
                   inlineCalcOpen={inlineCalcItemId === id}
                   setInlineCalcOpen={(v) => setInlineCalcItemId(v ? id : null)}
                   margenObjDefault={margenObjDefaultForSimulator(row)}
@@ -964,15 +1059,11 @@ function CatalogRows({
   pending,
   mlAccountId,
   pricingSkuChoices,
-  costForms,
-  setCostForms,
   onReconcileCostRow,
   onReconcileMlPrice,
   onReconcileLinkSkuRow,
   onReconcileFromServer,
   startTransition,
-  inlineCostOpen,
-  setInlineCostOpen,
   inlineCalcOpen,
   setInlineCalcOpen,
   margenObjDefault,
@@ -992,8 +1083,6 @@ function CatalogRows({
   pending: boolean;
   mlAccountId: string;
   pricingSkuChoices: PricingChoice[];
-  costForms: Record<string, { costo: string; logistica: string; margen: string; pub: string }>;
-  setCostForms: Dispatch<SetStateAction<Record<string, { costo: string; logistica: string; margen: string; pub: string }>>>;
   onReconcileCostRow: (
     itemId: string,
     saved: {
@@ -1010,8 +1099,6 @@ function CatalogRows({
   onReconcileLinkSkuRow: (prevPricingSkuId: string | null, item: UnifiedCatalogItem) => void;
   onReconcileFromServer: () => void;
   startTransition: (cb: () => Promise<void>) => void;
-  inlineCostOpen: boolean;
-  setInlineCostOpen: (open: boolean) => void;
   inlineCalcOpen: boolean;
   setInlineCalcOpen: (open: boolean) => void;
   margenObjDefault: number | null;
@@ -1101,159 +1188,6 @@ function CatalogRows({
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {inlineCostOpen ? (
-        <div className="border-b border-[#E8E8E2] bg-neutral-50 p-4">
-            <p className="text-sm font-semibold text-[#1A1A1A]">{row.tiene_costo ? "Editar costo" : "Configurar costo"}</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="text-xs font-semibold text-[#6B6B6B]">
-                Costo $
-                <input
-                  type="number"
-                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.costo ?? ""}
-                  onChange={(e) =>
-                    setCostForms((prev) => ({
-                      ...prev,
-                      [row.item_id]: {
-                        costo: e.target.value,
-                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
-                        margen: prev[row.item_id]?.margen ?? "",
-                        pub: prev[row.item_id]?.pub ?? "0"
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label className="text-xs font-semibold text-[#6B6B6B]">
-                Log. costos (motor)
-                <select
-                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.logistica ?? operatorLogisticaDefault(row)}
-                  onChange={(e) =>
-                    setCostForms((prev) => ({
-                      ...prev,
-                      [row.item_id]: {
-                        costo: prev[row.item_id]?.costo ?? "",
-                        logistica: e.target.value,
-                        margen: prev[row.item_id]?.margen ?? "",
-                        pub: prev[row.item_id]?.pub ?? "0"
-                      }
-                    }))
-                  }
-                >
-                  <option value="Flex">Flex</option>
-                  <option value="Full">Full</option>
-                  <option value="Retiro domicilio">Retiro domicilio</option>
-                </select>
-              </label>
-              <label className="text-xs font-semibold text-[#6B6B6B]">
-                % Publicidad (0–100 o 0–1)
-                <input
-                  type="number"
-                  step="0.01"
-                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.pub ?? "0"}
-                  onChange={(e) =>
-                    setCostForms((prev) => ({
-                      ...prev,
-                      [row.item_id]: {
-                        costo: prev[row.item_id]?.costo ?? "",
-                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
-                        margen: prev[row.item_id]?.margen ?? "",
-                        pub: e.target.value
-                      }
-                    }))
-                  }
-                />
-              </label>
-              <label className="text-xs font-semibold text-[#6B6B6B]">
-                % Margen objetivo (requerido)
-                <input
-                  type="number"
-                  step="0.01"
-                  className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.margen ?? ""}
-                  placeholder="Ej. 15"
-                  onChange={(e) =>
-                    setCostForms((prev) => ({
-                      ...prev,
-                      [row.item_id]: {
-                        costo: prev[row.item_id]?.costo ?? "",
-                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
-                        margen: e.target.value,
-                        pub: prev[row.item_id]?.pub ?? "0"
-                      }
-                    }))
-                  }
-                />
-              </label>
-            </div>
-            {rowHint ? <p className="mt-2 text-xs text-red-700">{rowHint}</p> : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={pending}
-                className="rounded-lg bg-[#FFD600] px-3 py-2 text-sm font-semibold"
-                onClick={() => {
-                  const f = costForms[row.item_id];
-                  const costo = Number(f?.costo);
-                  if (!Number.isFinite(costo) || costo <= 0) {
-                    onRowHint("Ingresá un costo válido.");
-                    return;
-                  }
-                  const margenStr = f?.margen?.trim() ?? "";
-                  if (margenStr === "") {
-                    onRowHint("Ingresá un margen objetivo para calcular el precio.");
-                    return;
-                  }
-                  const margen_pct = normalizePct(Number(margenStr));
-                  if (!Number.isFinite(margen_pct) || margen_pct <= 0) {
-                    onRowHint("Ingresá un margen objetivo para calcular el precio.");
-                    return;
-                  }
-                  const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
-                  const logisticaIns = (f?.logistica ?? operatorLogisticaDefault(row)) as "Full" | "Flex" | "Retiro domicilio";
-                  onRowHint(null);
-                  void (async () => {
-                    const res = await saveCostForItem(mlAccountId, row.item_id, {
-                      costo,
-                      logistica: logisticaIns,
-                      margen_pct,
-                      publicidad_pct
-                    });
-                    if (!res.success) {
-                      onRowHint(res.error ?? "No se pudo guardar");
-                      return;
-                    }
-                    setInlineCostOpen(false);
-                    onReconcileCostRow(
-                      row.item_id,
-                      {
-                        pricing_sku_id: res.data.pricing_sku_id,
-                        costo,
-                        logistica: logisticaIns,
-                        margen_pct,
-                        publicidad_pct,
-                        reputacion: row.reputacion
-                      },
-                      res.data.item
-                    );
-                  })();
-                }}
-              >
-                Guardar
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold"
-                onClick={() => setInlineCostOpen(false)}
-              >
-                Cancelar
-              </button>
-            </div>
         </div>
       ) : null}
 

@@ -50,9 +50,15 @@ export type CatalogGridRowOwnProps = {
   inlineCostOpen: boolean;
   inlineCalcOpen: boolean;
   margenObjDefault: number | null;
+  costForm: { costo: string; logistica: string; margen: string; pub: string } | null;
+  rowHint: string | null;
+  rowSaveState: "idle" | "saving" | "saved" | "error";
   onToggleSelect: () => void;
   onToggleExpand: () => void;
   onToggleInlineCost: () => void;
+  onInlineCostFieldChange: (patch: Partial<{ costo: string; logistica: string; margen: string; pub: string }>) => void;
+  onInlineCostSave: () => void;
+  onInlineCostCancel: () => void;
   onOpenInlineCalc: () => void;
   onOpenMlPushRow: (itemId: string) => void;
 };
@@ -75,6 +81,12 @@ function catalogGridRowAreEqual(a: CatalogGridRowOwnProps, b: CatalogGridRowOwnP
     a.inlineCostOpen === b.inlineCostOpen &&
     a.inlineCalcOpen === b.inlineCalcOpen &&
     a.margenObjDefault === b.margenObjDefault &&
+    a.rowHint === b.rowHint &&
+    a.rowSaveState === b.rowSaveState &&
+    a.costForm?.costo === b.costForm?.costo &&
+    a.costForm?.logistica === b.costForm?.logistica &&
+    a.costForm?.margen === b.costForm?.margen &&
+    a.costForm?.pub === b.costForm?.pub &&
     a.pending === b.pending &&
     a.rowActionKey === b.rowActionKey &&
     styleSliceEqual(a.style, b.style)
@@ -89,9 +101,15 @@ function CatalogGridRowInner({
   selected,
   pending,
   inlineCostOpen,
+  costForm,
+  rowHint,
+  rowSaveState,
   onToggleSelect,
   onToggleExpand,
   onToggleInlineCost,
+  onInlineCostFieldChange,
+  onInlineCostSave,
+  onInlineCostCancel,
   onOpenInlineCalc,
   onOpenMlPushRow
 }: CatalogGridRowOwnProps) {
@@ -151,6 +169,27 @@ function CatalogGridRowInner({
       optimalPrice: row.precio_calculado
     }) &&
     Math.round(row.precio_calculado) !== Math.round(row.price_ml);
+  const missingFinancial = ds.computed.financialBreakdown?.missing ?? [];
+  const mlPushBlockedReason =
+    !row.tiene_costo
+      ? "Falta costo"
+      : ds.computed.profitCompleteness !== "net_full"
+        ? missingFinancial.some((x) => x.toLowerCase().includes("iibb"))
+          ? "Falta IIBB"
+          : missingFinancial.some((x) => x.toLowerCase().includes("shipping"))
+            ? "Falta envío completo"
+            : "Cálculo parcial"
+        : cashInDisplay.kind !== "real"
+          ? cashInDisplay.kind === "estimated"
+            ? "Cálculo parcial"
+            : "Falta envío completo"
+          : row.dataTrust.operabilityStatus !== "operable"
+            ? "Fila no operable"
+            : row.precio_calculado === null || !Number.isFinite(row.precio_calculado)
+              ? "Falta precio óptimo"
+              : row.price_ml === null || !Number.isFinite(row.price_ml)
+                ? "Sin precio ML actual"
+                : "Precio ya actualizado";
 
   const stockBadgeClass =
     row.status === "active" && row.stock === 0
@@ -224,7 +263,7 @@ function CatalogGridRowInner({
               className="text-left font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
               onClick={onToggleInlineCost}
             >
-              Configurar →
+              Configurar costo
             </button>
           ) : rowAction.kind === "edit_cost" ? (
             <button
@@ -232,7 +271,7 @@ function CatalogGridRowInner({
               className="text-left font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
               onClick={onToggleInlineCost}
             >
-              Editar costo →
+              Editar
             </button>
           ) : rowAction.kind === "sin_stock" ? (
             <span className="font-semibold text-amber-900">⚠ Sin stock</span>
@@ -264,8 +303,91 @@ function CatalogGridRowInner({
               className="mt-1 rounded-lg border border-[#1A1A1A] bg-[#FFD600] px-2 py-1 text-left font-semibold text-[#1A1A1A] disabled:opacity-50"
               onClick={() => onOpenMlPushRow(row.item_id)}
             >
-              ↑ ML: {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
+              Actualizar ML: {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
             </button>
+          ) : (
+            <span className="mt-1 text-[10px] font-medium text-[#6B6B6B]">{mlPushBlockedReason}</span>
+          )}
+          {inlineCostOpen ? (
+            <div className="mt-1 space-y-1 rounded border border-[#E8E8E2] bg-[#FAFAF8] p-2">
+              <label className="block">
+                <span className="text-[10px] font-semibold text-[#6B6B6B]">Costo</span>
+                <input
+                  autoFocus
+                  type="number"
+                  className="mt-0.5 w-full rounded border border-[#E8E8E2] px-1 py-1 text-xs"
+                  value={costForm?.costo ?? ""}
+                  onChange={(e) => onInlineCostFieldChange({ costo: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onInlineCostSave();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      onInlineCostCancel();
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (!e.currentTarget.value.trim()) return;
+                    onInlineCostSave();
+                  }}
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold text-[#6B6B6B]">Log. costos</span>
+                <select
+                  className="mt-0.5 w-full rounded border border-[#E8E8E2] px-1 py-1 text-xs"
+                  value={costForm?.logistica ?? "Flex"}
+                  onChange={(e) => onInlineCostFieldChange({ logistica: e.target.value })}
+                >
+                  <option value="Flex">Flex</option>
+                  <option value="Full">Full</option>
+                  <option value="Retiro domicilio">Retiro</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold text-[#6B6B6B]">Ads %</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="mt-0.5 w-full rounded border border-[#E8E8E2] px-1 py-1 text-xs"
+                  value={costForm?.pub ?? "0"}
+                  onChange={(e) => onInlineCostFieldChange({ pub: e.target.value })}
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold text-[#6B6B6B]">Margen %</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="mt-0.5 w-full rounded border border-[#E8E8E2] px-1 py-1 text-xs"
+                  value={costForm?.margen ?? ""}
+                  onChange={(e) => onInlineCostFieldChange({ margen: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onInlineCostSave();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      onInlineCostCancel();
+                    }
+                  }}
+                />
+              </label>
+              <div className="flex flex-wrap gap-1">
+                <button type="button" className="rounded bg-[#FFD600] px-2 py-0.5 text-[10px] font-semibold" onClick={onInlineCostSave}>
+                  Guardar
+                </button>
+                <button type="button" className="rounded border border-[#E8E8E2] px-2 py-0.5 text-[10px] font-semibold" onClick={onInlineCostCancel}>
+                  Cancelar
+                </button>
+              </div>
+              {rowSaveState === "saving" ? <p className="text-[10px] font-semibold text-[#6B6B6B]">Saving...</p> : null}
+              {rowSaveState === "saved" ? <p className="text-[10px] font-semibold text-emerald-700">Guardado</p> : null}
+              {rowSaveState === "error" && rowHint ? <p className="text-[10px] font-semibold text-red-700">{rowHint}</p> : null}
+            </div>
           ) : null}
         </div>
       </div>

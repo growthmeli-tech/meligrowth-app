@@ -103,7 +103,7 @@ describe("PricingEngineTable - Configurar flow", () => {
     pushOptimalPriceToML.mockReset();
   });
 
-  it("partial profit and cash-in show estimated markers and CTA stays blocked", async () => {
+  it("partial profit and cash-in show estimated markers and blocked reason", async () => {
     const partialRow = { ...(rowWithoutCost() as Record<string, unknown>), id: "sku-2", costo: 10000 } as never;
     render(
       <PricingEngineTable
@@ -126,10 +126,10 @@ describe("PricingEngineTable - Configurar flow", () => {
     );
 
     expect(screen.getAllByText(/\u2248/).length).toBeGreaterThan(0);
-    expect(screen.getByText("Completar datos")).toBeTruthy();
+    expect(screen.getByText("Falta IIBB", { selector: "span" })).toBeTruthy();
   });
 
-  it("click Configurar abre editor de costo y Enter guarda cambios", async () => {
+  it("click Configurar costo abre editor de costo y Enter guarda cambios", async () => {
     render(
       <PricingEngineTable
         rows={[rowWithoutCost()]}
@@ -150,7 +150,7 @@ describe("PricingEngineTable - Configurar flow", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configurar costo" }));
     const costInput = screen.getAllByRole("spinbutton")[0];
     fireEvent.change(costInput, { target: { value: "12000" } });
     fireEvent.blur(costInput);
@@ -165,5 +165,28 @@ describe("PricingEngineTable - Configurar flow", () => {
 
     expect(screen.getByText(/12\.000/)).toBeTruthy();
     await screen.findByText("✓ Guardado");
+  });
+
+  it("safe row shows Actualizar ML CTA", () => {
+    render(
+      <PricingEngineTable
+        rows={[{ ...(rowWithoutCost() as Record<string, unknown>), id: "sku-3", costo: 10000 } as never]}
+        mlLinks={{
+          "sku-3": {
+            item_id: "MLA3",
+            price_ml: 20000,
+            stock: 10,
+            free_shipping: false,
+            logistic_type: "self_service",
+            shipping_mode: "me2",
+            permalink: "https://example.com/mla3",
+            operabilityStatus: "operable"
+          } as never
+        }}
+        mlAccountId="acc-1"
+        initialFinancialSettings={null}
+      />
+    );
+    expect(screen.getByRole("button", { name: /Actualizar ML:/ })).toBeTruthy();
   });
 });
