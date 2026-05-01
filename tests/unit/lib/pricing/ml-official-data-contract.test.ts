@@ -74,4 +74,26 @@ describe("formatMlLogisticsPublicationLabel", () => {
       })
     ).toBe("Flex");
   });
+
+  it("me2 nunca expone ME2 en etiqueta publicación", () => {
+    const s = formatMlLogisticsPublicationLabel({
+      logistic_type: "xd_drop_off",
+      shipping_mode: "me2",
+      free_shipping: false,
+      free_shipping_key_present: true
+    });
+    expect(s).toBe("Mercado Envíos");
+    expect(s).not.toMatch(/ME2/i);
+  });
+
+  it("custom => A coordinar", () => {
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "custom",
+        shipping_mode: null,
+        free_shipping: false,
+        free_shipping_key_present: true
+      })
+    ).toBe("A coordinar");
+  });
 });

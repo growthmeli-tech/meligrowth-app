@@ -29,6 +29,13 @@ export interface MlCatalogItem {
   shipping_tags: string[];
   /** ML `shipping.methods` — estructura variable por sitio. */
   shipping_methods: unknown[];
+  /** ML `shipping.dimensions` raw string when present. */
+  shipping_dimensions: string | null;
+  local_pick_up: boolean | null;
+  store_pick_up: boolean | null;
+  listing_type_id: string | null;
+  category_id: string | null;
+  catalog_product_id: string | null;
   last_updated: string;
 }
 
@@ -59,6 +66,9 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
   let free_shipping_key_present = false;
   let shipping_mode: string | null = null;
   let package_weight_kg: number | null = null;
+  let shipping_dimensions: string | null = null;
+  let local_pick_up: boolean | null = null;
+  let store_pick_up: boolean | null = null;
   const shipping_tags: string[] = [];
   const shipping_methods: unknown[] = [];
   if (shipping && typeof shipping === "object") {
@@ -69,6 +79,7 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
     if (typeof sh.mode === "string" && sh.mode.trim()) shipping_mode = sh.mode.trim();
     if (typeof sh.dimensions === "string" && sh.dimensions.trim()) {
       const dim = sh.dimensions.trim();
+      shipping_dimensions = dim;
       const comma = dim.lastIndexOf(",");
       if (comma >= 0) {
         const tail = dim.slice(comma + 1).replace(/[^\d.]/g, "");
@@ -78,6 +89,10 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
         }
       }
     }
+    if (typeof sh.local_pick_up === "boolean") local_pick_up = sh.local_pick_up;
+    else if (sh.local_pick_up === null) local_pick_up = null;
+    if (typeof sh.store_pick_up === "boolean") store_pick_up = sh.store_pick_up;
+    else if (sh.store_pick_up === null) store_pick_up = null;
     if (Array.isArray(sh.tags)) {
       for (const t of sh.tags) {
         if (typeof t === "string" && t.trim()) shipping_tags.push(t.trim());
@@ -126,6 +141,12 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
         ? body.date_created
         : new Date().toISOString();
 
+  const listing_type_id =
+    typeof body.listing_type_id === "string" && body.listing_type_id.trim() ? body.listing_type_id.trim() : null;
+  const category_id = typeof body.category_id === "string" && body.category_id.trim() ? body.category_id.trim() : null;
+  const catalog_product_id =
+    typeof body.catalog_product_id === "string" && body.catalog_product_id.trim() ? body.catalog_product_id.trim() : null;
+
   return {
     item_id: id,
     title,
@@ -144,6 +165,12 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
     package_weight_kg,
     shipping_tags,
     shipping_methods,
+    shipping_dimensions,
+    local_pick_up,
+    store_pick_up,
+    listing_type_id,
+    category_id,
+    catalog_product_id,
     last_updated: lastUpdated
   };
 }
@@ -215,7 +242,7 @@ export async function getItemCatalog(
         query: {
           ids: idsParam,
           attributes:
-            "id,title,price,available_quantity,sold_quantity,status,seller_custom_field,condition,permalink,thumbnail,listing_type_id,shipping,attributes,last_updated,pictures,date_created"
+            "id,title,price,available_quantity,sold_quantity,status,seller_custom_field,condition,permalink,thumbnail,listing_type_id,category_id,catalog_product_id,shipping,attributes,last_updated,pictures,date_created"
         }
       });
 
@@ -317,4 +344,9 @@ export async function pushPriceToML(
       ml_status
     };
   }
+}
+
+/** Auditoría / tests: parsea body GET `/items` o `/items?ids=` (mismo contrato que sync). */
+export function parseMlCatalogApiItemBody(body: Record<string, unknown>): MlCatalogItem | null {
+  return parseItemBody(body);
 }

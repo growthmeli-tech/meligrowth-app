@@ -60,6 +60,12 @@ export async function syncMlCatalog(
     package_weight_kg: row.package_weight_kg,
     shipping_tags: row.shipping_tags as unknown as Json,
     shipping_methods: row.shipping_methods as unknown as Json,
+    listing_type_id: row.listing_type_id,
+    category_id: row.category_id,
+    catalog_product_id: row.catalog_product_id,
+    shipping_dimensions: row.shipping_dimensions,
+    local_pick_up: row.local_pick_up,
+    store_pick_up: row.store_pick_up,
     last_synced_at: now
   }));
 

@@ -47,12 +47,18 @@ export function buildPricingRowInput(
         ventas30d: ml?.ventas_30d ?? null,
         revenue30d: ml?.revenue_30d ?? null,
         lastSaleDate: ml?.last_sale_date ?? null,
-        shippingMode: ml?.shipping_mode ?? ml?.logistic_type ?? null,
-        listingType: null,
+        shippingMode: ml?.shipping_mode ?? null,
+        logisticType: ml?.logistic_type ?? null,
+        listingType: ml?.listing_type_id ?? null,
         freeShipping: ml?.free_shipping ?? null,
-        categoryId: null,
+        categoryId: ml?.category_id ?? null,
         condition: ml?.condition ?? null,
-        packageWeightKg: ml?.package_weight_kg ?? (r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null)
+        packageWeightKg: ml?.package_weight_kg ?? (r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null),
+        shippingTags: ml?.shipping_tags ?? null,
+        shippingMethods: ml?.shipping_methods ?? null,
+        localPickUp: ml?.local_pick_up ?? null,
+        storePickUp: ml?.store_pick_up ?? null,
+        mlFreeShippingKeyPresent: ml?.free_shipping_key_present ?? null
       },
     inputs: {
       productCost: d.costo !== null && Number.isFinite(d.costo) ? d.costo : null,

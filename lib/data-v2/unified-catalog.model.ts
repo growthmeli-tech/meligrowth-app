@@ -104,7 +104,13 @@ function buildRawMlSliceFromRow(row: UnifiedCatalogItem): MlSlice {
     condition: row.mlOfficial.conditionRaw,
     package_weight_kg: row.mlOfficial.packageWeightKg,
     shipping_tags: row.mlShippingTags,
-    shipping_methods: row.mlShippingMethods
+    shipping_methods: row.mlShippingMethods,
+    category_id: row.mlOfficial.categoryId,
+    listing_type_id: row.mlOfficial.listingTypeId,
+    catalog_product_id: row.mlOfficial.catalogProductId,
+    shipping_dimensions: row.mlOfficial.packageDimensionsRaw,
+    local_pick_up: row.mlOfficial.localPickUpMl,
+    store_pick_up: row.mlOfficial.storePickUpMl
   };
 }
 
@@ -120,7 +126,7 @@ function pricingSkuFromUnifiedItem(row: UnifiedCatalogItem, mlAccountId: string)
     producto: row.title,
     costo: costoVal,
     ml_item_id: null,
-    logistica: (row.logistica ?? shippingModeToOperatorLogistica(row.mlOfficial.shippingMode)) as LogisticaType,
+    logistica: shippingModeToOperatorLogistica(row.mlOfficial.shippingMode) as LogisticaType,
     reputacion: row.reputacion,
     publicidad_pct: row.publicidad_pct,
     margen_pct: row.margen_pct,
@@ -219,6 +225,17 @@ export function computeUnifiedCatalogDerived(
     sellerReputationSyncedAt: accountReputation?.sellerReputationSyncedAt ?? null
   };
 
+  const shippingTagsSrc = ml.shipping_tags;
+  const shippingTags = Array.isArray(shippingTagsSrc)
+    ? shippingTagsSrc.filter((x): x is string => typeof x === "string")
+    : coerceShippingTagsFromJson(shippingTagsSrc);
+  const shippingMethodsSrc = ml.shipping_methods;
+  const shippingMethods = Array.isArray(shippingMethodsSrc)
+    ? [...shippingMethodsSrc]
+    : coerceShippingMethodsFromJson(shippingMethodsSrc);
+  const mlKeyPresent = resolveMlFreeShippingKeyPresentForRow(ml.ml_free_shipping_key_present, ml.free_shipping);
+  const fsKeyForOfficial = mlKeyPresent === true || mlKeyPresent === false ? mlKeyPresent : undefined;
+
   const mlOfficial = buildMlOfficialItemState({
     itemId: ml.item_id,
     sellerId,
@@ -228,11 +245,17 @@ export function computeUnifiedCatalogDerived(
     shippingModeRaw: ml.shipping_mode ?? null,
     logisticType: ml.logistic_type ?? null,
     freeShipping: ml.free_shipping === true || ml.free_shipping === false ? ml.free_shipping : null,
+    freeShippingKeyPresent: fsKeyForOfficial,
     conditionRaw: ml.condition !== null && ml.condition !== undefined && String(ml.condition).trim() !== "" ? String(ml.condition) : null,
     packageWeightKgRaw: ml.package_weight_kg as number | null,
-    packageDimensionsRaw: null,
-    categoryId: options?.categoryId ?? null,
-    listingTypeId: options?.listingTypeId ?? null,
+    packageDimensionsRaw: ml.shipping_dimensions ?? null,
+    categoryId: ml.category_id ?? options?.categoryId ?? null,
+    listingTypeId: ml.listing_type_id ?? options?.listingTypeId ?? null,
+    catalogProductId: ml.catalog_product_id ?? null,
+    shippingTags,
+    shippingMethods,
+    localPickUp: ml.local_pick_up ?? null,
+    storePickUp: ml.store_pick_up ?? null,
     sellerReputationSyncedAt: accountRepForOfficial.sellerReputationSyncedAt,
     sellerReputationLevel: accountRepForOfficial.sellerReputationLevel,
     sellerPowerSellerStatus: accountRepForOfficial.sellerPowerSellerStatus
@@ -269,11 +292,16 @@ export function computeUnifiedCatalogDerived(
       lastSaleDate: ml.last_sale_date ?? null,
       shippingMode: ml.shipping_mode ?? null,
       freeShipping: freeRes.value,
-      categoryId: options?.categoryId ?? null,
-      listingType: options?.listingTypeId ?? null,
+      categoryId: ml.category_id ?? options?.categoryId ?? null,
+      listingType: ml.listing_type_id ?? options?.listingTypeId ?? null,
       condition: ml.condition ?? null,
       packageWeightKg: mlOfficial.packageWeightKg,
-      logisticType: ml.logistic_type ?? null
+      logisticType: ml.logistic_type ?? null,
+      shippingTags,
+      shippingMethods,
+      localPickUp: ml.local_pick_up ?? null,
+      storePickUp: ml.store_pick_up ?? null,
+      mlFreeShippingKeyPresent: mlKeyPresent
     },
     inputs: {
       productCost,
@@ -325,15 +353,6 @@ export function computeUnifiedCatalogDerived(
 
   const sin_configurar = !tiene_costo;
 
-  const mlKeyPresent = resolveMlFreeShippingKeyPresentForRow(ml.ml_free_shipping_key_present, ml.free_shipping);
-  const shippingTagsSrc = ml.shipping_tags;
-  const shippingTags = Array.isArray(shippingTagsSrc)
-    ? shippingTagsSrc.filter((x): x is string => typeof x === "string")
-    : coerceShippingTagsFromJson(shippingTagsSrc);
-  const shippingMethodsSrc = ml.shipping_methods;
-  const shippingMethods = Array.isArray(shippingMethodsSrc)
-    ? [...shippingMethodsSrc]
-    : coerceShippingMethodsFromJson(shippingMethodsSrc);
   const mlRawFsBool = ml.free_shipping === true || ml.free_shipping === false ? ml.free_shipping : null;
   const dataTrust = buildCatalogDataTrust({
     priceMl: price_ml,
@@ -433,7 +452,13 @@ export function mergeCatalogRowAfterCostSave(
     condition: row.mlOfficial.conditionRaw,
     package_weight_kg: row.mlOfficial.packageWeightKg,
     shipping_tags: row.mlShippingTags,
-    shipping_methods: row.mlShippingMethods
+    shipping_methods: row.mlShippingMethods,
+    category_id: row.mlOfficial.categoryId,
+    listing_type_id: row.mlOfficial.listingTypeId,
+    catalog_product_id: row.mlOfficial.catalogProductId,
+    shipping_dimensions: row.mlOfficial.packageDimensionsRaw,
+    local_pick_up: row.mlOfficial.localPickUpMl,
+    store_pick_up: row.mlOfficial.storePickUpMl
   };
   const pricingMinimal = {
     id: saved.pricing_sku_id,
@@ -498,7 +523,13 @@ export function mergeCatalogRowAfterMlPricePush(
     condition: row.mlOfficial.conditionRaw,
     package_weight_kg: row.mlOfficial.packageWeightKg,
     shipping_tags: row.mlShippingTags,
-    shipping_methods: row.mlShippingMethods
+    shipping_methods: row.mlShippingMethods,
+    category_id: row.mlOfficial.categoryId,
+    listing_type_id: row.mlOfficial.listingTypeId,
+    catalog_product_id: row.mlOfficial.catalogProductId,
+    shipping_dimensions: row.mlOfficial.packageDimensionsRaw,
+    local_pick_up: row.mlOfficial.localPickUpMl,
+    store_pick_up: row.mlOfficial.storePickUpMl
   };
   const pricing =
     row.pricing_sku_id && row.tiene_costo
@@ -593,9 +624,16 @@ export function mapPricingSkusToMlLinks(pricingRows: PricingSkuRow[], unified: U
         thumbnail: fuzzy.thumbnail,
         title: fuzzy.title,
         free_shipping: fuzzy.mlOfficial.freeShipping,
+        free_shipping_key_present: fuzzy.dataTrust.mlFreeShippingKeyPresent,
         shipping_mode: fuzzy.mlOfficial.shippingModeRaw,
         condition: fuzzy.mlOfficial.conditionRaw,
         package_weight_kg: fuzzy.mlOfficial.packageWeightKg,
+        listing_type_id: fuzzy.mlOfficial.listingTypeId,
+        category_id: fuzzy.mlOfficial.categoryId,
+        shipping_tags: fuzzy.mlShippingTags,
+        shipping_methods: fuzzy.mlShippingMethods,
+        local_pick_up: fuzzy.mlOfficial.localPickUpMl,
+        store_pick_up: fuzzy.mlOfficial.storePickUpMl,
         operabilityStatus: fuzzy.dataTrust.operabilityStatus
       });
     }

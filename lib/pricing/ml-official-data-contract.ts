@@ -1,9 +1,6 @@
-import {
-  formatMlLogisticsLabel,
-  mapMlLogisticTypeToShippingMode,
-  parseMlItemCondition,
-  type ShippingMode
-} from "@/lib/pricing/shipping-costs-argentina";
+import { parseMlItemCondition, type ShippingMode } from "@/lib/pricing/shipping-costs-argentina";
+import { normalizeMlShipping } from "@/lib/ml/normalize-ml-shipping";
+import { scrubInternalLogisticsCodesFromDisplay } from "@/lib/pricing/ml-public-logistics-label";
 import {
   deriveSellerReputationStateFromPersistedAccount,
   type SellerReputationState
@@ -26,23 +23,30 @@ export type MlOfficialItemState = {
   price: number | null;
   availableQuantity: number | null;
   status: string | null;
-  /** Normalized from `logistic_type` first, then `shipping.mode` (API ML; no inference from freeShipping). */
+  /** Normalized from ML `shipping` via `normalizeMlShipping` (no inference from freeShipping alone). */
   shippingMode: ShippingMode;
   /** ML `shipping.mode` (API). */
   shippingModeRaw: string | null;
   /** ML `shipping.logistic_type` (API). */
   logisticTypeRaw: string | null;
   freeShipping: boolean | null;
+  /** Etiqueta pública ML (sin códigos internos tipo ME2). */
+  publicationLogisticsLabel: string;
   condition: "new" | "used" | "unknown";
   /** Valor crudo ML (columna `condition`). */
   conditionRaw: string | null;
   categoryId: string | null;
   listingTypeId: string | null;
+  catalogProductId: string | null;
   packageWeightKg: number | null;
   packageDimensionsRaw: string | null;
   sellerReputationState: SellerReputationState;
   sellerReputationLevel: string | null;
   sellerPowerSellerStatus: string | null;
+  /** ML `shipping.local_pick_up` cuando se sincroniza. */
+  localPickUpMl: boolean | null;
+  /** ML `shipping.store_pick_up` cuando se sincroniza. */
+  storePickUpMl: boolean | null;
 };
 
 export type SkuFieldSources = {
@@ -138,14 +142,30 @@ export function buildSkuFieldSources(input: {
   };
 }
 
-/** Prioriza `logistic_type` (API ML); `shipping.mode` solo si el tipo no clasifica. */
+/** Normaliza modo publicación ML usando `normalizeMlShipping` (tags/methods/pickup opcionales). */
 export function normalizeOfficialShippingMode(
   logisticType: string | null | undefined,
-  shippingModeRaw: string | null | undefined
+  shippingModeRaw: string | null | undefined,
+  opts?: {
+    tags?: unknown;
+    methods?: unknown;
+    localPickUp?: boolean | null;
+    storePickUp?: boolean | null;
+    freeShipping?: boolean | null;
+    freeShippingKeyPresent?: boolean;
+  }
 ): ShippingMode {
-  const fromLt = mapMlLogisticTypeToShippingMode(logisticType);
-  if (fromLt !== "unknown") return fromLt;
-  return mapMlLogisticTypeToShippingMode(shippingModeRaw);
+  const n = normalizeMlShipping({
+    mode: shippingModeRaw ?? null,
+    logistic_type: logisticType ?? null,
+    free_shipping: opts?.freeShipping ?? null,
+    free_shipping_key_present: opts?.freeShippingKeyPresent,
+    tags: opts?.tags,
+    methods: opts?.methods,
+    local_pick_up: opts?.localPickUp ?? null,
+    store_pick_up: opts?.storePickUp ?? null
+  });
+  return n.shippingMode as ShippingMode;
 }
 
 /** Etiqueta OPS única a partir de columnas ML crudas (catálogo / `MlPublicationLink`). */
@@ -153,11 +173,27 @@ export function formatMlLogisticsPublicationLabel(input: {
   logistic_type?: string | null;
   shipping_mode?: string | null;
   free_shipping?: boolean | null;
+  free_shipping_key_present?: boolean;
+  shipping_tags?: unknown;
+  shipping_methods?: unknown;
+  local_pick_up?: boolean | null;
+  store_pick_up?: boolean | null;
 }): string {
-  const mode = normalizeOfficialShippingMode(input.logistic_type ?? null, input.shipping_mode ?? null);
-  const fs =
-    input.free_shipping === true || input.free_shipping === false ? input.free_shipping : null;
-  return formatMlLogisticsLabel(mode, fs);
+  const keyPresent =
+    input.free_shipping_key_present === true || input.free_shipping_key_present === false
+      ? input.free_shipping_key_present
+      : undefined;
+  const n = normalizeMlShipping({
+    mode: input.shipping_mode ?? null,
+    logistic_type: input.logistic_type ?? null,
+    free_shipping: input.free_shipping === true || input.free_shipping === false ? input.free_shipping : null,
+    free_shipping_key_present: keyPresent,
+    tags: input.shipping_tags,
+    methods: input.shipping_methods,
+    local_pick_up: input.local_pick_up ?? null,
+    store_pick_up: input.store_pick_up ?? null
+  });
+  return scrubInternalLogisticsCodesFromDisplay(n.label);
 }
 
 /**
@@ -173,11 +209,17 @@ export function buildMlOfficialItemState(input: {
   shippingModeRaw: string | null;
   logisticType: string | null;
   freeShipping: boolean | null;
+  freeShippingKeyPresent?: boolean | null;
   conditionRaw: string | null;
   packageWeightKgRaw: number | null;
   packageDimensionsRaw: string | null;
   categoryId: string | null;
   listingTypeId: string | null;
+  catalogProductId: string | null;
+  shippingTags?: string[] | null;
+  shippingMethods?: unknown[] | null;
+  localPickUp?: boolean | null;
+  storePickUp?: boolean | null;
   sellerReputationSyncedAt: string | null;
   sellerReputationLevel: string | null;
   sellerPowerSellerStatus: string | null;
@@ -187,24 +229,45 @@ export function buildMlOfficialItemState(input: {
     input.sellerReputationLevel,
     input.sellerPowerSellerStatus
   );
+
+  const keyPresent =
+    input.freeShippingKeyPresent === true || input.freeShippingKeyPresent === false ? input.freeShippingKeyPresent : undefined;
+
+  const norm = normalizeMlShipping({
+    mode: input.shippingModeRaw ?? null,
+    logistic_type: input.logisticType ?? null,
+    free_shipping: input.freeShipping === true || input.freeShipping === false ? input.freeShipping : null,
+    free_shipping_key_present: keyPresent,
+    tags: input.shippingTags ?? [],
+    methods: input.shippingMethods ?? [],
+    local_pick_up: input.localPickUp ?? null,
+    store_pick_up: input.storePickUp ?? null
+  });
+
+  const mlFree = input.freeShipping === true || input.freeShipping === false ? input.freeShipping : null;
+
   return {
     itemId: input.itemId,
     sellerId: input.sellerId,
     price: input.price,
     availableQuantity: input.availableQuantity,
     status: input.status,
-    shippingMode: normalizeOfficialShippingMode(input.logisticType, input.shippingModeRaw),
+    shippingMode: norm.shippingMode as ShippingMode,
     shippingModeRaw: input.shippingModeRaw,
     logisticTypeRaw: input.logisticType,
-    freeShipping: input.freeShipping === true || input.freeShipping === false ? input.freeShipping : null,
+    freeShipping: mlFree,
+    publicationLogisticsLabel: scrubInternalLogisticsCodesFromDisplay(norm.label),
     condition: parseMlItemCondition(input.conditionRaw),
     conditionRaw: input.conditionRaw,
     categoryId: input.categoryId,
     listingTypeId: input.listingTypeId,
+    catalogProductId: input.catalogProductId ?? null,
     packageWeightKg: parsePackageWeightKgFromMl(input.packageWeightKgRaw),
     packageDimensionsRaw: input.packageDimensionsRaw,
     sellerReputationState,
     sellerReputationLevel: input.sellerReputationLevel,
-    sellerPowerSellerStatus: input.sellerPowerSellerStatus
+    sellerPowerSellerStatus: input.sellerPowerSellerStatus,
+    localPickUpMl: input.localPickUp ?? null,
+    storePickUpMl: input.storePickUp ?? null
   };
 }

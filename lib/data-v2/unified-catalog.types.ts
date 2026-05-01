@@ -95,6 +95,12 @@ export type MlSlice = {
   package_weight_kg?: number | null;
   shipping_tags?: string[];
   shipping_methods?: unknown[];
+  category_id?: string | null;
+  listing_type_id?: string | null;
+  catalog_product_id?: string | null;
+  shipping_dimensions?: string | null;
+  local_pick_up?: boolean | null;
+  store_pick_up?: boolean | null;
 };
 
 export type MlPublicationLink = {
@@ -109,10 +115,16 @@ export type MlPublicationLink = {
   thumbnail?: string | null;
   title?: string | null;
   free_shipping?: boolean | null;
+  free_shipping_key_present?: boolean | null;
   shipping_mode?: string | null;
   condition?: string | null;
   package_weight_kg?: number | null;
-  /** Cuando el link viene del catálogo unificado — gate de ejecución ML. */
+  listing_type_id?: string | null;
+  category_id?: string | null;
+  shipping_tags?: string[];
+  shipping_methods?: unknown[];
+  local_pick_up?: boolean | null;
+  store_pick_up?: boolean | null;
   operabilityStatus?: OperabilityStatus;
 };
 

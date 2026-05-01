@@ -146,6 +146,12 @@ export type BuildSkuDecisionStateInput = {
     packageWeightKg?: number | null;
     /** ML `shipping.logistic_type` (texto crudo) — solo trazas / envío, sin inferir `freeShipping`. */
     logisticType?: string | null;
+    shippingTags?: string[] | null;
+    shippingMethods?: unknown[] | null;
+    localPickUp?: boolean | null;
+    storePickUp?: boolean | null;
+    /** Persistido catálogo / decisión — presencia clave `free_shipping` en payload ML. */
+    mlFreeShippingKeyPresent?: boolean | null;
   };
   /** Reputación vendedor ML (API/sync + fallback pricing). */
   accountReputation?: {
@@ -172,7 +178,17 @@ export type BuildSkuDecisionStateInput = {
 function operatorLogisticaFromMl(input: BuildSkuDecisionStateInput): LogisticaType {
   const raw = input.inputs.logistics;
   if (raw === "Full" || raw === "Flex" || raw === "Retiro domicilio") return raw;
-  const mode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null);
+  const mode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null, {
+    tags: input.ml.shippingTags,
+    methods: input.ml.shippingMethods,
+    localPickUp: input.ml.localPickUp ?? null,
+    storePickUp: input.ml.storePickUp ?? null,
+    freeShipping: input.ml.freeShipping ?? null,
+    freeShippingKeyPresent:
+      input.ml.mlFreeShippingKeyPresent === true || input.ml.mlFreeShippingKeyPresent === false
+        ? input.ml.mlFreeShippingKeyPresent
+        : undefined
+  });
   return shippingModeToOperatorLogistica(mode);
 }
 
@@ -560,8 +576,7 @@ function priorityScoreFrom(input: {
 function pickShippingShortSignal(
   freeShipping: boolean | null,
   breakdown: FinancialCostBreakdown | null,
-  shippingModeNorm: ShippingMode,
-  accountReputationState: SellerReputationState
+  shippingModeNorm: ShippingMode
 ): { msg: string | null; action: string | null } {
   if (!breakdown) return { msg: null, action: null };
   const mode = shippingModeNorm;
@@ -585,12 +600,6 @@ function pickShippingShortSignal(
     breakdown.missing.some((m) => String(m).includes("ml_reputation_sync"))
   ) {
     return { msg: "Falta reputación ML sincronizada", action: "Sincronizar cuenta" };
-  }
-  if (
-    accountReputationState !== "no_reputation" &&
-    breakdown.missing.some((m) => m === "shipping_ml_reputation" || (String(m).includes("ml_reputation") && !String(m).includes("sync")))
-  ) {
-    return { msg: "Falta reputación ML", action: "Sincronizar reputación de cuenta" };
   }
   return { msg: null, action: null };
 }
@@ -672,7 +681,7 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
   const missRepSync = shipMiss.includes("ml_reputation_sync");
   const shippingIncompleteForFree = freeTrue && (!ship || ship.completeness !== "complete");
 
-  if (freeTrue && ship?.source === "missing_reputation") {
+  if (freeTrue && ship?.source === "missing_reputation" && state.fieldSources.sellerReputationState === "missing") {
     return {
       type: "complete_shipping_data",
       priority: "high",
@@ -846,7 +855,17 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     Number.isFinite(Number(input.ml.packageWeightKg))
       ? Number(input.ml.packageWeightKg)
       : null;
-  const shipMode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null);
+  const shipMode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null, {
+    tags: input.ml.shippingTags,
+    methods: input.ml.shippingMethods,
+    localPickUp: input.ml.localPickUp ?? null,
+    storePickUp: input.ml.storePickUp ?? null,
+    freeShipping: input.ml.freeShipping ?? null,
+    freeShippingKeyPresent:
+      input.ml.mlFreeShippingKeyPresent === true || input.ml.mlFreeShippingKeyPresent === false
+        ? input.ml.mlFreeShippingKeyPresent
+        : undefined
+  });
 
   const shippingOmit = (): Omit<ShippingCostInput, "price"> => ({
     packageWeightKg: packageKg,
@@ -1064,12 +1083,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     realMarginPct
   });
 
-  const shipSig = pickShippingShortSignal(
-    input.ml.freeShipping ?? null,
-    financialBreakdown,
-    shipMode,
-    accountReputationState
-  );
+  const shipSig = pickShippingShortSignal(input.ml.freeShipping ?? null, financialBreakdown, shipMode);
 
   const priorityScore = priorityScoreFrom({
     profitabilityStatus,

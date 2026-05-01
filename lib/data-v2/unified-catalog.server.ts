@@ -65,7 +65,13 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
         condition: row.condition,
         package_weight_kg: row.package_weight_kg === null || row.package_weight_kg === undefined ? null : Number(row.package_weight_kg),
         shipping_tags: coerceShippingTagsFromJson(row.shipping_tags),
-        shipping_methods: coerceShippingMethodsFromJson(row.shipping_methods)
+        shipping_methods: coerceShippingMethodsFromJson(row.shipping_methods),
+        category_id: row.category_id ?? null,
+        listing_type_id: row.listing_type_id ?? null,
+        catalog_product_id: row.catalog_product_id ?? null,
+        shipping_dimensions: row.shipping_dimensions ?? null,
+        local_pick_up: row.local_pick_up ?? null,
+        store_pick_up: row.store_pick_up ?? null
       },
       pricing,
       accountFinancialSettings,

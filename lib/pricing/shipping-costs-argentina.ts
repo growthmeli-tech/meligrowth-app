@@ -1,5 +1,7 @@
 /** Pure ML Argentina shipping cost domain — client-safe types & table estimates (no I/O). */
 
+import { normalizeMlShipping } from "@/lib/ml/normalize-ml-shipping";
+import { publicMlLogisticsPublicationLabel } from "@/lib/pricing/ml-public-logistics-label";
 import {
   deriveSellerReputationStateFromPersistedAccount,
   type SellerReputationState
@@ -213,7 +215,7 @@ export function mapMlSellerReputation(input: {
 
 /** Columna catálogo OPS — modo envío ML normalizado (no infiere envío gratis). */
 export function catalogLogisticsModeColumnLabel(mode: ShippingMode): string {
-  return formatMlLogisticsLabel(mode, null);
+  return publicMlLogisticsPublicationLabel(mode, null);
 }
 
 /**
@@ -221,22 +223,7 @@ export function catalogLogisticsModeColumnLabel(mode: ShippingMode): string {
  */
 export function formatMlLogisticsLabel(mode: ShippingMode | null, freeShipping: boolean | null): string {
   if (mode === null && freeShipping === null) return "Sin dato";
-  if (mode === "retire") return "Retiro";
-  if (mode === null || mode === "unknown") return "Sin dato";
-  const base =
-    mode === "full"
-      ? "Full"
-      : mode === "flex"
-        ? "Flex"
-        : mode === "me2"
-          ? "ME2"
-          : mode === "custom"
-            ? "Custom"
-            : "Sin dato";
-  if (base === "Sin dato") return "Sin dato";
-  if (freeShipping === null) return base;
-  if (freeShipping === true) return `${base} gratis`;
-  return base;
+  return publicMlLogisticsPublicationLabel(mode ?? null, freeShipping);
 }
 
 /** Convierte modo ML normalizado al enum de costos operativos del motor (tabla `pricing_skus.logistica`). */
@@ -260,21 +247,20 @@ export function mapLegacyReputacionLabelToSellerReputation(raw: string | null | 
 }
 
 /**
- * Normaliza `shipping.logistic_type` / `shipping.mode` (ML API). No infiere envío gratis.
- * `self_service` → Flex; `drop_off` / `xd_*` → ME2; sin dato explícito → unknown (sin inventar Full/Flex).
+ * Normaliza solo `logistic_type` (sin tags/methods). Preferir `normalizeMlShipping` con señales completas.
  */
 export function mapMlLogisticTypeToShippingMode(logisticType: string | null | undefined): ShippingMode {
-  if (logisticType === null || logisticType === undefined || String(logisticType).trim() === "") return "unknown";
-  const t = String(logisticType).toLowerCase();
-  if (t.includes("fulfillment") || t === "full") return "full";
-  if (t.includes("self_service")) return "flex";
-  if (t.includes("retir") || t.includes("pick_up") || t.includes("store_pick_up")) return "retire";
-  if (t.includes("drop_off") || t.startsWith("xd_") || t.includes("cross_docking") || t.includes("me2")) {
-    return "me2";
-  }
-  if (t.includes("custom")) return "custom";
-  if (t === "flex" || t.includes("mdd")) return "flex";
-  return "unknown";
+  const n = normalizeMlShipping({
+    logistic_type: logisticType ?? null,
+    mode: null,
+    tags: [],
+    methods: [],
+    free_shipping: null,
+    free_shipping_key_present: false,
+    local_pick_up: null,
+    store_pick_up: null
+  });
+  return n.shippingMode as ShippingMode;
 }
 
 export function parseMlItemCondition(raw: string | null | undefined): "new" | "used" | "unknown" {
@@ -390,11 +376,23 @@ export function estimateSellerShippingCostAr(input: ShippingCostInput): Shipping
     };
   }
 
-  if (input.reputation === "unknown") {
-    missing.push("ml_reputation");
+  if (input.reputation === "unknown" && accountRepSynced) {
+    missing.push("ml_reputation_tier_unparsed");
+    return {
+      sellerShippingCost: null,
+      buyerShippingCost: null,
+      totalEstimatedShippingCost: null,
+      priceBand,
+      weightBand,
+      reputationGroup: repGroup,
+      source: "missing_data",
+      completeness: "partial",
+      reasons: ["Reputación ML sincronizada pero tier no clasificable para tabla AR."],
+      missing
+    };
   }
 
-  if (priceBand === null || weightBand === null || input.reputation === "unknown") {
+  if (priceBand === null || weightBand === null) {
     return {
       sellerShippingCost: null,
       buyerShippingCost: null,

@@ -712,6 +712,12 @@ export type Database = {
           package_weight_kg: number | null;
           shipping_tags: Json;
           shipping_methods: Json;
+          listing_type_id: string | null;
+          category_id: string | null;
+          catalog_product_id: string | null;
+          shipping_dimensions: string | null;
+          local_pick_up: boolean | null;
+          store_pick_up: boolean | null;
         };
         Insert: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]> & {
           ml_account_id: string;

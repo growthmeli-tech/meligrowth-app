@@ -310,11 +310,15 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
             </tr>
             <tr className="border-b border-[#E8E8E2] bg-[#FAFAF8] text-[10px] font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-2">SKU</th>
-              <th className="p-2">Publicación</th>
+              <th className="p-2" title="Publicación ML y modo de envío de la publicación">
+                Publicación
+              </th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Precio ML</th>
               <th className="p-2">En caja</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Costo</th>
-              <th className="p-2">Log.</th>
+              <th className="p-2" title="Costo logístico interno (Full / Flex / Retiro) — no es el envío de la publicación ML">
+                Log. motor
+              </th>
               <th className="p-2">Ads</th>
               <th className="p-2">Margen</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Precio óptimo</th>
@@ -557,12 +561,20 @@ const PricingEngineRow = memo(function PricingEngineRow({
             <div className="mt-1 text-[#6B6B6B]">
               Stock: {mlLink?.stock === null || mlLink?.stock === undefined ? "—" : mlLink.stock}
             </div>
-            <div className="mt-0.5 text-[10px] font-medium text-[#1A1A1A]">
-              {formatMlLogisticsPublicationLabel({
-                logistic_type: mlLink.logistic_type,
-                shipping_mode: mlLink.shipping_mode,
-                free_shipping: mlLink.free_shipping
-              })}
+            <div className="mt-0.5 space-y-0.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-[#6B6B6B]">Envío publicación</div>
+              <div className="text-[10px] font-medium leading-snug text-[#1A1A1A]">
+                {formatMlLogisticsPublicationLabel({
+                  logistic_type: mlLink.logistic_type,
+                  shipping_mode: mlLink.shipping_mode,
+                  free_shipping: mlLink.free_shipping,
+                  free_shipping_key_present: mlLink.free_shipping_key_present ?? undefined,
+                  shipping_tags: mlLink.shipping_tags,
+                  shipping_methods: mlLink.shipping_methods,
+                  local_pick_up: mlLink.local_pick_up,
+                  store_pick_up: mlLink.store_pick_up
+                })}
+              </div>
             </div>
             {decision.decision.stockStatus === "syncing" ? (
               <div className="mt-0.5 text-[10px] text-amber-800">Ventas: Sincronizando…</div>

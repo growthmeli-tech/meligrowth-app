@@ -21,7 +21,7 @@ export async function ensurePricingSkuForMlItem(
 
   const { data: cat, error: catErr } = await supabase
     .from("ml_catalog_items")
-    .select("id, item_id, title, seller_custom_field, pricing_sku_id, logistic_type, shipping_mode")
+    .select("id, item_id, title, seller_custom_field, pricing_sku_id, logistic_type, shipping_mode, shipping_tags, shipping_methods, local_pick_up, store_pick_up")
     .eq("ml_account_id", mlAccountId)
     .eq("item_id", trimmedItem)
     .maybeSingle();
@@ -50,7 +50,12 @@ export async function ensurePricingSkuForMlItem(
   const skuKey = trimmedItem;
   const producto = (cat.title?.trim() || trimmedItem).slice(0, 2000);
   const shellLogistica = shippingModeToOperatorLogistica(
-    normalizeOfficialShippingMode(cat.logistic_type ?? null, cat.shipping_mode ?? null)
+    normalizeOfficialShippingMode(cat.logistic_type ?? null, cat.shipping_mode ?? null, {
+      tags: cat.shipping_tags,
+      methods: cat.shipping_methods,
+      localPickUp: cat.local_pick_up ?? null,
+      storePickUp: cat.store_pick_up ?? null
+    })
   );
 
   const insertPayload: Database["public"]["Tables"]["pricing_skus"]["Insert"] = {

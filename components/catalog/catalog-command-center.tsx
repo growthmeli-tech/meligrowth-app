@@ -713,17 +713,17 @@ export function CatalogCommandCenter({
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
-                    Logística ML
+                    Tipo logístico ML (filtro)
                     <select
                       value={logFilter}
                       onChange={(e) => setLogFilter(e.target.value)}
                       className="rounded-lg border border-[#E8E8E2] px-2 py-2 font-normal text-[#1A1A1A]"
                     >
-                      <option value="all">Todas</option>
-                      <option value="fulfillment">fulfillment</option>
-                      <option value="xd_drop_off">xd_drop_off</option>
-                      <option value="cross_docking">cross_docking</option>
-                      <option value="self_service">self_service</option>
+                      <option value="all">Todos</option>
+                      <option value="fulfillment">Full (fulfillment)</option>
+                      <option value="xd_drop_off">Mercado Envíos</option>
+                      <option value="cross_docking">Mercado Envíos (cross docking)</option>
+                      <option value="self_service">Flex</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 font-semibold text-[#6B6B6B]">
@@ -875,7 +875,7 @@ export function CatalogCommandCenter({
                 Precio ML
               </div>
               <div role="columnheader" className="p-2">
-                Logística
+                Envío (ML)
               </div>
               <div role="columnheader" className="p-2">
                 Costo
@@ -1111,7 +1111,7 @@ function CatalogRows({
                 />
               </label>
               <label className="text-xs font-semibold text-[#6B6B6B]">
-                Logística
+                Logística costos (motor)
                 <select
                   className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
                   value={costForms[row.item_id]?.logistica ?? operatorLogisticaDefault(row)}
@@ -1262,6 +1262,10 @@ function CatalogRows({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">
                 <p className="font-bold text-[#1A1A1A]">Desglose</p>
+                <p className="text-xs text-[#1A1A1A]">
+                  <span className="font-semibold text-[#6B6B6B]">Logística publicación (ML):</span>{" "}
+                  {row.mlOfficial.publicationLogisticsLabel}
+                </p>
                 <p className="text-xs text-[#6B6B6B]">Cuenta ML: {row.cuenta_reputacion_ml}</p>
                 {ds.decision.shippingMessage ? (
                   <p className="text-xs text-[#6B6B6B]">
@@ -1667,6 +1671,10 @@ function InlinePriceCalculator({
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className="space-y-3">
           <p className="text-xs font-semibold text-[#6B6B6B]">Entradas</p>
+          <p className="rounded border border-[#E8E8E2] bg-white px-2 py-1.5 text-xs leading-snug text-[#1A1A1A]">
+            <span className="font-semibold text-[#6B6B6B]">Envío publicación (ML):</span>{" "}
+            {row.mlOfficial.publicationLogisticsLabel}
+          </p>
           <label className="block text-xs font-semibold text-[#6B6B6B]">
             Costo
             <input
@@ -1697,7 +1705,7 @@ function InlinePriceCalculator({
             />
           </label>
           <label className="block text-xs font-semibold text-[#6B6B6B]">
-            Logística
+            Logística costos (motor)
             <select
               className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1.5 text-sm"
               value={logistica}

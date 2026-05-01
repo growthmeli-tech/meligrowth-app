@@ -117,6 +117,18 @@ describe("estimateSellerShippingCostAr — tabla yellow AR", () => {
     expect(e.sellerShippingCost).toBeNull();
   });
 
+  it("freeShipping true + unknown reputation + cuenta sincronizada => missing_data (no missing_reputation)", () => {
+    const e = estimateSellerShippingCostAr({
+      ...base,
+      price: 30_000,
+      freeShipping: true,
+      reputation: "unknown",
+      accountReputationSynced: true
+    });
+    expect(e.source).toBe("missing_data");
+    expect(e.missing).toContain("ml_reputation_tier_unparsed");
+  });
+
   it("freeShipping true + missing weight => partial", () => {
     const e = estimateSellerShippingCostAr({
       ...base,
@@ -312,16 +324,17 @@ describe("decision cache key — shipping drivers", () => {
 });
 
 describe("formatMlLogisticsLabel", () => {
-  it("etiquetas Full/Flex/ME2 + gratis y Retiro", () => {
+  it("etiquetas públicas Full/Flex/Mercado Envíos + gratis y Retiro", () => {
     expect(formatMlLogisticsLabel("full", true)).toBe("Full gratis");
     expect(formatMlLogisticsLabel("full", false)).toBe("Full");
     expect(formatMlLogisticsLabel("flex", true)).toBe("Flex gratis");
     expect(formatMlLogisticsLabel("flex", false)).toBe("Flex");
-    expect(formatMlLogisticsLabel("me2", true)).toBe("ME2 gratis");
-    expect(formatMlLogisticsLabel("me2", false)).toBe("ME2");
+    expect(formatMlLogisticsLabel("me2", true)).toBe("Mercado Envíos gratis");
+    expect(formatMlLogisticsLabel("me2", false)).toBe("Mercado Envíos");
     expect(formatMlLogisticsLabel("retire", true)).toBe("Retiro");
-    expect(formatMlLogisticsLabel("me2", null)).toBe("ME2");
+    expect(formatMlLogisticsLabel("me2", null)).toBe("Mercado Envíos");
     expect(formatMlLogisticsLabel(null, null)).toBe("Sin dato");
+    expect(formatMlLogisticsLabel("custom", false)).toBe("A coordinar");
   });
 });
 
