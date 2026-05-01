@@ -7,6 +7,7 @@ import {
   calcStockStatus,
   calculateFinancialCostBreakdown,
   coerceReputacion,
+  explainCashInUnavailable,
   mlComisionRate,
   normalizePct
 } from "@/lib/pricing/calculator";
@@ -397,6 +398,36 @@ describe("Motor ML — logistics operating + shipping separation", () => {
     });
     expect(b.logisticsOperating.operatingCost).toBe(275);
     expect(b.totalCost).not.toBeNull();
+  });
+
+  it("explainCashInUnavailable alinea con cashIn del breakdown", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 25_000,
+      productCost: 8000,
+      logistica: "Flex",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 500 },
+      skuAdditionalFixedCost: null,
+      shipping: { ...shipFree, freeShipping: false }
+    });
+    expect(b.cashInAmount).not.toBeNull();
+    expect(explainCashInUnavailable(25_000, b, false)).toBeNull();
+  });
+
+  it("explainCashInUnavailable: Falta precio / Sin desglose / Falta fiscal", () => {
+    expect(explainCashInUnavailable(null, null, null)).toBe("Falta precio");
+    expect(explainCashInUnavailable(5000, null, false)).toBe("Sin desglose financiero");
+    const partialFiscal = calculateFinancialCostBreakdown({
+      salePrice: 10_000,
+      productCost: 4000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: null,
+      financialSettings: { iibbPct: null, taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(explainCashInUnavailable(10_000, partialFiscal, false)).toBe("Falta fiscal");
   });
 });
 

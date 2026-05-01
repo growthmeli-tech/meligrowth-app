@@ -5,11 +5,16 @@
 
 export type PublicLogisticsMode = "full" | "flex" | "me2" | "custom" | "retire" | "unknown";
 
-/** Last line of defense: never show internal ML mode codes (ME2) in operator UI. */
+/** Last line of defense: never show internal ML mode codes in operator UI. */
 export function scrubInternalLogisticsCodesFromDisplay(label: string): string {
   return label
     .replace(/\bme2\s+gratis\b/gi, "Mercado Envíos gratis")
-    .replace(/\bme2\b/gi, "Mercado Envíos");
+    .replace(/\bme2\b/gi, "Mercado Envíos")
+    .replace(/\bxd_drop_off\b/gi, "Mercado Envíos")
+    .replace(/\bcross_docking\b/gi, "Mercado Envíos")
+    .replace(/\bdrop_off\b/gi, "Mercado Envíos")
+    .replace(/\bself_service\b/gi, "Flex")
+    .replace(/\bfulfillment\b/gi, "Full");
 }
 
 export function publicMlLogisticsPublicationLabel(mode: PublicLogisticsMode | null, freeShipping: boolean | null): string {

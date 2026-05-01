@@ -25,7 +25,7 @@ import {
   type PricingDraft,
   type PricingSkuRow
 } from "@/lib/pricing/pricing-row-model";
-import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
+import { normalizePct, explainCashInUnavailable, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 import { formatMlLogisticsPublicationLabel } from "@/lib/pricing/ml-official-data-contract";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
@@ -317,7 +317,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
               <th className="p-2">En caja</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Costo</th>
               <th className="p-2" title="Costo logístico interno (Full / Flex / Retiro) — no es el envío de la publicación ML">
-                Log. motor
+                Log. costos
               </th>
               <th className="p-2">Ads</th>
               <th className="p-2">Margen</th>
@@ -430,6 +430,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
   onMlPushSuccess
 }: PricingEngineRowProps) {
   const [pushOpen, setPushOpen] = useState(false);
+  const [pushErr, setPushErr] = useState<string | null>(null);
 
   const decision = useMemo(() => {
     const input = buildPricingRowInput(mlAccountId, row, d, mlLink, financialSettings);
@@ -458,6 +459,11 @@ const PricingEngineRow = memo(function PricingEngineRow({
   const gananciaReal = decision.computed.realProfit;
   const margenReal = decision.computed.realMarginPct;
   const cashIn = decision.computed.cashInAmount;
+  const cashInReason = explainCashInUnavailable(
+    hasMlPrice ? (priceMl as number) : null,
+    decision.computed.financialBreakdown,
+    decision.ml.freeShipping
+  );
   const ganObj = decision.computed.optimalGananciaUnit;
   const margObj = decision.inputs.targetMarginPct;
 
@@ -561,8 +567,8 @@ const PricingEngineRow = memo(function PricingEngineRow({
             <div className="mt-1 text-[#6B6B6B]">
               Stock: {mlLink?.stock === null || mlLink?.stock === undefined ? "—" : mlLink.stock}
             </div>
-            <div className="mt-0.5 space-y-0.5">
-              <div className="text-[9px] font-semibold uppercase tracking-wide text-[#6B6B6B]">Envío publicación</div>
+              <div className="mt-0.5 space-y-0.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-[#6B6B6B]">Envío ML</div>
               <div className="text-[10px] font-medium leading-snug text-[#1A1A1A]">
                 {formatMlLogisticsPublicationLabel({
                   logistic_type: mlLink.logistic_type,
@@ -588,7 +594,12 @@ const PricingEngineRow = memo(function PricingEngineRow({
         {hasMlPrice ? ars.format(priceMl as number) : "—"}
       </td>
       <td className="p-2 tabular-nums text-xs text-[#1A1A1A]">
-        {cashIn !== null && Number.isFinite(cashIn) ? ars.format(cashIn) : "—"}
+        <span
+          className={cn(cashIn !== null && Number.isFinite(cashIn) ? "" : "font-sans text-amber-900")}
+          title={cashInReason ?? undefined}
+        >
+          {cashIn !== null && Number.isFinite(cashIn) ? ars.format(cashIn) : (cashInReason ?? "—")}
+        </span>
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-1">
         {editingField === "costo" ? (
@@ -683,14 +694,29 @@ const PricingEngineRow = memo(function PricingEngineRow({
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 text-sm">{resultadoBlock}</td>
       <td className="p-2 align-top text-xs">
-        {showPush && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
+        {decision.businessDecision.type === "configure_cost" ? (
+          <button
+            type="button"
+            className="font-semibold text-[#1A1A1A] underline underline-offset-2"
+            onClick={() => {
+              setPushOpen(false);
+              setPushErr(null);
+              onRequestEditField(row.id, "costo");
+            }}
+          >
+            Configurar
+          </button>
+        ) : showPush && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
           <div className="space-y-2">
             {!pushOpen ? (
               <button
                 type="button"
                 disabled={isPending}
                 className="rounded-lg border border-[#1A1A1A] bg-[#FFD600] px-2 py-1 font-semibold text-[#1A1A1A] disabled:opacity-50"
-                onClick={() => setPushOpen(true)}
+                onClick={() => {
+                  setPushErr(null);
+                  setPushOpen(true);
+                }}
               >
                 ↑ ML: {ars.format(priceMl)} → {ars.format(optimal)}
               </button>
@@ -700,6 +726,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
                 <p className="tabular-nums text-[#1A1A1A]">
                   {ars.format(priceMl)} → {ars.format(optimal)}
                 </p>
+                {pushErr ? <p className="text-[10px] font-semibold text-red-700">{pushErr}</p> : null}
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -709,9 +736,10 @@ const PricingEngineRow = memo(function PricingEngineRow({
                       runTransitionAsync(async () => {
                         const res = await pushOptimalPriceToML(mlAccountId, mlLink.item_id, optimal);
                         if (!res.success) {
-                          console.error(res.error);
+                          setPushErr(res.error ?? "No se pudo actualizar el precio en ML");
                           return;
                         }
+                        setPushErr(null);
                         setPushOpen(false);
                         if (res.data) onMlPushSuccess(row.id, res.data.new_price);
                       });
@@ -719,7 +747,14 @@ const PricingEngineRow = memo(function PricingEngineRow({
                   >
                     Confirmar
                   </button>
-                  <button type="button" className="rounded-lg border border-[#E8E8E2] px-2 py-1 font-semibold" onClick={() => setPushOpen(false)}>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[#E8E8E2] px-2 py-1 font-semibold"
+                    onClick={() => {
+                      setPushErr(null);
+                      setPushOpen(false);
+                    }}
+                  >
                     Cancelar
                   </button>
                 </div>

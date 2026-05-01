@@ -96,4 +96,49 @@ describe("formatMlLogisticsPublicationLabel", () => {
       })
     ).toBe("A coordinar");
   });
+
+  it("freeShipping solo desde ML: Flex/Full/Mercado Envíos vs gratis", () => {
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "self_service",
+        free_shipping: false,
+        free_shipping_key_present: true
+      })
+    ).toBe("Flex");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "self_service",
+        free_shipping: true,
+        free_shipping_key_present: true
+      })
+    ).toBe("Flex gratis");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "fulfillment",
+        free_shipping: false,
+        free_shipping_key_present: true
+      })
+    ).toBe("Full");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "fulfillment",
+        free_shipping: true,
+        free_shipping_key_present: true
+      })
+    ).toBe("Full gratis");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "xd_drop_off",
+        free_shipping: false,
+        free_shipping_key_present: true
+      })
+    ).toBe("Mercado Envíos");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "xd_drop_off",
+        free_shipping: true,
+        free_shipping_key_present: true
+      })
+    ).toBe("Mercado Envíos gratis");
+  });
 });

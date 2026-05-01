@@ -225,6 +225,49 @@ function computeCashInAmount(params: {
 }
 
 /**
+ * Mensaje OPS cuando `financialBreakdown.cashInAmount` es null pero hay precio ML — misma lógica que `computeCashInAmount`.
+ */
+export function explainCashInUnavailable(
+  priceMl: number | null | undefined,
+  breakdown: FinancialCostBreakdown | null,
+  freeShipping: boolean | null
+): string | null {
+  if (
+    breakdown?.cashInAmount !== null &&
+    breakdown?.cashInAmount !== undefined &&
+    Number.isFinite(breakdown.cashInAmount)
+  ) {
+    return null;
+  }
+  if (priceMl === null || priceMl === undefined || !Number.isFinite(priceMl) || priceMl <= 0) {
+    return "Falta precio";
+  }
+  if (!breakdown) {
+    return "Sin desglose financiero";
+  }
+  if (breakdown.mlFeeAmount === null || !Number.isFinite(breakdown.mlFeeAmount)) {
+    return "Falta comisión ML";
+  }
+  if (breakdown.iibbAmount === null || breakdown.taxAmount === null) {
+    return "Falta fiscal";
+  }
+  if (freeShipping === null) {
+    return "Falta envío";
+  }
+  if (freeShipping === true) {
+    const est = breakdown.shipping;
+    const ok =
+      est?.completeness === "complete" &&
+      est?.sellerShippingCost !== null &&
+      Number.isFinite(est.sellerShippingCost);
+    if (!ok) {
+      return "Falta envío";
+    }
+  }
+  return "Sin datos para En caja";
+}
+
+/**
  * Desglose de costos y ganancia neta (única fuente de verdad para trazabilidad en UI).
  * IIBB / impuestos / costos adicionales no configurados → `amount`/`pct` null y entradas en `missing` (no se asume 0).
  */

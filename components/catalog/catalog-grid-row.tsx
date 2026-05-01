@@ -197,7 +197,7 @@ function CatalogGridRowInner({
       <div role="cell" className={cn("p-2 tabular-nums", precioCellClass)}>
         {row.price_ml === null ? "—" : ars.format(row.price_ml)}
       </div>
-      <div role="cell" className="p-2 text-xs font-medium text-[#1A1A1A]">
+      <div role="cell" className="p-2 text-xs font-medium text-[#1A1A1A]" title="Envío ML (publicación, datos ML)">
         {row.mlOfficial.publicationLogisticsLabel}
       </div>
       <div role="cell" className="p-2 tabular-nums">

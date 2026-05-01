@@ -39,6 +39,7 @@ import {
   selectCatalogFilteredIds,
   selectCatalogPromMargenReal
 } from "@/lib/data-v2/catalog-selectors";
+import { catalogDetailPanelOrderedIds } from "@/lib/data-v2/catalog-detail-panel-ids";
 import {
   CatalogGridRowMemo,
   CATALOG_GRID_ROW_CLASS,
@@ -48,6 +49,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   coerceReputacion,
+  explainCashInUnavailable,
   mlComisionRate,
   normalizePct,
   type LogisticaType,
@@ -378,15 +380,11 @@ export function CatalogCommandCenter({
 
   const insights = useMemo(() => buildInsights(effectiveOrderedItems), [effectiveOrderedItems]);
 
-  const catalogDetailIdsSorted = useMemo(() => {
-    const want = new Set<string>();
-    if (expanded) want.add(expanded);
-    if (inlineCostItemId) want.add(inlineCostItemId);
-    if (inlineCalcItemId) want.add(inlineCalcItemId);
-    if (mlPushItemId) want.add(mlPushItemId);
-    if (want.size === 0) return [];
-    return filteredIds.filter((id) => want.has(id));
-  }, [expanded, inlineCostItemId, inlineCalcItemId, mlPushItemId, filteredIds]);
+  const catalogDetailIdsSorted = useMemo(
+    () =>
+      catalogDetailPanelOrderedIds(filteredIds, expanded, inlineCostItemId, inlineCalcItemId, mlPushItemId),
+    [expanded, inlineCostItemId, inlineCalcItemId, mlPushItemId, filteredIds]
+  );
 
   const togglePill = (key: PillKey) => {
     setActivePill((prev) => (prev === key ? null : key));
@@ -558,7 +556,7 @@ export function CatalogCommandCenter({
               setInlineCostItemId(null);
               return;
             }
-            startTransition(async () => {
+            void (async () => {
               const res = await ensurePricingSkuShellForItem(mlAccountId, rowId);
               if (!res.success) {
                 setRowHints((prev) => ({ ...prev, [rowId]: res.error ?? "No se pudo preparar la fila de precios" }));
@@ -599,7 +597,7 @@ export function CatalogCommandCenter({
               setInlineCostItemId(rowId);
               setInlineCalcItemId(null);
               setMlPushItemId(null);
-            });
+            })();
           }}
           onOpenInlineCalc={() => {
             setInlineCalcItemId(rowId);
@@ -875,7 +873,7 @@ export function CatalogCommandCenter({
                 Precio ML
               </div>
               <div role="columnheader" className="p-2">
-                Envío (ML)
+                Envío ML
               </div>
               <div role="columnheader" className="p-2">
                 Costo
@@ -1017,6 +1015,9 @@ function CatalogRows({
   onLinkSkuValue: (v: string) => void;
 }) {
   const ds = row.decisionState;
+  const fb = ds.computed.financialBreakdown;
+  const cashIn = ds.computed.cashInAmount;
+  const cashInReason = explainCashInUnavailable(row.price_ml, fb, ds.ml.freeShipping);
   const rep = coerceReputacion(row.reputacion);
 
   const dailySales = ds.computed.velocity30d;
@@ -1111,7 +1112,7 @@ function CatalogRows({
                 />
               </label>
               <label className="text-xs font-semibold text-[#6B6B6B]">
-                Logística costos (motor)
+                Log. costos (motor)
                 <select
                   className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
                   value={costForms[row.item_id]?.logistica ?? operatorLogisticaDefault(row)}
@@ -1200,7 +1201,7 @@ function CatalogRows({
                   const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
                   const logisticaIns = (f?.logistica ?? operatorLogisticaDefault(row)) as "Full" | "Flex" | "Retiro domicilio";
                   onRowHint(null);
-                  startTransition(async () => {
+                  void (async () => {
                     const res = await saveCostForItem(mlAccountId, row.item_id, {
                       costo,
                       logistica: logisticaIns,
@@ -1224,7 +1225,7 @@ function CatalogRows({
                       },
                       res.data.item
                     );
-                  });
+                  })();
                 }}
               >
                 Guardar
@@ -1296,7 +1297,7 @@ function CatalogRows({
                     <option value="unk">Sin dato</option>
                   </select>
                 </label>
-                {row.price_ml !== null && ds.computed.financialBreakdown !== null ? (
+                {row.price_ml !== null ? (
                   <>
                     {netMarginDisplayLabel(ds.computed) ? (
                       <p className="text-xs font-semibold text-amber-900">{netMarginDisplayLabel(ds.computed)}</p>
@@ -1308,116 +1309,116 @@ function CatalogRows({
                       </li>
                       <li className="flex justify-between gap-4 text-[#6B6B6B]">
                         <span>En caja:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.cashInAmount !== null &&
-                          Number.isFinite(ds.computed.financialBreakdown.cashInAmount)
-                            ? ars.format(ds.computed.financialBreakdown.cashInAmount)
-                            : "—"}
+                        <span
+                          className="max-w-[min(280px,55vw)] text-right font-sans text-xs leading-snug"
+                          title={cashInReason ?? undefined}
+                        >
+                          {cashIn !== null && Number.isFinite(cashIn)
+                            ? ars.format(cashIn)
+                            : (cashInReason ?? "—")}
                         </span>
                       </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Costo producto:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.productCost !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.productCost)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Comisión ML {comisionPctLabel}:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.mlFeeAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.mlFeeAmount)}`
-                            : "—"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Costo fijo por unidad:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.fixedUnitCost !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.fixedUnitCost)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Ads ({(ds.computed.financialBreakdown.adsPct * 100).toFixed(1)}%):</span>
-                        <span>− {ars.format(ds.computed.financialBreakdown.adsAmount)}</span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− IIBB:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.iibbAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.iibbAmount)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Impuestos:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.taxAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.taxAmount)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Envío (envío estimado):</span>
-                        <span>
-                          {ds.computed.financialBreakdown.shipping.source === "buyer_pays_shipping"
-                            ? "envío no absorbido"
-                            : ds.computed.financialBreakdown.mlShippingAmount !== null
-                              ? `− ${ars.format(ds.computed.financialBreakdown.mlShippingAmount)}`
-                              : ds.computed.financialBreakdown.shipping.source === "missing_reputation"
-                                ? "falta reputación sincronizada"
-                                : ds.computed.financialBreakdown.missing.some((x) => x.includes("package_weight"))
-                                  ? "falta peso"
-                                  : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation_sync"))
+                      {fb ? (
+                        <>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Costo producto:</span>
+                            <span>
+                              {fb.productCost !== null ? `− ${ars.format(fb.productCost)}` : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Comisión ML {comisionPctLabel}:</span>
+                            <span>
+                              {fb.mlFeeAmount !== null ? `− ${ars.format(fb.mlFeeAmount)}` : "—"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Costo fijo por unidad:</span>
+                            <span>
+                              {fb.fixedUnitCost !== null ? `− ${ars.format(fb.fixedUnitCost)}` : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Ads ({(fb.adsPct * 100).toFixed(1)}%):</span>
+                            <span>− {ars.format(fb.adsAmount)}</span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− IIBB:</span>
+                            <span>
+                              {fb.iibbAmount !== null ? `− ${ars.format(fb.iibbAmount)}` : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Impuestos:</span>
+                            <span>
+                              {fb.taxAmount !== null ? `− ${ars.format(fb.taxAmount)}` : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Envío ML (estimado):</span>
+                            <span>
+                              {fb.shipping.source === "buyer_pays_shipping"
+                                ? "comprador paga (no absorbido)"
+                                : fb.mlShippingAmount !== null
+                                  ? `− ${ars.format(fb.mlShippingAmount)}`
+                                  : fb.shipping.source === "missing_reputation"
                                     ? "falta reputación sincronizada"
-                                    : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation"))
-                                      ? "falta reputación ML"
-                                      : ds.computed.financialBreakdown.shipping.source === "missing_table"
-                                        ? "tabla de envío no disponible"
-                                        : "—"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Logística interna:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.internalLogisticsAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.internalLogisticsAmount)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
-                        <span>− Costos adicionales:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.additionalCostsAmount !== null
-                            ? `− ${ars.format(ds.computed.financialBreakdown.additionalCostsAmount)}`
-                            : "— (no configurado)"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 border-t border-[#E8E8E2] pt-1 font-semibold text-[#1A1A1A]">
-                        <span>Ganancia neta:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.netProfit !== null &&
-                          Number.isFinite(ds.computed.financialBreakdown.netProfit)
-                            ? `${ds.computed.financialBreakdown.netProfit >= 0 ? "+" : ""}${ars.format(ds.computed.financialBreakdown.netProfit)}`
-                            : "—"}
-                        </span>
-                      </li>
-                      <li className="flex justify-between gap-4 font-semibold text-[#1A1A1A]">
-                        <span>Margen neto / parcial:</span>
-                        <span>
-                          {ds.computed.financialBreakdown.netMarginPct !== null
-                            ? `${(ds.computed.financialBreakdown.netMarginPct * 100).toFixed(1)}% · ${netMarginDisplayLabel(ds.computed) || "—"}`
-                            : "—"}
-                        </span>
-                      </li>
+                                    : fb.missing.some((x) => x.includes("package_weight"))
+                                      ? "falta peso"
+                                      : fb.missing.some((x) => x.includes("ml_reputation_sync"))
+                                        ? "falta reputación sincronizada"
+                                        : fb.missing.some((x) => x.includes("ml_reputation"))
+                                          ? "falta reputación ML"
+                                          : fb.shipping.source === "missing_table"
+                                            ? "tabla de envío no disponible"
+                                            : "—"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Log. costos (motor):</span>
+                            <span>
+                              {fb.internalLogisticsAmount !== null
+                                ? `− ${ars.format(fb.internalLogisticsAmount)}`
+                                : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                            <span>− Costos adicionales:</span>
+                            <span>
+                              {fb.additionalCostsAmount !== null
+                                ? `− ${ars.format(fb.additionalCostsAmount)}`
+                                : "— (no configurado)"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 border-t border-[#E8E8E2] pt-1 font-semibold text-[#1A1A1A]">
+                            <span>Ganancia neta:</span>
+                            <span>
+                              {fb.netProfit !== null && Number.isFinite(fb.netProfit)
+                                ? `${fb.netProfit >= 0 ? "+" : ""}${ars.format(fb.netProfit)}`
+                                : "—"}
+                            </span>
+                          </li>
+                          <li className="flex justify-between gap-4 font-semibold text-[#1A1A1A]">
+                            <span>Margen neto / parcial:</span>
+                            <span>
+                              {fb.netMarginPct !== null
+                                ? `${(fb.netMarginPct * 100).toFixed(1)}% · ${netMarginDisplayLabel(ds.computed) || "—"}`
+                                : "—"}
+                            </span>
+                          </li>
+                        </>
+                      ) : (
+                        <li className="flex justify-between gap-4 font-sans text-amber-900">
+                          <span>Estado:</span>
+                          <span className="max-w-[min(280px,55vw)] text-right leading-snug">
+                            {cashInReason ?? "Sin desglose financiero"}
+                          </span>
+                        </li>
+                      )}
                     </ul>
                   </>
                 ) : (
-                  <p className="text-xs text-[#6B6B6B]">
-                    {!row.price_ml ? "Sin precio ML o datos incompletos." : "Sin desglose financiero para este precio."}
-                  </p>
+                  <p className="text-xs text-[#6B6B6B]">Sin precio ML o datos incompletos.</p>
                 )}
               </div>
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">

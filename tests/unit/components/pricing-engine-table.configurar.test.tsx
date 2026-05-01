@@ -1,0 +1,141 @@
+/** @vitest-environment jsdom */
+
+import React from "react";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { PricingEngineTable } from "@/components/pricing/pricing-engine-table";
+
+const savePricingSkuInputs = vi.fn();
+const pushOptimalPriceToML = vi.fn();
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>
+}));
+
+vi.mock("@/components/pricing/account-fiscal-config-panel", () => ({
+  AccountFiscalConfigPanel: () => <div data-testid="fiscal-panel" />
+}));
+
+vi.mock("@/app/(ops)/ops/pricing/actions", () => ({
+  savePricingSkuInputs: (...args: unknown[]) => savePricingSkuInputs(...args)
+}));
+
+vi.mock("@/app/(ops)/ops/catalog/actions", () => ({
+  pushOptimalPriceToML: (...args: unknown[]) => pushOptimalPriceToML(...args)
+}));
+
+vi.mock("@/lib/pricing/pricing-engine-selectors", () => ({
+  selectFilteredPricingRowIds: (rows: Array<{ id: string }>) => rows.map((r) => r.id),
+  selectHeaderMetrics: () => ({ weightedMargenObj: null, weightedReal: null }),
+  selectVisiblePricingRows: (rowsById: Map<string, unknown>, filteredIds: string[]) => filteredIds.map((id) => rowsById.get(id)),
+  pricingTierFromDecision: () => "ok"
+}));
+
+vi.mock("@/lib/pricing/decision-state-cache", () => ({
+  makeDecisionCacheKey: () => "decision-key",
+  sellerFinancialSettingsFingerprint: () => "fp",
+  invalidateDecisionCacheBySkuId: vi.fn(),
+  invalidateDecisionCacheByAccountId: vi.fn(),
+  getCachedDecisionState: (_id: string, input: { ml: { currentPrice: number | null; freeShipping: boolean | null }; inputs: { productCost: number | null; targetMarginPct: number | null } }) => {
+    const missingCost = input.inputs.productCost === null;
+    return {
+      ml: {
+        currentPrice: input.ml.currentPrice ?? 20000,
+        freeShipping: input.ml.freeShipping
+      },
+      inputs: {
+        targetMarginPct: input.inputs.targetMarginPct
+      },
+      computed: {
+        optimalPrice: 21000,
+        optimalGananciaUnit: 1200,
+        realProfit: missingCost ? null : 700,
+        realMarginPct: missingCost ? null : 0.12,
+        cashInAmount: 17000,
+        financialBreakdown: null
+      },
+      decision: {
+        profitabilityStatus: missingCost ? "risk" : "healthy",
+        stockStatus: "healthy",
+        primaryInsight: null
+      },
+      businessDecision: missingCost
+        ? {
+            type: "configure_cost",
+            priority: "critical",
+            message: "Falta costo de producto",
+            action: "Configurar"
+          }
+        : {
+            type: "hold",
+            priority: "low",
+            message: "OK",
+            action: "Ninguna"
+          },
+      sync: {
+        calculationStatus: "ok"
+      }
+    };
+  }
+}));
+
+function rowWithoutCost() {
+  return {
+    id: "sku-1",
+    ml_account_id: "acc-1",
+    sku: "SKU-1",
+    producto: "Producto demo",
+    costo: null,
+    logistica: "Flex",
+    publicidad_pct: 0,
+    margen_pct: 0.2,
+    reputacion: "Verde / MercadoLíder",
+    peso_kg: null
+  } as never;
+}
+
+describe("PricingEngineTable - Configurar flow", () => {
+  beforeEach(() => {
+    savePricingSkuInputs.mockReset();
+    savePricingSkuInputs.mockResolvedValue({ success: true, data: { id: "sku-1" } });
+    pushOptimalPriceToML.mockReset();
+  });
+
+  it("click Configurar abre editor de costo y Enter guarda cambios", async () => {
+    render(
+      <PricingEngineTable
+        rows={[rowWithoutCost()]}
+        mlLinks={{
+          "sku-1": {
+            item_id: "MLA1",
+            price_ml: 20000,
+            stock: 10,
+            free_shipping: false,
+            logistic_type: "self_service",
+            shipping_mode: "me2",
+            permalink: "https://example.com/mla1",
+            operabilityStatus: "operable"
+          } as never
+        }}
+        mlAccountId="acc-1"
+        initialFinancialSettings={null}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    const costInput = screen.getAllByRole("spinbutton")[0];
+    fireEvent.change(costInput, { target: { value: "12000" } });
+    fireEvent.blur(costInput);
+
+    const row = screen.getByText("SKU-1").closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(savePricingSkuInputs).toHaveBeenCalledWith("sku-1", "acc-1", expect.objectContaining({ costo: 12000 }));
+    });
+
+    expect(screen.getByText(/12\.000/)).toBeTruthy();
+    await screen.findByText("✓ Guardado");
+  });
+});
