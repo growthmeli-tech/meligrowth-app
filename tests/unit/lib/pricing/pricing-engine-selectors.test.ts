@@ -19,6 +19,7 @@ function samplePricingRow(over: Partial<PricingSkuRow>): PricingSkuRow {
     sku: "SKU-PARITY",
     producto: "Parity product",
     costo: 12_000,
+    ml_item_id: null,
     peso_kg: null,
     logistica: "Flex",
     reputacion: "Verde / MercadoLíder",
@@ -83,7 +84,7 @@ describe("makeDraftImpactKey", () => {
     const r = samplePricingRow({});
     const base = rowToDraft(r);
     const a = { [r.id]: base };
-    const b = { [r.id]: { ...base, costo: base.costo + 1 } };
+    const b = { [r.id]: { ...base, costo: (base.costo ?? 0) + 1 } };
     expect(makeDraftImpactKey([r], a)).not.toBe(makeDraftImpactKey([r], b));
   });
 });

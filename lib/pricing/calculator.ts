@@ -65,6 +65,12 @@ export type FinancialCostBreakdown = {
   netProfit: number | null;
   netMarginPct: number | null;
 
+  /**
+   * Efectivo después de retenciones marketplace en la venta: precio − comisión − fijo − envío absorbido (si gratis) − ads − fiscal.
+   * Sin restar COGS ni logística operativa ni costos adicionales — esos van en `netProfit`.
+   */
+  cashInAmount: number | null;
+
   /** AR free-shipping table / política comercial (no mezclar con modo logístico). */
   shipping: {
     sellerShippingCost: number | null;
@@ -180,6 +186,44 @@ function emptyShippingBreakdown(): FinancialCostBreakdown["shipping"] {
   };
 }
 
+/** “En caja” al precio de venta: solo deducciones marketplace explícitas; sin COGS ni logística operativa. */
+function computeCashInAmount(params: {
+  salePrice: number;
+  mlFeeAmount: number | null;
+  adsAmount: number;
+  fixedUnitCost: number | null;
+  iibbAmount: number | null;
+  taxAmount: number | null;
+  freeShipping: boolean | null;
+  shipEst: ShippingCostEstimate;
+}): number | null {
+  const P = params.salePrice;
+  if (!Number.isFinite(P) || P <= 0) return null;
+  if (params.mlFeeAmount === null) return null;
+  if (params.iibbAmount === null || params.taxAmount === null) return null;
+  if (params.freeShipping === null) return null;
+
+  let sellerShip: number | null = null;
+  if (params.freeShipping === false) sellerShip = 0;
+  else if (
+    params.freeShipping === true &&
+    params.shipEst.completeness === "complete" &&
+    params.shipEst.sellerShippingCost !== null &&
+    Number.isFinite(params.shipEst.sellerShippingCost)
+  ) {
+    sellerShip = roundMoney(params.shipEst.sellerShippingCost);
+  } else if (params.freeShipping === true) {
+    return null;
+  }
+
+  if (sellerShip === null) return null;
+
+  const fixedPart =
+    params.fixedUnitCost !== null && Number.isFinite(params.fixedUnitCost) ? params.fixedUnitCost : 0;
+
+  return roundMoney(P - params.mlFeeAmount - params.adsAmount - sellerShip - fixedPart - params.iibbAmount - params.taxAmount);
+}
+
 /**
  * Desglose de costos y ganancia neta (única fuente de verdad para trazabilidad en UI).
  * IIBB / impuestos / costos adicionales no configurados → `amount`/`pct` null y entradas en `missing` (no se asume 0).
@@ -229,6 +273,7 @@ export function calculateFinancialCostBreakdown(input: {
       totalCost: null,
       netProfit: null,
       netMarginPct: null,
+      cashInAmount: null,
       shipping: emptyShippingBreakdown(),
       reasons,
       missing: ["price"]
@@ -345,7 +390,8 @@ export function calculateFinancialCostBreakdown(input: {
           reputation: "unknown",
           shippingMode: "unknown",
           freeShipping: null,
-          condition: "unknown"
+          condition: "unknown",
+          accountReputationSynced: false
         }
       : {
           price: P,
@@ -353,7 +399,8 @@ export function calculateFinancialCostBreakdown(input: {
           reputation: sh.reputation,
           shippingMode: sh.shippingMode,
           freeShipping: sh.freeShipping,
-          condition: sh.condition
+          condition: sh.condition,
+          accountReputationSynced: sh.accountReputationSynced
         };
 
   const shipEst = estimateSellerShippingCostAr(shipInput);
@@ -397,6 +444,17 @@ export function calculateFinancialCostBreakdown(input: {
 
   const mlFeePct = comisionRate;
 
+  const cashInAmount = computeCashInAmount({
+    salePrice: P,
+    mlFeeAmount,
+    adsAmount,
+    fixedUnitCost,
+    iibbAmount,
+    taxAmount,
+    freeShipping: shipInput.freeShipping,
+    shipEst
+  });
+
   if (productCost === null) {
     missing.push("product_cost");
     return {
@@ -419,6 +477,7 @@ export function calculateFinancialCostBreakdown(input: {
       totalCost: null,
       netProfit: null,
       netMarginPct: null,
+      cashInAmount,
       shipping: shipBreakdown,
       reasons,
       missing
@@ -456,6 +515,7 @@ export function calculateFinancialCostBreakdown(input: {
     totalCost,
     netProfit,
     netMarginPct,
+    cashInAmount,
     shipping: shipBreakdown,
     reasons,
     missing

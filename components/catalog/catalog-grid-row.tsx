@@ -3,6 +3,7 @@
 import { memo, useRef, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
+import { catalogLogisticsModeColumnLabel } from "@/lib/pricing/shipping-costs-argentina";
 import { cn } from "@/lib/utils";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 
@@ -10,7 +11,7 @@ const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS",
 
 /** Must match header grid in `catalog-command-center.tsx`. */
 export const CATALOG_GRID_ROW_CLASS =
-  "grid w-full min-w-[980px] grid-cols-[32px_48px_minmax(200px,2fr)_72px_96px_88px_120px_minmax(120px,1fr)_40px] gap-0 text-left text-sm align-top";
+  "grid w-full min-w-[1060px] grid-cols-[32px_48px_minmax(200px,2fr)_72px_96px_72px_88px_120px_minmax(120px,1fr)_40px] gap-0 text-left text-sm align-top";
 
 /** Fixed virtual row height (main row only; detail panels render below the list). */
 export const CATALOG_MAIN_ROW_HEIGHT = 76;
@@ -182,6 +183,9 @@ function CatalogGridRowInner({
       </div>
       <div role="cell" className={cn("p-2 tabular-nums", precioCellClass)}>
         {row.price_ml === null ? "—" : ars.format(row.price_ml)}
+      </div>
+      <div role="cell" className="p-2 text-xs font-medium text-[#1A1A1A]">
+        {catalogLogisticsModeColumnLabel(row.mlOfficial.shippingMode)}
       </div>
       <div role="cell" className="p-2 tabular-nums">
         {row.costo === null ? "—" : ars.format(row.costo)}

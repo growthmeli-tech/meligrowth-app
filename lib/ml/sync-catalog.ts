@@ -1,6 +1,7 @@
 import { getItemCatalog } from "@/lib/ml/endpoints/catalog";
 import { getSellerReputation } from "@/lib/ml/endpoints/users";
 import { getSalesLast30Days } from "@/lib/ml/endpoints/sales";
+import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { invalidateDecisionCacheByAccountId } from "@/lib/pricing/decision-state-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
@@ -115,6 +116,8 @@ export async function syncMlCatalog(
       message: repCatch instanceof Error ? repCatch.message : String(repCatch)
     });
   }
+
+  await ensurePricingSkuShellsForAccount(mlAccountId, supabase);
 
   const durationMs = Date.now() - started;
 

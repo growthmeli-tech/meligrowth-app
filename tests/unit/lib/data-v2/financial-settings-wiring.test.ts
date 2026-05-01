@@ -17,6 +17,7 @@ function basePricing(over: Partial<PricingSkuRow>): PricingSkuRow {
     sku: "TEST",
     producto: "Producto",
     costo: 15_600,
+    ml_item_id: null,
     peso_kg: null,
     logistica: "Flex",
     reputacion: "Verde / MercadoLíder",

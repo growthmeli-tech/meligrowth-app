@@ -659,7 +659,9 @@ export type Database = {
           ml_account_id: string;
           sku: string | null;
           producto: string;
-          costo: number;
+          /** null = shell row sin costo configurado (no inventar 0). */
+          costo: number | null;
+          ml_item_id: string | null;
           peso_kg: number | null;
           logistica: "Full" | "Flex" | "Retiro domicilio";
           reputacion: string | null;
@@ -676,7 +678,6 @@ export type Database = {
         Insert: Partial<Database["public"]["Tables"]["pricing_skus"]["Row"]> & {
           ml_account_id: string;
           producto: string;
-          costo: number;
         };
         Update: Partial<Database["public"]["Tables"]["pricing_skus"]["Row"]>;
         Relationships: [];

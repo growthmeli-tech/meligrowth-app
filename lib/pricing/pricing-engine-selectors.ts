@@ -73,7 +73,7 @@ export function selectHeaderMetrics(
     const d = getDraft(r.id);
     if (!d) continue;
     const c = d.costo;
-    if (!Number.isFinite(c) || c <= 0) continue;
+    if (c === null || !Number.isFinite(c) || c <= 0) continue;
     if (d.margen_pct !== null) {
       wM += c;
       accM += d.margen_pct * c;

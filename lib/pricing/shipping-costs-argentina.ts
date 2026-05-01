@@ -60,6 +60,8 @@ export type ShippingCostInput = {
   shippingMode: ShippingMode;
   freeShipping: boolean | null;
   condition: "new" | "used" | "unknown";
+  /** true = cuenta con `seller_reputation_synced_at` (sync ML); distinto de tier desconocido con sync. */
+  accountReputationSynced?: boolean;
 };
 
 export type { SellerReputationState };
@@ -75,6 +77,7 @@ export type ShippingCostEstimate = {
     | "ml_ar_table_estimate"
     | "buyer_pays_shipping"
     | "missing_data"
+    | "missing_reputation"
     | "missing_table"
     | "not_applicable";
   completeness: "complete" | "partial" | "not_applicable";
@@ -191,18 +194,37 @@ export function mapMlSellerReputation(input: {
   }
   const level = String(raw).trim().toLowerCase();
 
-  const isGreenLevel = level === "green" || level === "light_green";
+  /** ML API `level_id` patterns e.g. `5_green`, `4_light_green`, `3_yellow`. */
+  const isLightGreen = level.includes("light_green");
+  const isGreenTier = isLightGreen || level.includes("green");
 
-  if (power && isGreenLevel) {
-    return "mercado_lider_green";
-  }
-  if (isGreenLevel) return "green";
   if (level.includes("yellow")) return "yellow";
   if (level.includes("orange")) return "orange";
   if (level.includes("red")) return "red";
   if (level === "no_reputation" || level.includes("no_reputation")) return "no_reputation";
 
+  if (power && isGreenTier) {
+    return "mercado_lider_green";
+  }
+  if (isGreenTier) return "green";
+
   return "unknown";
+}
+
+/** Columna catálogo OPS — modo envío ML normalizado (no infiere envío gratis). */
+export function catalogLogisticsModeColumnLabel(mode: ShippingMode): string {
+  switch (mode) {
+    case "full":
+      return "Full";
+    case "flex":
+      return "Flex";
+    case "me2":
+      return "ME2";
+    case "retire":
+      return "Retiro";
+    default:
+      return "Sin dato";
+  }
 }
 
 /** Fallback when ML API reputation not synced — maps margenes-style labels only; never defaults to green without signal. */
@@ -262,6 +284,7 @@ export function estimateSellerShippingCostAr(input: ShippingCostInput): Shipping
   const reasons: string[] = [];
   const missing: string[] = [];
   const repGroup = resolveShippingReputationGroup(input.reputation);
+  const accountRepSynced = input.accountReputationSynced !== false;
 
   if (input.freeShipping === false) {
     return {
@@ -316,12 +339,29 @@ export function estimateSellerShippingCostAr(input: ShippingCostInput): Shipping
   if (input.packageWeightKg === null || !Number.isFinite(input.packageWeightKg)) {
     missing.push("package_weight");
   }
-  if (input.reputation === "unknown") {
-    missing.push("ml_reputation");
-  }
 
   const priceBand = resolvePriceBand(input.price);
   const weightBand = resolveWeightBand(input.packageWeightKg);
+
+  if (input.reputation === "unknown" && !accountRepSynced) {
+    missing.push("ml_reputation_sync");
+    return {
+      sellerShippingCost: null,
+      buyerShippingCost: null,
+      totalEstimatedShippingCost: null,
+      priceBand,
+      weightBand,
+      reputationGroup: repGroup,
+      source: "missing_reputation",
+      completeness: "partial",
+      reasons: ["Cuenta ML sin reputación sincronizada — no se aplica tabla AR."],
+      missing
+    };
+  }
+
+  if (input.reputation === "unknown") {
+    missing.push("ml_reputation");
+  }
 
   if (priceBand === null || weightBand === null || input.reputation === "unknown") {
     return {

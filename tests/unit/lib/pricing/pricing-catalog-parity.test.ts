@@ -14,6 +14,7 @@ function samplePricingRow(over: Partial<PricingSkuRow>): PricingSkuRow {
     sku: "SKU-PARITY",
     producto: "Parity product",
     costo: 12_000,
+    ml_item_id: null,
     peso_kg: null,
     logistica: "Flex",
     reputacion: "Verde / MercadoLíder",

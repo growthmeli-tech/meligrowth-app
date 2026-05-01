@@ -6,7 +6,7 @@ import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "
 export type PricingSkuRow = Database["public"]["Tables"]["pricing_skus"]["Row"];
 
 export type PricingDraft = {
-  costo: number;
+  costo: number | null;
   logistica: LogisticaType;
   publicidad_pct: number;
   margen_pct: number | null;
@@ -15,8 +15,11 @@ export type PricingDraft = {
 export function rowToDraft(r: PricingSkuRow): PricingDraft {
   const margRaw = r.margen_pct === null || r.margen_pct === undefined ? null : normalizePct(Number(r.margen_pct));
   const margen_pct = margRaw === null || !Number.isFinite(margRaw) || margRaw <= 0 ? null : margRaw;
+  const cr = r.costo;
+  const costo =
+    cr !== null && cr !== undefined && Number.isFinite(Number(cr)) && Number(cr) >= 0 ? Number(cr) : null;
   return {
-    costo: Number(r.costo),
+    costo,
     logistica: r.logistica as LogisticaType,
     publicidad_pct:
       r.publicidad_pct === null || r.publicidad_pct === undefined ? 0 : normalizePct(Number(r.publicidad_pct)),
@@ -52,7 +55,7 @@ export function buildPricingRowInput(
         packageWeightKg: ml?.package_weight_kg ?? (r.peso_kg !== null && r.peso_kg !== undefined ? Number(r.peso_kg) : null)
       },
     inputs: {
-      productCost: Number.isFinite(d.costo) ? d.costo : null,
+      productCost: d.costo !== null && Number.isFinite(d.costo) ? d.costo : null,
       logistics: d.logistica,
       publicidadPct: d.publicidad_pct,
       targetMarginPct: d.margen_pct,
@@ -130,7 +133,8 @@ export function makeDraftImpactKey(rows: readonly { id: string }[], drafts: Reco
     if (!d) continue;
     h = fnv1aStr(h, r.id);
     const m = d.margen_pct === null || !Number.isFinite(d.margen_pct) ? -999 : d.margen_pct;
-    h = fnv1aU32(h, (d.costo * 131) | 0);
+    const c = d.costo === null || !Number.isFinite(d.costo) ? -1 : d.costo;
+    h = fnv1aU32(h, (c * 131) | 0);
     h = fnv1aStr(h, d.logistica);
     h = fnv1aU32(h, (d.publicidad_pct * 7919) | 0);
     h = fnv1aU32(h, (m * 7937) | 0);

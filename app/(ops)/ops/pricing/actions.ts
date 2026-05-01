@@ -29,7 +29,7 @@ export async function savePricingSkuInputs(
   skuId: string,
   mlAccountId: string,
   inputs: {
-    costo?: number;
+    costo?: number | null;
     logistica?: string;
     publicidad_pct?: number;
     margen_pct?: number | null;
@@ -44,7 +44,7 @@ export async function savePricingSkuInputs(
   const patch: SkuUpdate = {};
 
   if (inputs.costo !== undefined) {
-    if (!Number.isFinite(inputs.costo) || inputs.costo < 0) {
+    if (inputs.costo !== null && (!Number.isFinite(inputs.costo) || inputs.costo < 0)) {
       return { success: false, error: "Costo inválido." };
     }
     patch.costo = inputs.costo;
@@ -106,8 +106,15 @@ export async function savePricingSkuInputs(
         ? null
         : normalizePct(current.margen_pct);
 
+  const mergedCosto =
+    patch.costo !== undefined
+      ? Number(patch.costo)
+      : current.costo !== null && current.costo !== undefined && Number.isFinite(Number(current.costo))
+        ? Number(current.costo)
+        : NaN;
+
   const merged = {
-    costo: patch.costo !== undefined ? Number(patch.costo) : Number(current.costo),
+    costo: mergedCosto,
     logistica: (patch.logistica !== undefined ? patch.logistica : current.logistica) as LogisticaType,
     publicidad_pct: patch.publicidad_pct !== undefined ? Number(patch.publicidad_pct) : normalizePct(current.publicidad_pct),
     margen_pct: mergedMargen !== null && Number.isFinite(mergedMargen) && mergedMargen > 0 ? mergedMargen : null,
@@ -117,6 +124,9 @@ export async function savePricingSkuInputs(
   };
 
   if (merged.margen_pct !== null) {
+    if (!Number.isFinite(merged.costo) || merged.costo <= 0) {
+      return { success: false, error: "Definí un costo de producto válido antes de guardar el margen objetivo." };
+    }
     const calc = calcSellingPrice({
       costo: merged.costo,
       logistica: merged.logistica,

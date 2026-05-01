@@ -6,6 +6,7 @@ import { getValidAccessToken } from "@/lib/ml/auth";
 import { pushPriceToML } from "@/lib/ml/endpoints/catalog";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
+import { ensurePricingSkuForMlItem } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { linkPricingSkuToItem, listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { catalogStateFromItems, type CatalogState } from "@/lib/data-v2/catalog-state";
@@ -30,6 +31,27 @@ async function gateMlAccount(mlAccountId: string): Promise<ActionResult<{ supaba
   }
 
   return { success: true, data: { supabase } };
+}
+
+export async function ensurePricingSkuShellForItem(
+  mlAccountId: string,
+  itemId: string
+): Promise<ActionResult<{ pricing_sku_id: string; item?: UnifiedCatalogItem }>> {
+  const gate = await gateMlAccount(mlAccountId);
+  if (!gate.success) return gate;
+
+  const ensured = await ensurePricingSkuForMlItem(gate.data.supabase, mlAccountId, itemId);
+  if (!ensured.ok) {
+    return { success: false, error: ensured.error };
+  }
+
+  revalidatePath("/ops/catalog");
+  revalidatePath("/ops/pricing");
+  revalidatePath("/ops/dashboard");
+
+  const refreshed = await listUnifiedCatalog(mlAccountId);
+  const item = refreshed.success ? refreshed.data.find((i) => i.item_id === itemId) : undefined;
+  return { success: true, data: { pricing_sku_id: ensured.pricingSkuId, item } };
 }
 
 export async function triggerCatalogSync(mlAccountId: string): Promise<ActionResult<{ synced: number; errors: number; durationMs: number }>> {

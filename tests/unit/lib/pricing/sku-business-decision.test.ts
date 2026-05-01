@@ -60,7 +60,8 @@ function base(over: Partial<SkuDecisionStateBase> = {}): SkuDecisionStateBase {
       idealStock: null,
       stockGap: null,
       velocity30d: null,
-      daysOfStock: null
+      daysOfStock: null,
+      cashInAmount: null
     },
     decision: {
       profitabilityStatus: "healthy",
@@ -85,6 +86,17 @@ function base(over: Partial<SkuDecisionStateBase> = {}): SkuDecisionStateBase {
 }
 
 describe("deriveSkuBusinessDecision V3 precedence", () => {
+  it("[0] productCost null → configure_cost", () => {
+    const s = deriveSkuBusinessDecision(
+      base({
+        inputs: { ...base().inputs, productCost: null },
+        sync: { calculationStatus: "missing_inputs" }
+      })
+    );
+    expect(s.type).toBe("configure_cost");
+    expect(s.action).toBe("Configurar");
+  });
+
   it("[1] missing_inputs → complete_shipping_data critical", () => {
     const s = deriveSkuBusinessDecision(base({ sync: { calculationStatus: "missing_inputs" } }));
     expect(s).toEqual({
@@ -123,6 +135,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 5000,
       netProfit: 100,
       netMarginPct: 0.02,
+      cashInAmount: null,
       shipping: {
         sellerShippingCost: 0,
         source: "buyer_pays_shipping" as const,
@@ -180,6 +193,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 8000,
       netProfit: 2000,
       netMarginPct: 0.2,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: [] as string[]
@@ -225,6 +239,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 12_000,
       netProfit: -2000,
       netMarginPct: -0.2,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: [] as string[]
@@ -277,6 +292,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 11_000,
       netProfit: -1000,
       netMarginPct: -0.1,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: [] as string[]
@@ -340,6 +356,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 5000,
       netProfit: 5000,
       netMarginPct: 0.5,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: ["shipping_free_shipping"] as string[]
@@ -399,6 +416,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 4000,
       netProfit: 6000,
       netMarginPct: 0.6,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: [] as string[]
@@ -449,6 +467,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       totalCost: 2000,
       netProfit: 8000,
       netMarginPct: 0.8,
+      cashInAmount: null,
       shipping: ship,
       reasons: [],
       missing: [] as string[]

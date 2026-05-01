@@ -18,6 +18,7 @@ import { getCachedDecisionState, invalidateDecisionCacheBySkuId, invalidateDecis
 import type { BuildSkuDecisionStateInput } from "@/lib/pricing/sku-decision-state";
 import {
   bulkMarkNoAds,
+  ensurePricingSkuShellForItem,
   exportMasterCatalog,
   linkSkuToItem,
   pushOptimalPriceToML,
@@ -544,9 +545,27 @@ export function CatalogCommandCenter({
             setMlPushItemId(null);
           }}
           onToggleInlineCost={() => {
-            setInlineCostItemId((cur) => (cur === rowId ? null : rowId));
-            setInlineCalcItemId(null);
-            setMlPushItemId(null);
+            if (inlineCostItemId === rowId) {
+              setInlineCostItemId(null);
+              return;
+            }
+            startTransition(async () => {
+              const res = await ensurePricingSkuShellForItem(mlAccountId, rowId);
+              if (!res.success) {
+                setRowHints((prev) => ({ ...prev, [rowId]: res.error ?? "No se pudo preparar la fila de precios" }));
+                return;
+              }
+              setRowHints((prev) => ({ ...prev, [rowId]: null }));
+              if (res.data?.item) {
+                setCatalog((c) => reconcileItemReplace(c, res.data!.item!));
+                if (res.data.item.pricing_sku_id) invalidateDecisionCacheBySkuId(res.data.item.pricing_sku_id);
+              }
+              const cid = res.data?.item?.pricing_sku_id ?? `calc:${mlAccountId}:${rowId}`;
+              invalidateDecisionCacheBySkuId(cid);
+              setInlineCostItemId(rowId);
+              setInlineCalcItemId(null);
+              setMlPushItemId(null);
+            });
           }}
           onOpenInlineCalc={() => {
             setInlineCalcItemId(rowId);
@@ -820,6 +839,9 @@ export function CatalogCommandCenter({
               </div>
               <div role="columnheader" className="p-2">
                 Precio ML
+              </div>
+              <div role="columnheader" className="p-2">
+                Logística
               </div>
               <div role="columnheader" className="p-2">
                 Costo
@@ -1235,15 +1257,24 @@ function CatalogRows({
                     <option value="unk">Sin dato</option>
                   </select>
                 </label>
-                {row.price_ml !== null && row.tiene_costo && ds.computed.financialBreakdown !== null ? (
+                {row.price_ml !== null && ds.computed.financialBreakdown !== null ? (
                   <>
                     {netMarginDisplayLabel(ds.computed) ? (
                       <p className="text-xs font-semibold text-amber-900">{netMarginDisplayLabel(ds.computed)}</p>
                     ) : null}
                     <ul className="space-y-1 font-mono text-xs leading-relaxed">
                       <li className="flex justify-between gap-4">
-                        <span>Precio:</span>
+                        <span>Precio ML:</span>
                         <span>{ars.format(row.price_ml)}</span>
+                      </li>
+                      <li className="flex justify-between gap-4 text-[#6B6B6B]">
+                        <span>En caja:</span>
+                        <span>
+                          {ds.computed.financialBreakdown.cashInAmount !== null &&
+                          Number.isFinite(ds.computed.financialBreakdown.cashInAmount)
+                            ? ars.format(ds.computed.financialBreakdown.cashInAmount)
+                            : "—"}
+                        </span>
                       </li>
                       <li className="flex justify-between gap-4 text-[#6B6B6B]">
                         <span>− Costo producto:</span>
@@ -1296,13 +1327,17 @@ function CatalogRows({
                             ? "envío no absorbido"
                             : ds.computed.financialBreakdown.mlShippingAmount !== null
                               ? `− ${ars.format(ds.computed.financialBreakdown.mlShippingAmount)}`
-                              : ds.computed.financialBreakdown.missing.some((x) => x.includes("package_weight"))
-                                ? "falta peso"
-                                : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation"))
-                                  ? "falta reputación ML"
-                                  : ds.computed.financialBreakdown.shipping.source === "missing_table"
-                                    ? "tabla de envío no disponible"
-                                    : "—"}
+                              : ds.computed.financialBreakdown.shipping.source === "missing_reputation"
+                                ? "falta reputación sincronizada"
+                                : ds.computed.financialBreakdown.missing.some((x) => x.includes("package_weight"))
+                                  ? "falta peso"
+                                  : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation_sync"))
+                                    ? "falta reputación sincronizada"
+                                    : ds.computed.financialBreakdown.missing.some((x) => x.includes("ml_reputation"))
+                                      ? "falta reputación ML"
+                                      : ds.computed.financialBreakdown.shipping.source === "missing_table"
+                                        ? "tabla de envío no disponible"
+                                        : "—"}
                         </span>
                       </li>
                       <li className="flex justify-between gap-4 text-[#6B6B6B]">
@@ -1341,7 +1376,9 @@ function CatalogRows({
                     </ul>
                   </>
                 ) : (
-                  <p className="text-xs text-[#6B6B6B]">{!row.tiene_costo ? "Sin costo — no hay desglose." : "Sin precio ML o datos incompletos."}</p>
+                  <p className="text-xs text-[#6B6B6B]">
+                    {!row.price_ml ? "Sin precio ML o datos incompletos." : "Sin desglose financiero para este precio."}
+                  </p>
                 )}
               </div>
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-white p-3 text-sm">

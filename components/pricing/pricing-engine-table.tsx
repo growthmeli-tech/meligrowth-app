@@ -154,7 +154,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
         void (async () => {
           const snap = savedSnapshot.current[rowId];
           const res = await savePricingSkuInputs(rowId, mlAccountId, {
-            costo: d.costo,
+            costo: d.costo !== null && d.costo !== undefined ? d.costo : undefined,
             logistica: d.logistica,
             publicidad_pct: d.publicidad_pct,
             margen_pct: d.margen_pct
@@ -282,7 +282,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-[#E8E8E2] bg-white">
-        <table className="w-full min-w-[960px] text-left text-sm">
+        <table className="w-full min-w-[1080px] text-left text-sm">
           <thead>
             <tr className="border-b border-[#E8E8E2] bg-[#F5F5F0] text-[10px] font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-2" colSpan={1}>
@@ -291,11 +291,14 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
               <th className="p-2" colSpan={1}>
                 ML
               </th>
+              <th className="border-l-2 border-[#E8E8E2] p-2 text-center" colSpan={2}>
+                Referencia ML
+              </th>
               <th className="border-l-2 border-[#E8E8E2] p-2 text-center" colSpan={4}>
                 ◄ Lo que vos sabés ►
               </th>
               <th className="border-l-2 border-[#E8E8E2] p-2 text-center" colSpan={1}>
-                ◄ Lo que calcula ►
+                Precio óptimo
               </th>
               <th className="border-l-2 border-[#E8E8E2] p-2" colSpan={1}>
                 Resultado
@@ -307,6 +310,8 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
             <tr className="border-b border-[#E8E8E2] bg-[#FAFAF8] text-[10px] font-bold uppercase tracking-wide text-[#6B6B6B]">
               <th className="p-2">SKU</th>
               <th className="p-2">Publicación</th>
+              <th className="border-l-2 border-[#E8E8E2] p-2">Precio ML</th>
+              <th className="p-2">En caja</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Costo</th>
               <th className="p-2">Log.</th>
               <th className="p-2">Ads</th>
@@ -441,6 +446,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
 
   const gananciaReal = decision.computed.realProfit;
   const margenReal = decision.computed.realMarginPct;
+  const cashIn = decision.computed.cashInAmount;
   const ganObj = decision.computed.optimalGananciaUnit;
   const margObj = decision.inputs.targetMarginPct;
 
@@ -552,14 +558,23 @@ const PricingEngineRow = memo(function PricingEngineRow({
           <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-semibold text-neutral-700">Sin ML</span>
         )}
       </td>
+      <td className="border-l-2 border-[#E8E8E2] p-2 tabular-nums text-xs font-medium text-[#1A1A1A]">
+        {hasMlPrice ? ars.format(priceMl as number) : "—"}
+      </td>
+      <td className="p-2 tabular-nums text-xs text-[#1A1A1A]">
+        {cashIn !== null && Number.isFinite(cashIn) ? ars.format(cashIn) : "—"}
+      </td>
       <td className="border-l-2 border-[#E8E8E2] p-1">
         {editingField === "costo" ? (
           <input
             autoFocus
             type="number"
             className="w-full min-w-[88px] rounded border border-[#E8E8E2] px-1 py-1 text-xs tabular-nums"
-            value={Number.isFinite(d.costo) ? d.costo : ""}
-            onChange={(e) => update({ costo: Number(e.target.value) || 0 })}
+            value={d.costo !== null && Number.isFinite(d.costo) ? d.costo : ""}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              update({ costo: raw === "" ? null : Number(raw) });
+            }}
             onBlur={() => setEditing(null)}
           />
         ) : (
@@ -568,7 +583,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
             className="w-full rounded px-1 py-1 text-left text-xs tabular-nums hover:bg-neutral-100"
             onClick={() => onRequestEditField(row.id, "costo")}
           >
-            {Number.isFinite(d.costo) && d.costo > 0 ? ars.format(d.costo) : "—"}
+            {d.costo !== null && Number.isFinite(d.costo) && d.costo > 0 ? ars.format(d.costo) : "—"}
           </button>
         )}
       </td>

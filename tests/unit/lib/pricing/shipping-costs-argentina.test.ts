@@ -36,6 +36,8 @@ describe("mapMlSellerReputation", () => {
   it("yellow / green / orange / red / unknown", () => {
     expect(mapMlSellerReputation({ levelId: "yellow", powerSellerStatus: null })).toBe("yellow");
     expect(mapMlSellerReputation({ levelId: "green", powerSellerStatus: null })).toBe("green");
+    expect(mapMlSellerReputation({ levelId: "5_green", powerSellerStatus: null })).toBe("green");
+    expect(mapMlSellerReputation({ levelId: "4_light_green", powerSellerStatus: null })).toBe("green");
     expect(mapMlSellerReputation({ levelId: "green", powerSellerStatus: "platinum" })).toBe("mercado_lider_green");
     expect(mapMlSellerReputation({ levelId: "orange", powerSellerStatus: null })).toBe("orange");
     expect(mapMlSellerReputation({ levelId: "red", powerSellerStatus: null })).toBe("red");
@@ -88,6 +90,19 @@ describe("estimateSellerShippingCostAr — tabla yellow AR", () => {
     ).toBe(7920);
   });
 
+  it("freeShipping true + unknown reputation + cuenta sin sync => missing_reputation", () => {
+    const e = estimateSellerShippingCostAr({
+      ...base,
+      price: 30_000,
+      freeShipping: true,
+      reputation: "unknown",
+      accountReputationSynced: false
+    });
+    expect(e.source).toBe("missing_reputation");
+    expect(e.completeness).toBe("partial");
+    expect(e.sellerShippingCost).toBeNull();
+  });
+
   it("freeShipping true + unknown reputation => partial", () => {
     const e = estimateSellerShippingCostAr({
       ...base,
@@ -95,6 +110,7 @@ describe("estimateSellerShippingCostAr — tabla yellow AR", () => {
       freeShipping: true,
       reputation: "unknown"
     });
+    expect(e.source).toBe("missing_data");
     expect(e.completeness).toBe("partial");
     expect(e.sellerShippingCost).toBeNull();
   });
@@ -155,6 +171,7 @@ describe("Financial breakdown — shipping subtract", () => {
     expect(bComplete.shipping.completeness).toBe("complete");
     expect(bComplete.mlShippingAmount).toBe(7368);
     expect(bComplete.netProfit).not.toBeNull();
+    expect(bComplete.cashInAmount).toBe(27_132);
   });
 
   it("parcial envío no resta costo en total", () => {

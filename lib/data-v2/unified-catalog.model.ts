@@ -99,13 +99,17 @@ function buildRawMlSliceFromRow(row: UnifiedCatalogItem): MlSlice {
 }
 
 function pricingSkuFromUnifiedItem(row: UnifiedCatalogItem, mlAccountId: string): PricingSkuRow | null {
-  if (!row.pricing_sku_id || !row.tiene_costo) return null;
+  if (!row.pricing_sku_id) return null;
+  const rawCost = row.costo;
+  const costoVal =
+    rawCost !== null && rawCost !== undefined && Number.isFinite(Number(rawCost)) && Number(rawCost) >= 0 ? Number(rawCost) : null;
   return {
     id: row.pricing_sku_id,
     ml_account_id: mlAccountId,
     sku: row.sku ?? row.seller_custom_field,
     producto: row.title,
-    costo: row.costo ?? 0,
+    costo: costoVal,
+    ml_item_id: null,
     logistica: (row.logistica ?? "Flex") as LogisticaType,
     reputacion: row.reputacion,
     publicidad_pct: row.publicidad_pct,
@@ -115,6 +119,7 @@ function pricingSkuFromUnifiedItem(row: UnifiedCatalogItem, mlAccountId: string)
     ganancia_unit: null,
     roi: null,
     source_file: null,
+    free_shipping: null,
     created_at: row.last_synced_at,
     updated_at: row.last_synced_at
   } as PricingSkuRow;
@@ -180,8 +185,6 @@ export function computeUnifiedCatalogDerived(
   | "logistic_type"
   | "status"
 > & { price_ml: number | null; stock: number | null; sold_quantity: number | null; status: string } {
-  const tiene_costo = Boolean(pricing);
-
   const price_ml = ml.price === null || ml.price === undefined ? null : Number(ml.price);
   const stock = ml.available_quantity === null || ml.available_quantity === undefined ? null : Number(ml.available_quantity);
   const ventas_30d =
@@ -190,7 +193,11 @@ export function computeUnifiedCatalogDerived(
       : Number(ml.ventas_30d);
 
   const productCost =
-    pricing && Number.isFinite(Number(pricing.costo)) && Number(pricing.costo) >= 0 ? Number(pricing.costo) : null;
+    pricing && pricing.costo !== null && pricing.costo !== undefined && Number.isFinite(Number(pricing.costo)) && Number(pricing.costo) >= 0
+      ? Number(pricing.costo)
+      : null;
+
+  const tiene_costo = productCost !== null;
 
   const sellerId = options?.sellerId ?? "unknown_seller";
   const accountDefFs = options?.accountDefaultFreeShipping ?? null;
@@ -321,7 +328,10 @@ export function computeUnifiedCatalogDerived(
     roi_calculado,
     pricing_sku_id: pricing?.id ?? null,
     sku: pricing?.sku ?? null,
-    costo: pricing ? Number(pricing.costo) : null,
+    costo:
+      pricing !== null && pricing.costo !== null && pricing.costo !== undefined && Number.isFinite(Number(pricing.costo))
+        ? Number(pricing.costo)
+        : null,
     peso_kg: pricing?.peso_kg !== null && pricing?.peso_kg !== undefined ? Number(pricing.peso_kg) : null,
     logistica: pricing?.logistica ?? null,
     cuenta_reputacion_ml,

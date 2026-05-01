@@ -1,6 +1,7 @@
 import {
   calcRealProfit,
   calcSellingPrice,
+  calculateFinancialCostBreakdown,
   coerceReputacion,
   normalizePct,
   type FinancialCostBreakdown,
@@ -21,6 +22,7 @@ import { buildSkuFieldSources, type FieldSource, type SkuFieldSources } from "@/
 /** V3 forced single action — derived only from `SkuDecisionStateBase` (no recomputation). */
 export type SkuBusinessDecision = {
   type:
+    | "configure_cost"
     | "configure_fiscal"
     | "complete_shipping_data"
     | "fix_shipping"
@@ -78,6 +80,8 @@ export type SkuDecisionStateBase = {
     realAdsAmount: number | null;
     realProductCostApplied: number | null;
     financialBreakdown: FinancialCostBreakdown | null;
+    /** Precio ML menos retenciones marketplace (`financialBreakdown.cashInAmount`). */
+    cashInAmount: number | null;
     /** `net_full` = IIBB e impuestos explícitos en configuración; `net_partial` = falta al menos uno. */
     profitCompleteness: "net_full" | "net_partial" | null;
     breakEvenPrice: number | null;
@@ -560,6 +564,9 @@ function pickShippingShortSignal(
   if (mode === "retire" && freeShipping === true) {
     return { msg: "No soporta envío gratis", action: "Quitar envío gratis o subir precio" };
   }
+  if (breakdown.shipping.source === "missing_reputation") {
+    return { msg: "Falta reputación ML sincronizada", action: "Sincronizar cuenta" };
+  }
   if (breakdown.shipping.source === "missing_table") {
     return { msg: "Tabla de envío no disponible", action: "Cargar tabla para esta reputación" };
   }
@@ -567,8 +574,13 @@ function pickShippingShortSignal(
     return { msg: "Falta peso del paquete", action: "Completar peso para estimar envío" };
   }
   if (
+    breakdown.missing.some((m) => String(m).includes("ml_reputation_sync"))
+  ) {
+    return { msg: "Falta reputación ML sincronizada", action: "Sincronizar cuenta" };
+  }
+  if (
     accountReputationState !== "no_reputation" &&
-    breakdown.missing.some((m) => m === "shipping_ml_reputation" || m.includes("ml_reputation"))
+    breakdown.missing.some((m) => m === "shipping_ml_reputation" || (String(m).includes("ml_reputation") && !String(m).includes("sync")))
   ) {
     return { msg: "Falta reputación ML", action: "Sincronizar reputación de cuenta" };
   }
@@ -580,6 +592,16 @@ function pickShippingShortSignal(
  * Read-only on orchestration outputs — no calculator / shipping / API calls.
  */
 export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusinessDecision {
+  if (state.inputs.productCost === null) {
+    return {
+      type: "configure_cost",
+      priority: "critical",
+      message: "Falta costo de producto",
+      action: "Configurar",
+      impactAmount: null
+    };
+  }
+
   if (state.sync.calculationStatus === "missing_inputs") {
     return {
       type: "complete_shipping_data",
@@ -639,11 +661,30 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
   const freeTrue = state.ml.freeShipping === true;
   const missWeight = shipMiss.includes("package_weight");
   const missPriceBand = shipMiss.includes("price");
-  const missReputationGroup = shipMiss.includes("ml_reputation");
+  const missRepSync = shipMiss.includes("ml_reputation_sync");
   const shippingIncompleteForFree = freeTrue && (!ship || ship.completeness !== "complete");
 
-  // [3] SHIPPING MODEL VALIDATION (ML compliance) — datos tabla solo si envío gratis
-  if (shippingIncompleteForFree || (freeTrue && (missWeight || missPriceBand || missReputationGroup))) {
+  if (freeTrue && ship?.source === "missing_reputation") {
+    return {
+      type: "complete_shipping_data",
+      priority: "high",
+      message: "Falta reputación ML de cuenta",
+      action: "Sincronizar cuenta",
+      impactAmount: null
+    };
+  }
+
+  if (freeTrue && ship?.source === "missing_table") {
+    return {
+      type: "fix_shipping",
+      priority: "high",
+      message: "Tabla envío AR no disponible para esta reputación",
+      action: "Revisar envío gratis",
+      impactAmount: null
+    };
+  }
+
+  if (shippingIncompleteForFree || (freeTrue && (missWeight || missPriceBand || missRepSync))) {
     return {
       type: "fix_shipping",
       priority: "high",
@@ -808,7 +849,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     reputation: sellerRep,
     shippingMode: shipMode,
     freeShipping: input.ml.freeShipping ?? null,
-    condition: itemCondition
+    condition: itemCondition,
+    accountReputationSynced: Boolean(acc?.sellerReputationSyncedAt && String(acc.sellerReputationSyncedAt).trim() !== "")
   });
 
   const currentPrice = normalizeCurrentPrice(input.ml.currentPrice ?? null);
@@ -900,6 +942,19 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   if (productCost === null) {
     realProfit = null;
     realMarginPct = null;
+    if (currentPrice !== null && Number.isFinite(currentPrice) && currentPrice > 0) {
+      financialBreakdown = calculateFinancialCostBreakdown({
+        salePrice: currentPrice,
+        productCost: null,
+        logistica,
+        reputacion: rep,
+        publicidad_pct: input.inputs.publicidadPct ?? null,
+        financialSettings: mergedFinancial,
+        skuAdditionalFixedCost: additionalCosts,
+        shipping: shippingOmit(),
+        rowInternalLogisticsCost
+      });
+    }
   } else if (currentPrice === null || !Number.isFinite(productCost) || productCost < 0) {
     realProfit = null;
     realMarginPct = null;
@@ -1051,6 +1106,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       realAdsAmount,
       realProductCostApplied,
       financialBreakdown,
+      cashInAmount: financialBreakdown?.cashInAmount ?? null,
       profitCompleteness,
       breakEvenPrice,
       priceDelta,

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PricingEngineTable } from "@/components/pricing/pricing-engine-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings.server";
+import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { mapPricingSkusToMlLinks, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
@@ -11,6 +12,8 @@ export default async function OpsPricingPage() {
   if (!accountResult.success || !accountResult.data) {
     return <EmptyState context="cuenta" />;
   }
+
+  await ensurePricingSkuShellsForAccount(accountResult.data.id);
 
   const [skusResult, financialSettings] = await Promise.all([
     listPricingSkus(accountResult.data.id),
