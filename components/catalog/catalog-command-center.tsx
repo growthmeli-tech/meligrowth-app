@@ -43,8 +43,7 @@ import { catalogDetailPanelOrderedIds } from "@/lib/data-v2/catalog-detail-panel
 import {
   CatalogGridRowMemo,
   CATALOG_GRID_ROW_CLASS,
-  CATALOG_MAIN_ROW_HEIGHT,
-  type CatalogGridRowAction
+  CATALOG_MAIN_ROW_HEIGHT
 } from "@/components/catalog/catalog-grid-row";
 import { cn } from "@/lib/utils";
 import {
@@ -56,7 +55,9 @@ import {
   type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
-import { canTriggerMlPricePush, toCashInDisplay } from "@/lib/pricing/financial-display";
+import { toCashInDisplay, toOptimalPriceDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
+import { resolveSellerShippingCostStatus } from "@/lib/pricing/operability-resolver";
+import { buildRowActionModel } from "@/lib/pricing/row-action-model";
 import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-argentina";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
 
@@ -128,37 +129,6 @@ function isCriticoRow(row: UnifiedCatalogItem): boolean {
     row.stock_status === "critico" ||
     (row.status === "active" && row.stock === 0)
   );
-}
-
-function resolveRowAction(row: UnifiedCatalogItem):
-  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" | "completar" }
-  | { kind: "sin_stock" }
-  | { kind: "config_cost" }
-  | { kind: "edit_cost" }
-  | { kind: "none" } {
-  const d = row.decisionState.decision;
-  if (!row.tiene_costo) {
-    return { kind: "config_cost" };
-  }
-  if (row.tiene_costo && d.profitabilityStatus === "loss") {
-    return { kind: "calc", reason: "pierde" };
-  }
-  if (row.status === "active" && row.stock === 0) {
-    return { kind: "sin_stock" };
-  }
-  if (row.decisionState.computed.profitCompleteness !== "net_full") {
-    return { kind: "calc", reason: "completar" };
-  }
-  if (row.tiene_costo && (d.profitabilityStatus === "risk" || d.profitabilityStatus === "low_margin") && row.price_ml !== null) {
-    return { kind: "calc", reason: "optimizar" };
-  }
-  if (row.precio_vs_objetivo === "bajo") {
-    return { kind: "calc", reason: "subir" };
-  }
-  if (row.tiene_costo) {
-    return { kind: "edit_cost" };
-  }
-  return { kind: "none" };
 }
 
 function margenObjDefaultForSimulator(row: UnifiedCatalogItem): number | null {
@@ -534,8 +504,34 @@ export function CatalogCommandCenter({
       const mlKey = `${row.price_ml ?? "∅"}\x1f${row.stock ?? "∅"}\x1f${row.precio_calculado ?? "∅"}\x1f${row.decisionState.decision.profitabilityStatus}\x1f${row.decisionState.decision.stockStatus}\x1f${shipKey}`;
       const fsFp = sellerFinancialSettingsFingerprint(financialSettings);
       const rowKey = `${row.pricing_sku_id ?? ""}\x1f${row.last_synced_at}\x1f${fsFp}`;
-      const ra = resolveRowAction(row) as CatalogGridRowAction;
-      const rowActionKey = ra.kind === "calc" ? `calc:${ra.reason}` : ra.kind;
+      const ds = row.decisionState;
+      const rowAction = buildRowActionModel({
+        itemId: row.item_id,
+        pricingSkuId: row.pricing_sku_id,
+        currentPrice: row.price_ml,
+        recommendedPrice: row.precio_calculado,
+        productCost: ds.inputs.productCost ?? row.costo ?? null,
+        freeShipping: ds.ml.freeShipping,
+        operabilityStatus: row.dataTrust.operabilityStatus,
+        profitDisplay: toProfitDisplay(ds.computed),
+        cashInDisplay: toCashInDisplay({
+          computed: ds.computed,
+          currentPrice: row.price_ml,
+          freeShipping: ds.ml.freeShipping
+        }),
+        optimalPriceDisplay: toOptimalPriceDisplay({
+          optimalPrice: row.precio_calculado,
+          calculationStatus: ds.sync.calculationStatus,
+          financialCompleteness: ds.computed.financialCompleteness
+        }),
+        sellerShippingCostStatus: resolveSellerShippingCostStatus({
+          ...ds,
+          inputs: { ...ds.inputs, productCost: ds.inputs.productCost ?? row.costo ?? null }
+        }),
+        financialMissing: ds.computed.financialBreakdown?.missing ?? [],
+        financialCompleteness: ds.computed.financialCompleteness
+      });
+      const rowActionKey = `${rowAction.primaryAction}\x1f${rowAction.sublabel ?? ""}\x1f${rowAction.label}`;
       return (
         <CatalogGridRowMemo
           style={style}
@@ -547,7 +543,7 @@ export function CatalogCommandCenter({
           error={rowHints[rowId] ?? null}
           row={row}
           rowActionKey={rowActionKey}
-          rowAction={ra}
+          rowAction={rowAction}
           expanded={expanded === rowId}
           selected={selected.has(rowId)}
           pending={pending}
@@ -705,11 +701,6 @@ export function CatalogCommandCenter({
             setRowHints((prev) => ({ ...prev, [rowId]: null }));
             setRowSaveState((prev) => ({ ...prev, [rowId]: "idle" }));
             setInlineCostItemId(null);
-          }}
-          onOpenInlineCalc={() => {
-            setInlineCalcItemId(rowId);
-            setInlineCostItemId(null);
-            setMlPushItemId(null);
           }}
           onOpenMlPushRow={(id) => {
             setMlPushItemId(id);
@@ -1117,6 +1108,28 @@ function CatalogRows({
     currentPrice: row.price_ml,
     freeShipping: ds.ml.freeShipping
   });
+  const rowAction = buildRowActionModel({
+    itemId: row.item_id,
+    pricingSkuId: row.pricing_sku_id,
+    currentPrice: row.price_ml,
+    recommendedPrice: row.precio_calculado,
+    productCost: ds.inputs.productCost ?? row.costo ?? null,
+    freeShipping: ds.ml.freeShipping,
+    operabilityStatus: row.dataTrust.operabilityStatus,
+    profitDisplay: toProfitDisplay(ds.computed),
+    cashInDisplay,
+    optimalPriceDisplay: toOptimalPriceDisplay({
+      optimalPrice: row.precio_calculado,
+      calculationStatus: ds.sync.calculationStatus,
+      financialCompleteness: ds.computed.financialCompleteness
+    }),
+    sellerShippingCostStatus: resolveSellerShippingCostStatus({
+      ...ds,
+      inputs: { ...ds.inputs, productCost: ds.inputs.productCost ?? row.costo ?? null }
+    }),
+    financialMissing: ds.computed.financialBreakdown?.missing ?? [],
+    financialCompleteness: ds.computed.financialCompleteness
+  });
   const rep = coerceReputacion(row.reputacion);
 
   const dailySales = ds.computed.velocity30d;
@@ -1127,19 +1140,7 @@ function CatalogRows({
       ? Math.ceil(ds.computed.stockGap)
       : 0;
 
-  const canPushMlPrice =
-    row.status === "active" &&
-    row.precio_calculado !== null &&
-    row.price_ml !== null &&
-    Number.isFinite(row.precio_calculado) &&
-    Number.isFinite(row.price_ml) &&
-    canTriggerMlPricePush({
-      decision: ds,
-      cashInDisplay,
-      operabilityStatus: row.dataTrust.operabilityStatus,
-      optimalPrice: row.precio_calculado
-    }) &&
-    Math.round(row.precio_calculado) !== Math.round(row.price_ml);
+  const canPushMlPrice = rowAction.primaryAction === "push_ml_price" && rowAction.canPushMlPrice;
 
   const comisionPctLabel = `${(mlComisionRate(rep) * 100).toFixed(2)}%`;
 

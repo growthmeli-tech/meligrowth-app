@@ -141,7 +141,7 @@ export function computeOperabilityStatus(
 ): OperabilityStatus {
   if (!completeness.hasCost || !completeness.hasPrice) return "blocked";
   if (effectiveFreeShipping === null) return "partial";
-  if (!completeness.hasWeight) return "partial";
+  if (effectiveFreeShipping === true && !completeness.hasWeight) return "partial";
   return "operable";
 }
 

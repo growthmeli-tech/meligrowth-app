@@ -5,7 +5,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { cn } from "@/lib/utils";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
-import { canTriggerMlPricePush, toCashInDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
+import { toProfitDisplay } from "@/lib/pricing/financial-display";
+import type { RowActionModel } from "@/lib/pricing/row-action-model";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -26,13 +27,6 @@ function isCriticoRow(row: UnifiedCatalogItem): boolean {
   );
 }
 
-export type CatalogGridRowAction =
-  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" | "completar" }
-  | { kind: "sin_stock" }
-  | { kind: "config_cost" }
-  | { kind: "edit_cost" }
-  | { kind: "none" };
-
 export type CatalogGridRowOwnProps = {
   style: CSSProperties;
   rowId: string;
@@ -43,7 +37,7 @@ export type CatalogGridRowOwnProps = {
   error: string | null;
   row: UnifiedCatalogItem;
   rowActionKey: string;
-  rowAction: CatalogGridRowAction;
+  rowAction: RowActionModel;
   expanded: boolean;
   selected: boolean;
   pending: boolean;
@@ -59,7 +53,6 @@ export type CatalogGridRowOwnProps = {
   onInlineCostFieldChange: (patch: Partial<{ costo: string; logistica: string; margen: string; pub: string }>) => void;
   onInlineCostSave: () => void;
   onInlineCostCancel: () => void;
-  onOpenInlineCalc: () => void;
   onOpenMlPushRow: (itemId: string) => void;
 };
 
@@ -110,7 +103,6 @@ function CatalogGridRowInner({
   onInlineCostFieldChange,
   onInlineCostSave,
   onInlineCostCancel,
-  onOpenInlineCalc,
   onOpenMlPushRow
 }: CatalogGridRowOwnProps) {
   const dbg = useRef(0);
@@ -150,46 +142,6 @@ function CatalogGridRowInner({
   const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-50 font-semibold text-orange-950" : "";
 
   const stockSt = ds.decision.stockStatus;
-  const cashInDisplay = toCashInDisplay({
-    computed: ds.computed,
-    currentPrice: row.price_ml,
-    freeShipping: ds.ml.freeShipping
-  });
-
-  const canPushMlPrice =
-    row.status === "active" &&
-    row.precio_calculado !== null &&
-    row.price_ml !== null &&
-    Number.isFinite(row.precio_calculado) &&
-    Number.isFinite(row.price_ml) &&
-    canTriggerMlPricePush({
-      decision: ds,
-      cashInDisplay,
-      operabilityStatus: row.dataTrust.operabilityStatus,
-      optimalPrice: row.precio_calculado
-    }) &&
-    Math.round(row.precio_calculado) !== Math.round(row.price_ml);
-  const missingFinancial = ds.computed.financialBreakdown?.missing ?? [];
-  const mlPushBlockedReason =
-    !row.tiene_costo
-      ? "Falta costo"
-      : ds.computed.profitCompleteness !== "net_full"
-        ? missingFinancial.some((x) => x.toLowerCase().includes("iibb"))
-          ? "Falta IIBB"
-          : missingFinancial.some((x) => x.toLowerCase().includes("shipping"))
-            ? "Falta envío completo"
-            : "Cálculo parcial"
-        : cashInDisplay.kind !== "real"
-          ? cashInDisplay.kind === "estimated"
-            ? "Cálculo parcial"
-            : "Falta envío completo"
-          : row.dataTrust.operabilityStatus !== "operable"
-            ? "Fila no operable"
-            : row.precio_calculado === null || !Number.isFinite(row.precio_calculado)
-              ? "Falta precio óptimo"
-              : row.price_ml === null || !Number.isFinite(row.price_ml)
-                ? "Sin precio ML actual"
-                : "Precio ya actualizado";
 
   const stockBadgeClass =
     row.status === "active" && row.stock === 0
@@ -257,56 +209,39 @@ function CatalogGridRowInner({
       </div>
       <div role="cell" className="min-h-0 min-w-0 p-2 text-xs">
         <div className="flex flex-col gap-1">
-          {rowAction.kind === "config_cost" ? (
+          {rowAction.primaryAction === "configure_cost" ? (
             <button
               type="button"
               className="text-left font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
               onClick={onToggleInlineCost}
             >
-              Configurar costo
+              {rowAction.label}
             </button>
-          ) : rowAction.kind === "edit_cost" ? (
+          ) : rowAction.primaryAction === "edit_cost" ? (
             <button
               type="button"
               className="text-left font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
               onClick={onToggleInlineCost}
             >
-              Editar
+              {rowAction.label}
             </button>
-          ) : rowAction.kind === "sin_stock" ? (
-            <span className="font-semibold text-amber-900">⚠ Sin stock</span>
-          ) : rowAction.kind === "calc" ? (
-            <button
-              type="button"
-              className={cn(
-                "text-left font-semibold underline underline-offset-2",
-                rowAction.reason === "pierde" ? "text-red-800 decoration-red-800" : "text-[#1A1A1A] decoration-[#1A1A1A]"
-              )}
-              onClick={onOpenInlineCalc}
-            >
-              {rowAction.reason === "pierde"
-                ? "🔴 Pierde dinero"
-                : rowAction.reason === "optimizar"
-                  ? "📈 Optimizar precio"
-                  : rowAction.reason === "completar"
-                    ? "Completar datos"
-                    : "↑ Subir precio"}
-            </button>
+          ) : rowAction.primaryAction === "complete_data" ? (
+            <span className="text-left font-semibold text-[#1A1A1A]">{rowAction.label}</span>
           ) : (
-            <span className="text-[#6B6B6B]"> </span>
+            <span className="text-[#6B6B6B]">{rowAction.label}</span>
           )}
 
-          {canPushMlPrice && row.precio_calculado !== null && row.price_ml !== null ? (
+          {rowAction.primaryAction === "push_ml_price" && rowAction.canPushMlPrice && rowAction.pushMlPricePayload ? (
             <button
               type="button"
               disabled={pending}
               className="mt-1 rounded-lg border border-[#1A1A1A] bg-[#FFD600] px-2 py-1 text-left font-semibold text-[#1A1A1A] disabled:opacity-50"
               onClick={() => onOpenMlPushRow(row.item_id)}
             >
-              Actualizar ML: {ars.format(row.price_ml)} → {ars.format(row.precio_calculado)}
+              {rowAction.pushMlPriceLabel}
             </button>
           ) : (
-            <span className="mt-1 text-[10px] font-medium text-[#6B6B6B]">{mlPushBlockedReason}</span>
+            <span className="mt-1 text-[10px] font-medium text-[#6B6B6B]">{rowAction.sublabel ?? rowAction.blockedReason ?? "Sin acción"}</span>
           )}
           {inlineCostOpen ? (
             <div className="mt-1 space-y-1 rounded border border-[#E8E8E2] bg-[#FAFAF8] p-2">

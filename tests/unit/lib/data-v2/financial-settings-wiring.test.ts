@@ -45,7 +45,7 @@ describe("account financial settings wiring", () => {
     resetDecisionStateCacheForTests();
   });
 
-  it("null account settings keeps calculation partial when cost exists (IIBB/tax missing)", () => {
+  it("null account settings keeps calculation partial and unavailable profit when cost exists", () => {
     const ml = {
       price: 30_000,
       available_quantity: 12,
@@ -59,7 +59,8 @@ describe("account financial settings wiring", () => {
     };
     const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}), null);
     expect(d.decisionState.sync.calculationStatus).toBe("partial");
-    expect(d.decisionState.computed.profitCompleteness).toBe("net_partial");
+    expect(d.decisionState.computed.profitCompleteness).toBeNull();
+    expect(d.ganancia_real).toBeNull();
   });
 
   it("explicit iibbPct = 0 and taxPct = 0 yields net_full", () => {
@@ -97,7 +98,8 @@ describe("account financial settings wiring", () => {
       item_id: "MLA-TAX",
       sold_quantity: 0,
       ventas_30d: 2,
-      title: "T"
+      title: "T",
+      free_shipping: false
     };
     const zero = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}), {
       iibbPct: 0,

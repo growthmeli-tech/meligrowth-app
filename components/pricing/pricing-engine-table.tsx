@@ -28,7 +28,9 @@ import {
 import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 import { formatMlLogisticsPublicationLabel } from "@/lib/pricing/ml-official-data-contract";
-import { canTriggerMlPricePush, toCashInDisplay, toOptimalPriceDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
+import { toCashInDisplay, toOptimalPriceDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
+import { buildPricingAutomationCandidate, resolveRowOperability, resolveSellerShippingCostStatus } from "@/lib/pricing/operability-resolver";
+import { buildRowActionModel } from "@/lib/pricing/row-action-model";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
@@ -327,6 +329,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
               <th className="p-2">Margen</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Precio óptimo</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Ganancia real/estimada · Margen real/estimado</th>
+              <th className="p-2">Envio ML</th>
               <th className="p-2">ML</th>
             </tr>
           </thead>
@@ -448,14 +451,6 @@ const PricingEngineRow = memo(function PricingEngineRow({
     decision.computed.optimalPrice !== null && Number.isFinite(decision.computed.optimalPrice)
       ? Math.round(decision.computed.optimalPrice)
       : null;
-  const showPush = Boolean(
-    hasMlPrice &&
-      optimal !== null &&
-      mlLink?.item_id &&
-      mlLink.operabilityStatus !== "blocked" &&
-      Math.round(priceMl as number) !== optimal
-  );
-
   const update = (patch: Partial<PricingDraft>) => {
     patchRowDraft(row.id, patch);
   };
@@ -466,41 +461,42 @@ const PricingEngineRow = memo(function PricingEngineRow({
     currentPrice: hasMlPrice ? (priceMl as number) : null,
     freeShipping: decision.ml.freeShipping
   });
+  const decisionForReadiness = {
+    ...decision,
+    inputs: {
+      ...decision.inputs,
+      productCost: decision.inputs?.productCost ?? d.costo ?? null,
+      targetMarginPct: decision.inputs?.targetMarginPct ?? d.margen_pct
+    }
+  };
   const optimalDisplay = toOptimalPriceDisplay({
     optimalPrice: optimal,
-    calculationStatus: decision.sync.calculationStatus
+    calculationStatus: decision.sync.calculationStatus,
+    financialCompleteness: decision.computed.financialCompleteness
   });
-  const canPushMl =
-    showPush &&
-    canTriggerMlPricePush({
-      decision,
-      cashInDisplay,
-      operabilityStatus: mlLink?.operabilityStatus,
-      optimalPrice: optimal
-    });
-  const missingFinancial = decision.computed.financialBreakdown?.missing ?? [];
-  const mlPushBlockedReason =
-    !row.costo || row.costo <= 0
-      ? "Falta costo"
-      : decision.computed.profitCompleteness !== "net_full"
-        ? missingFinancial.some((x) => x.toLowerCase().includes("iibb"))
-          ? "Falta IIBB"
-          : missingFinancial.some((x) => x.toLowerCase().includes("shipping"))
-            ? "Falta envío completo"
-            : "Cálculo parcial"
-        : cashInDisplay.kind !== "real"
-          ? cashInDisplay.kind === "estimated"
-            ? "Cálculo parcial"
-            : "Falta envío completo"
-          : mlLink?.operabilityStatus !== "operable"
-            ? "Fila no operable"
-            : !mlLink?.item_id
-              ? "Falta item ML"
-              : optimal === null
-                ? "Falta precio óptimo"
-                : !hasMlPrice
-                  ? "Falta precio ML"
-                  : "Precio ya actualizado";
+  const shippingStatus = resolveSellerShippingCostStatus(decision);
+  const operability = resolveRowOperability(decisionForReadiness);
+  const rowAction = buildRowActionModel({
+    itemId: mlLink?.item_id ?? null,
+    pricingSkuId: row.id,
+    currentPrice: hasMlPrice ? (priceMl as number) : null,
+    recommendedPrice: optimal,
+    productCost: decisionForReadiness.inputs.productCost ?? null,
+    freeShipping: decision.ml.freeShipping,
+    operabilityStatus: operability.status,
+    profitDisplay,
+    cashInDisplay,
+    optimalPriceDisplay: optimalDisplay,
+    sellerShippingCostStatus: shippingStatus,
+    financialMissing: decision.computed.financialBreakdown?.missing ?? [],
+    financialCompleteness: decision.computed.financialCompleteness
+  });
+  const automationCandidate = buildPricingAutomationCandidate({
+    itemId: mlLink?.item_id ?? row.sku ?? row.id,
+    currentPrice: hasMlPrice ? (priceMl as number) : null,
+    recommendedPrice: optimal,
+    decision: decisionForReadiness
+  });
   const ganObj = decision.computed.optimalGananciaUnit;
   const margObj = decision.inputs.targetMarginPct;
 
@@ -737,8 +733,24 @@ const PricingEngineRow = memo(function PricingEngineRow({
         {optimalSubtitle}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 text-sm">{resultadoBlock}</td>
+      <td className="p-2 text-[10px] font-semibold text-[#1A1A1A]">
+        {shippingStatus.kind === "applies"
+          ? `aplica (${ars.format(shippingStatus.amount)})`
+          : shippingStatus.kind === "not_applicable"
+            ? "no aplica"
+            : shippingStatus.kind === "missing_weight"
+              ? "falta peso"
+              : shippingStatus.kind === "missing_reputation"
+                ? "falta reputacion"
+                : shippingStatus.kind === "missing_table"
+                  ? "falta tabla"
+                  : "desconocido"}
+      </td>
       <td className="p-2 align-top text-xs">
-        {decision.businessDecision.type === "configure_cost" ? (
+        <p className="mb-1 text-[10px] font-medium text-[#6B6B6B]">
+          Automatizacion: {rowAction.automationReady ? "lista" : automationCandidate.operabilityStatus}
+        </p>
+        {rowAction.primaryAction === "configure_cost" ? (
           <button
             type="button"
             className="font-semibold text-[#1A1A1A] underline underline-offset-2"
@@ -748,9 +760,17 @@ const PricingEngineRow = memo(function PricingEngineRow({
               onRequestEditField(row.id, "costo");
             }}
           >
-            Configurar costo
+            {rowAction.label}
           </button>
-        ) : canPushMl && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
+        ) : rowAction.primaryAction === "edit_cost" ? (
+          <button
+            type="button"
+            className="font-semibold text-[#1A1A1A] underline underline-offset-2"
+            onClick={() => onRequestEditField(row.id, "costo")}
+          >
+            {rowAction.label}
+          </button>
+        ) : rowAction.primaryAction === "push_ml_price" && rowAction.canPushMlPrice && rowAction.pushMlPricePayload && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
           <div className="space-y-2">
             {!pushOpen ? (
               <button
@@ -762,7 +782,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
                   setPushOpen(true);
                 }}
               >
-                Actualizar ML: {ars.format(priceMl)} → {ars.format(optimal)}
+                {rowAction.pushMlPriceLabel}
               </button>
             ) : (
               <div className="space-y-2 rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-2">
@@ -805,8 +825,10 @@ const PricingEngineRow = memo(function PricingEngineRow({
               </div>
             )}
           </div>
+        ) : rowAction.primaryAction === "complete_data" ? (
+          <span className="text-[#6B6B6B]">{rowAction.sublabel ?? rowAction.blockedReason ?? rowAction.label}</span>
         ) : (
-          <span className="text-[#6B6B6B]">{mlPushBlockedReason}</span>
+          <span className="text-[#6B6B6B]">{rowAction.label}</span>
         )}
       </td>
     </tr>

@@ -40,10 +40,18 @@ function normalizeMissing(computed: Computed): string[] {
 }
 
 function isPartialFinancial(computed: Computed): boolean {
-  return computed.profitCompleteness !== "net_full";
+  return computed.financialCompleteness === "partial";
 }
 
 export function toProfitDisplay(computed: Computed): ProfitDisplay {
+  if (computed.cashInCompleteness === "invalid" || computed.financialCompleteness === "invalid") {
+    return {
+      kind: "unavailable",
+      amount: null,
+      marginPct: null,
+      reason: "Faltan datos"
+    };
+  }
   const amount = computed.realProfit;
   const marginPct = computed.realMarginPct;
   if (amount !== null && Number.isFinite(amount)) {
@@ -78,7 +86,7 @@ export function toCashInDisplay(input: {
 }): CashInDisplay {
   const amount = input.computed.cashInAmount;
   if (amount !== null && Number.isFinite(amount)) {
-    if (isPartialFinancial(input.computed)) {
+    if (input.computed.cashInCompleteness === "partial" || isPartialFinancial(input.computed)) {
       return { kind: "estimated", amount, missing: normalizeMissing(input.computed) };
     }
     return { kind: "real", amount };
@@ -93,7 +101,11 @@ export function toCashInDisplay(input: {
 export function toOptimalPriceDisplay(input: {
   optimalPrice: number | null;
   calculationStatus: SkuDecisionState["sync"]["calculationStatus"];
+  financialCompleteness?: SkuDecisionState["computed"]["financialCompleteness"];
 }): OptimalPriceDisplay {
+  if (input.financialCompleteness && input.financialCompleteness !== "complete") {
+    return { kind: "unavailable", subtitle: "Faltan datos" };
+  }
   if (input.optimalPrice !== null && Number.isFinite(input.optimalPrice)) {
     if (input.calculationStatus === "partial") {
       return { kind: "estimated", amount: input.optimalPrice, subtitle: "Cálculo parcial" };

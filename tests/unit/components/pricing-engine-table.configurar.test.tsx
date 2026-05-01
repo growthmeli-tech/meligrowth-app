@@ -53,6 +53,8 @@ vi.mock("@/lib/pricing/decision-state-cache", () => ({
         realProfit: missingCost ? null : 700,
         realMarginPct: missingCost ? null : 0.12,
         cashInAmount: 17000,
+        financialCompleteness: partial ? "partial" : "complete",
+        cashInCompleteness: partial ? "partial" : "complete",
         profitCompleteness: partial ? "net_partial" : "net_full",
         financialBreakdown: partial ? { missing: ["iibb"] } : { missing: [] }
       },
@@ -126,7 +128,7 @@ describe("PricingEngineTable - Configurar flow", () => {
     );
 
     expect(screen.getAllByText(/\u2248/).length).toBeGreaterThan(0);
-    expect(screen.getByText("Falta IIBB", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("Falta configuración fiscal")).toBeTruthy();
   });
 
   it("click Configurar costo abre editor de costo y Enter guarda cambios", async () => {
@@ -188,5 +190,28 @@ describe("PricingEngineTable - Configurar flow", () => {
       />
     );
     expect(screen.getByRole("button", { name: /Actualizar ML:/ })).toBeTruthy();
+  });
+
+  it("does not render generic 'Fila no operable' fallback", () => {
+    render(
+      <PricingEngineTable
+        rows={[{ ...(rowWithoutCost() as Record<string, unknown>), id: "sku-4", costo: 10000 } as never]}
+        mlLinks={{
+          "sku-4": {
+            item_id: "MLA4",
+            price_ml: 20000,
+            stock: 10,
+            free_shipping: null,
+            logistic_type: "self_service",
+            shipping_mode: "me2",
+            permalink: "https://example.com/mla4",
+            operabilityStatus: "partial"
+          } as never
+        }}
+        mlAccountId="acc-1"
+        initialFinancialSettings={null}
+      />
+    );
+    expect(screen.queryByText("Fila no operable")).toBeNull();
   });
 });

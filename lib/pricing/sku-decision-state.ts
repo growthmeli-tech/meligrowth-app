@@ -74,6 +74,8 @@ export type SkuDecisionStateBase = {
   };
 
   computed: {
+    financialCompleteness: "complete" | "partial" | "invalid";
+    cashInCompleteness: "complete" | "partial" | "invalid";
     optimalPrice: number | null;
     /** Ganancia unitaria al precio óptimo (mismo `calcSellingPrice` que fija optimalPrice). */
     optimalGananciaUnit: number | null;
@@ -221,22 +223,8 @@ function mergeSellerFinancialSettings(
 
 function netProfitCompleteFromBreakdown(b: FinancialCostBreakdown | null, freeShipping: boolean | null): boolean {
   if (!b) return false;
-  const fiscalOk = !b.missing.includes("iibb") && !b.missing.includes("tax");
-  const logisticsOk =
-    b.logisticsOperating.completeness === "complete" || b.logisticsOperating.source === "retire_no_cost";
-  if (!logisticsOk) return false;
-  if (freeShipping === false) {
-    return fiscalOk;
-  }
-  if (freeShipping === null) {
-    return false;
-  }
-  return (
-    fiscalOk &&
-    b.shipping.completeness === "complete" &&
-    b.shipping.sellerShippingCost !== null &&
-    Number.isFinite(b.shipping.sellerShippingCost)
-  );
+  if (freeShipping === null) return false;
+  return b.financialCompleteness === "complete" && b.cashInCompleteness === "complete";
 }
 
 function normalizeCurrentPrice(v: number | null | undefined): number | null {
@@ -961,6 +949,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   let realProductCostApplied: number | null = null;
   let financialBreakdown: FinancialCostBreakdown | null = null;
   let profitCompleteness: SkuDecisionState["computed"]["profitCompleteness"] = null;
+  let financialCompleteness: SkuDecisionState["computed"]["financialCompleteness"] = "invalid";
+  let cashInCompleteness: SkuDecisionState["computed"]["cashInCompleteness"] = "invalid";
 
   if (productCost === null) {
     realProfit = null;
@@ -977,6 +967,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
         shipping: shippingOmit(),
         rowInternalLogisticsCost
       });
+      financialCompleteness = financialBreakdown.financialCompleteness;
+      cashInCompleteness = financialBreakdown.cashInCompleteness;
     }
   } else if (currentPrice === null || !Number.isFinite(productCost) || productCost < 0) {
     realProfit = null;
@@ -996,9 +988,14 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       rowInternalLogisticsCost
     });
     financialBreakdown = rp.breakdown;
-    profitCompleteness = netProfitCompleteFromBreakdown(rp.breakdown, input.ml.freeShipping ?? null)
-      ? "net_full"
-      : "net_partial";
+    financialCompleteness = rp.breakdown.financialCompleteness;
+    cashInCompleteness = rp.breakdown.cashInCompleteness;
+    profitCompleteness =
+      cashInCompleteness === "complete"
+        ? "net_full"
+        : cashInCompleteness === "partial"
+          ? "net_partial"
+          : null;
     if (
       calculationStatus === "valid" &&
       (rp.breakdown.missing.includes("iibb") ||
@@ -1008,13 +1005,16 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     ) {
       calculationStatus = "partial";
     }
-    if (rp.converged && Number.isFinite(rp.ganancia_real) && Number.isFinite(rp.margen_real)) {
+    const cashInAmount = rp.breakdown.cashInAmount;
+    const hasCashIn = cashInAmount !== null && Number.isFinite(cashInAmount);
+    if (rp.converged && Number.isFinite(rp.ganancia_real) && Number.isFinite(rp.margen_real) && hasCashIn) {
       realProfit = rp.breakdown.netProfit;
       realMarginPct = rp.breakdown.netMarginPct;
       realComisionAmount = Number.isFinite(rp.comision_$) ? rp.comision_$ : null;
       realShippingAmount = Number.isFinite(rp.envio_$) ? rp.envio_$ : null;
       realAdsAmount = Number.isFinite(rp.publicidad_$) ? rp.publicidad_$ : null;
       realProductCostApplied = rp.breakdown.productCost;
+      profitCompleteness = cashInCompleteness === "complete" ? "net_full" : "net_partial";
     } else {
       realProfit = null;
       realMarginPct = null;
@@ -1028,6 +1028,13 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const optimalGananciaUnit =
     sellResult && sellResult.converged && Number.isFinite(sellResult.ganancia_unit) ? sellResult.ganancia_unit : null;
   const optimalRoi = sellResult && sellResult.converged && Number.isFinite(sellResult.roi) ? sellResult.roi : null;
+
+  if (financialCompleteness !== "complete") {
+    optimalPrice = null;
+    if (calculationStatus === "error" && financialCompleteness !== "invalid") {
+      calculationStatus = "partial";
+    }
+  }
 
   const breakEvenPrice =
     productCost !== null && productCost > 0
@@ -1114,6 +1121,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     ml,
     inputs: inputsOut,
     computed: {
+      financialCompleteness,
+      cashInCompleteness,
       optimalPrice,
       optimalGananciaUnit,
       optimalRoi,

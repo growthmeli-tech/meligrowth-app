@@ -44,6 +44,8 @@ function base(over: Partial<SkuDecisionStateBase> = {}): SkuDecisionStateBase {
       additionalCosts: null
     },
     computed: {
+      financialCompleteness: "complete",
+      cashInCompleteness: "complete",
       optimalPrice: 12_000,
       optimalGananciaUnit: 100,
       optimalRoi: 0.1,
@@ -116,6 +118,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
 
   it("[2] fiscal missing → configure_fiscal", () => {
     const b = {
+      financialCompleteness: "partial" as const,
+      cashInCompleteness: "partial" as const,
       productCost: 3000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,
@@ -174,6 +178,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: []
     };
     const b = {
+      financialCompleteness: "partial" as const,
+      cashInCompleteness: "partial" as const,
       productCost: 3000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,
@@ -220,6 +226,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: [] as string[]
     };
     const b = {
+      financialCompleteness: "complete" as const,
+      cashInCompleteness: "complete" as const,
       productCost: 8000,
       mlFeeAmount: 500,
       mlFeePct: 0.1,
@@ -273,6 +281,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: [] as string[]
     };
     const b = {
+      financialCompleteness: "complete" as const,
+      cashInCompleteness: "complete" as const,
       productCost: 9000,
       mlFeeAmount: 500,
       mlFeePct: 0.1,
@@ -337,6 +347,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: []
     };
     const b = {
+      financialCompleteness: "partial" as const,
+      cashInCompleteness: "partial" as const,
       productCost: 3000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,
@@ -397,6 +409,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: [] as string[]
     };
     const b = {
+      financialCompleteness: "partial" as const,
+      cashInCompleteness: "partial" as const,
       productCost: 3000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,
@@ -448,6 +462,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       reasons: []
     };
     const b = {
+      financialCompleteness: "complete" as const,
+      cashInCompleteness: "complete" as const,
       productCost: 1000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,
@@ -504,6 +520,8 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
 
   it("prioritizes missing fiscal over optimize price", () => {
     const b = {
+      financialCompleteness: "partial" as const,
+      cashInCompleteness: "partial" as const,
       productCost: 3000,
       mlFeeAmount: 100,
       mlFeePct: 0.1,

@@ -107,6 +107,19 @@ describe("operability + confidence (deterministic)", () => {
     expect(conf.level).toBe("high");
   });
 
+  it("freeShipping=false does not require package weight", () => {
+    const c = buildDataCompleteness({
+      priceMl: 100,
+      productCost: 10,
+      stock: 1,
+      mlFreeShippingBoolean: false,
+      mlFreeShippingKeyPresent: true,
+      mlPackageWeightKg: null
+    });
+    const op = computeOperabilityStatus(c, false);
+    expect(op).toBe("operable");
+  });
+
   it("undefined freeShipping contract (key absent) → low", () => {
     const c = buildDataCompleteness({
       priceMl: 100,

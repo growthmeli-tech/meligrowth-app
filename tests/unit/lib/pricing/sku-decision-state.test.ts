@@ -145,7 +145,7 @@ describe("buildSkuDecisionState", () => {
     expect(s.decision.primaryInsight).toContain("sin Ads");
   });
 
-  it("sin configuración fiscal explícita → partial y aviso en insight", () => {
+  it("sin configuración fiscal explícita mantiene estado parcial y sin ganancia real", () => {
     const b = base();
     const s = buildSkuDecisionState({
       ...b,
@@ -161,7 +161,7 @@ describe("buildSkuDecisionState", () => {
     });
     expect(s.sync.calculationStatus).toBe("partial");
     expect(s.computed.financialBreakdown?.missing.some((m) => m === "iibb" || m === "tax")).toBe(true);
-    expect(s.decision.primaryInsight).toMatch(/IIBB|impuestos|parcial/i);
+    expect(s.computed.realProfit).toBeNull();
   });
 
   it("cuenta no_reputation no usa mensaje corto falta reputación ML", () => {
@@ -265,7 +265,7 @@ describe("buildSkuDecisionState", () => {
       }
     });
     expect(s.computed.optimalPrice).toBeNull();
-    expect(s.sync.calculationStatus).toBe("error");
+    expect(s.sync.calculationStatus).toBe("partial");
     expect(s.businessDecision.type).toBe("complete_shipping_data");
   });
 });

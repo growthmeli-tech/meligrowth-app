@@ -35,6 +35,8 @@ export type SellerFinancialSettings = {
 };
 
 export type FinancialCostBreakdown = {
+  financialCompleteness: "complete" | "partial" | "invalid";
+  cashInCompleteness: "complete" | "partial" | "invalid";
   productCost: number | null;
 
   mlFeeAmount: number | null;
@@ -189,6 +191,7 @@ function emptyShippingBreakdown(): FinancialCostBreakdown["shipping"] {
 /** “En caja” al precio de venta: solo deducciones marketplace explícitas; sin COGS ni logística operativa. */
 function computeCashInAmount(params: {
   salePrice: number;
+  productCost: number | null;
   mlFeeAmount: number | null;
   adsAmount: number;
   fixedUnitCost: number | null;
@@ -196,12 +199,15 @@ function computeCashInAmount(params: {
   taxAmount: number | null;
   freeShipping: boolean | null;
   shipEst: ShippingCostEstimate;
-}): number | null {
+}): { amount: number | null; completeness: "complete" | "partial" | "invalid" } {
   const P = params.salePrice;
-  if (!Number.isFinite(P) || P <= 0) return null;
-  if (params.mlFeeAmount === null) return null;
-  if (params.iibbAmount === null || params.taxAmount === null) return null;
-  if (params.freeShipping === null) return null;
+  if (!Number.isFinite(P) || P <= 0) return { amount: null, completeness: "invalid" };
+  if (params.productCost === null || !Number.isFinite(params.productCost)) {
+    return { amount: null, completeness: "invalid" };
+  }
+  if (params.mlFeeAmount === null) return { amount: null, completeness: "partial" };
+  if (params.iibbAmount === null || params.taxAmount === null) return { amount: null, completeness: "partial" };
+  if (params.freeShipping === null) return { amount: null, completeness: "partial" };
 
   let sellerShip: number | null = null;
   if (params.freeShipping === false) sellerShip = 0;
@@ -213,15 +219,42 @@ function computeCashInAmount(params: {
   ) {
     sellerShip = roundMoney(params.shipEst.sellerShippingCost);
   } else if (params.freeShipping === true) {
-    return null;
+    return { amount: null, completeness: "partial" };
   }
 
-  if (sellerShip === null) return null;
+  if (sellerShip === null) return { amount: null, completeness: "partial" };
 
   const fixedPart =
     params.fixedUnitCost !== null && Number.isFinite(params.fixedUnitCost) ? params.fixedUnitCost : 0;
 
-  return roundMoney(P - params.mlFeeAmount - params.adsAmount - sellerShip - fixedPart - params.iibbAmount - params.taxAmount);
+  return {
+    amount: roundMoney(P - params.mlFeeAmount - params.adsAmount - sellerShip - fixedPart - params.iibbAmount - params.taxAmount),
+    completeness: "complete"
+  };
+}
+
+function computeFinancialCompleteness(params: {
+  salePrice: number;
+  productCost: number | null;
+  mlFeeAmount: number | null;
+  freeShipping: boolean | null;
+  shipEst: ShippingCostEstimate;
+  iibbAmount: number | null;
+  taxAmount: number | null;
+}): "complete" | "partial" | "invalid" {
+  if (!Number.isFinite(params.salePrice) || params.salePrice <= 0) return "invalid";
+  if (params.productCost === null || !Number.isFinite(params.productCost)) return "invalid";
+  if (params.mlFeeAmount === null || !Number.isFinite(params.mlFeeAmount)) return "partial";
+  if (params.iibbAmount === null || params.taxAmount === null) return "partial";
+  if (params.freeShipping === null) return "partial";
+  if (params.freeShipping === true) {
+    const shippingOk =
+      params.shipEst.completeness === "complete" &&
+      params.shipEst.sellerShippingCost !== null &&
+      Number.isFinite(params.shipEst.sellerShippingCost);
+    if (!shippingOk) return "partial";
+  }
+  return "complete";
 }
 
 /**
@@ -297,6 +330,8 @@ export function calculateFinancialCostBreakdown(input: {
       rowInternalLogisticsCost: input.rowInternalLogisticsCost
     });
     return {
+      financialCompleteness: "invalid",
+      cashInCompleteness: "invalid",
       productCost: null,
       mlFeeAmount: null,
       mlFeePct: null,
@@ -487,8 +522,9 @@ export function calculateFinancialCostBreakdown(input: {
 
   const mlFeePct = comisionRate;
 
-  const cashInAmount = computeCashInAmount({
+  const cashIn = computeCashInAmount({
     salePrice: P,
+    productCost,
     mlFeeAmount,
     adsAmount,
     fixedUnitCost,
@@ -497,10 +533,22 @@ export function calculateFinancialCostBreakdown(input: {
     freeShipping: shipInput.freeShipping,
     shipEst
   });
+  const financialCompleteness = computeFinancialCompleteness({
+    salePrice: P,
+    productCost,
+    mlFeeAmount,
+    freeShipping: shipInput.freeShipping,
+    shipEst,
+    iibbAmount,
+    taxAmount
+  });
+  const cashInCompleteness = cashIn.completeness;
 
   if (productCost === null) {
     missing.push("product_cost");
     return {
+      financialCompleteness,
+      cashInCompleteness,
       productCost: null,
       mlFeeAmount,
       mlFeePct,
@@ -520,7 +568,7 @@ export function calculateFinancialCostBreakdown(input: {
       totalCost: null,
       netProfit: null,
       netMarginPct: null,
-      cashInAmount,
+      cashInAmount: cashIn.amount,
       shipping: shipBreakdown,
       reasons,
       missing
@@ -539,6 +587,8 @@ export function calculateFinancialCostBreakdown(input: {
   const netMarginPct = roundMoney((netProfit / P) * 10_000) / 10_000;
 
   return {
+    financialCompleteness,
+    cashInCompleteness,
     productCost,
     mlFeeAmount,
     mlFeePct,
@@ -558,7 +608,7 @@ export function calculateFinancialCostBreakdown(input: {
     totalCost,
     netProfit,
     netMarginPct,
-    cashInAmount,
+    cashInAmount: cashIn.amount,
     shipping: shipBreakdown,
     reasons,
     missing

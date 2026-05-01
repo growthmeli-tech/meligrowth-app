@@ -213,13 +213,13 @@ describe("selectores + fila efectiva", () => {
     expect(p1).toBeNull();
   });
 
-  it("margen real excluye parciales y margen estimado los incluye", () => {
+  it("margen real y estimado quedan nulos cuando cash-in no está completo", () => {
     const row = rowNullMlFreeForSim();
     const state = catalogStateFromItems([row]);
     const real = selectCatalogPromMargenReal(state);
     const estimated = selectCatalogPromMargenEstimado(state);
     expect(real).toBeNull();
-    expect(estimated).not.toBeNull();
+    expect(estimated).toBeNull();
   });
 
   it("catalogOrderedEffectiveItems alinea lista con override", () => {

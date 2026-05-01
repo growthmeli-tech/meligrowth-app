@@ -32,7 +32,7 @@ function basePricing(over: Partial<PricingSkuRow>): PricingSkuRow {
 }
 
 describe("computeUnifiedCatalogDerived", () => {
-  it("con price_ml y costo calcula ganancia_real coherente", () => {
+  it("con price_ml y costo sin fiscal deja ganancia_real en null por contrato estricto", () => {
     const ml = {
       price: 30_000,
       available_quantity: 12,
@@ -46,14 +46,13 @@ describe("computeUnifiedCatalogDerived", () => {
       free_shipping: false
     };
     const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({}));
-    expect(d.ganancia_real).not.toBeNull();
+    expect(d.ganancia_real).toBeNull();
     expect(d.cuenta_reputacion_ml).toBe("falta reputación ML");
-    expect(d.margen_real_pct).not.toBeNull();
-    expect(d.ganancia_real).toBeGreaterThan(0);
-    expect(d.comision_real).not.toBeNull();
-    expect(d.envio_real).not.toBeNull();
-    expect(d.publicidad_real).not.toBeNull();
-    expect(d.decisionState.computed.realProfit).toBe(d.ganancia_real);
+    expect(d.margen_real_pct).toBeNull();
+    expect(d.comision_real).toBeNull();
+    expect(d.envio_real).toBeNull();
+    expect(d.publicidad_real).toBeNull();
+    expect(d.decisionState.computed.realProfit).toBeNull();
   });
 
   it("normaliza publicidad_pct = 10 como 10%", () => {
@@ -69,7 +68,7 @@ describe("computeUnifiedCatalogDerived", () => {
       title: "T"
     };
     const d = computeUnifiedCatalogDerived(ML_ACCOUNT, ml, basePricing({ publicidad_pct: 10, margen_pct: 15 }));
-    expect(d.publicidad_real).toBeCloseTo(3000, 1);
+    expect(d.publicidad_real).toBeNull();
   });
 
   it("sin pricing → ganancia_real null, no cero", () => {

@@ -4,6 +4,7 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { CatalogGridRowMemo } from "@/components/catalog/catalog-grid-row";
+import type { RowActionModel } from "@/lib/pricing/row-action-model";
 
 function makeRow(withCost: boolean) {
   return {
@@ -24,7 +25,7 @@ function makeRow(withCost: boolean) {
     },
     mlOfficial: { publicationLogisticsLabel: "ME2", shippingMode: "me2" },
     decisionState: {
-      computed: { profitCompleteness: "net_full", cashInAmount: 12000 },
+      computed: { profitCompleteness: "net_full", financialCompleteness: "complete", cashInCompleteness: "complete", cashInAmount: 12000 },
       decision: { profitabilityStatus: "healthy", stockStatus: "healthy" },
       ml: { freeShipping: false }
     }
@@ -32,6 +33,26 @@ function makeRow(withCost: boolean) {
 }
 
 describe("CatalogGridRow inline actions", () => {
+  function action(over: Partial<RowActionModel>): RowActionModel {
+    return {
+      itemId: "MLA1",
+      pricingSkuId: "sku-1",
+      primaryAction: "none",
+      severity: "neutral",
+      label: "Sin acción",
+      sublabel: null,
+      canConfigureCost: false,
+      canEditCost: false,
+      canPushMlPrice: false,
+      pushMlPriceLabel: null,
+      pushMlPricePayload: null,
+      blockedReason: null,
+      missingFields: [],
+      automationReady: false,
+      ...over
+    };
+  }
+
   it("missing cost row opens inline input in same row", () => {
     const onToggleInlineCost = vi.fn();
     render(
@@ -46,8 +67,13 @@ describe("CatalogGridRow inline actions", () => {
             saveStatus="idle"
             error={null}
             row={makeRow(false)}
-            rowActionKey="config_cost"
-            rowAction={{ kind: "config_cost" }}
+            rowActionKey="configure_cost"
+            rowAction={action({
+              primaryAction: "configure_cost",
+              label: "Configurar costo",
+              blockedReason: "Falta costo",
+              canConfigureCost: true
+            })}
             expanded={false}
             selected={false}
             pending={false}
@@ -63,7 +89,6 @@ describe("CatalogGridRow inline actions", () => {
             onInlineCostFieldChange={() => {}}
             onInlineCostSave={() => {}}
             onInlineCostCancel={() => {}}
-            onOpenInlineCalc={() => {}}
             onOpenMlPushRow={() => {}}
           />
         </tbody>
@@ -87,7 +112,11 @@ describe("CatalogGridRow inline actions", () => {
             error={null}
             row={makeRow(true)}
             rowActionKey="edit_cost"
-            rowAction={{ kind: "edit_cost" }}
+            rowAction={action({
+              primaryAction: "edit_cost",
+              label: "Editar costo",
+              canEditCost: true
+            })}
             expanded={false}
             selected={false}
             pending={false}
@@ -103,13 +132,56 @@ describe("CatalogGridRow inline actions", () => {
             onInlineCostFieldChange={() => {}}
             onInlineCostSave={() => {}}
             onInlineCostCancel={() => {}}
-            onOpenInlineCalc={() => {}}
             onOpenMlPushRow={() => {}}
           />
         </tbody>
       </table>
     );
-    expect(screen.getByRole("button", { name: "Editar" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Editar costo" })).toBeTruthy();
     expect(screen.getAllByRole("spinbutton").length).toBeGreaterThan(0);
+  });
+
+  it("renders exact blocked reason from row action model", () => {
+    render(
+      <table>
+        <tbody>
+          <CatalogGridRowMemo
+            style={{ top: 0, height: 76 }}
+            rowId="MLA1"
+            rowKey="k"
+            draftKey=""
+            mlKey=""
+            saveStatus="idle"
+            error={null}
+            row={makeRow(true)}
+            rowActionKey="complete_data"
+            rowAction={action({
+              primaryAction: "complete_data",
+              label: "Completar datos",
+              sublabel: "Falta precio ML",
+              blockedReason: "Falta precio ML"
+            })}
+            expanded={false}
+            selected={false}
+            pending={false}
+            inlineCostOpen={false}
+            inlineCalcOpen={false}
+            margenObjDefault={null}
+            costForm={null}
+            rowHint={null}
+            rowSaveState="idle"
+            onToggleSelect={() => {}}
+            onToggleExpand={() => {}}
+            onToggleInlineCost={() => {}}
+            onInlineCostFieldChange={() => {}}
+            onInlineCostSave={() => {}}
+            onInlineCostCancel={() => {}}
+            onOpenMlPushRow={() => {}}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.getByText("Falta precio ML")).toBeTruthy();
+    expect(screen.queryByText("Fila no operable")).toBeNull();
   });
 });
