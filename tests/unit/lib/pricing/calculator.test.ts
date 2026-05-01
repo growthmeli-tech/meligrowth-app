@@ -120,6 +120,9 @@ describe("Motor ML — calcRealProfit", () => {
       financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null }
     });
     expect(r.comision_$).toBe(1200);
+    expect(r.breakdown.shipping.completeness).toBe("partial");
+    expect(r.breakdown.shipping.missing).toContain("free_shipping");
+    expect(r.envio_$).toBeNaN();
   });
 });
 
@@ -217,6 +220,22 @@ describe("Motor ML — FinancialCostBreakdown / fiscal", () => {
       skuAdditionalFixedCost: 200
     });
     expect(b.additionalCostsAmount).toBeCloseTo(500 + 100 + 200, 1);
+  });
+
+  it("sin bloque shipping → freeShipping no inferido; envío vendedor parcial", () => {
+    const b = calculateFinancialCostBreakdown({
+      salePrice: 40_000,
+      productCost: 10_000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(b.shipping.completeness).toBe("partial");
+    expect(b.shipping.missing).toContain("free_shipping");
+    expect(b.mlShippingAmount).toBeNull();
+    expect(b.shipping.sellerShippingCost).toBeNull();
   });
 
   it("break-even sube con IIBB e impuesto", () => {

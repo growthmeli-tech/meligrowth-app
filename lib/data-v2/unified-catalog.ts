@@ -4,6 +4,8 @@
  */
 
 export type { CatalogHealthSummary, MlPublicationLink, MlSlice, UnifiedCatalogItem } from "./unified-catalog.types";
+export type { LocalShippingPolicyOverride } from "./unified-catalog.model";
+export type { CatalogEffectiveContext, LocalShippingPolicyOverrides } from "./catalog-effective-row";
 
 export {
   computeUnifiedCatalogDerived,

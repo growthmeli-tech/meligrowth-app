@@ -1,5 +1,9 @@
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import type { CatalogState } from "@/lib/data-v2/catalog-state";
+import {
+  getEffectiveCatalogItem,
+  type CatalogEffectiveContext
+} from "@/lib/data-v2/catalog-effective-row";
 
 export type CatalogFilterState = {
   q: string;
@@ -11,6 +15,22 @@ export type CatalogFilterState = {
   activePill: "critico" | "reponer" | "riesgo" | "ok" | null;
 };
 
+function resolveEffectiveRow(
+  state: CatalogState,
+  id: string,
+  ctx: CatalogEffectiveContext | undefined
+): UnifiedCatalogItem | undefined {
+  const base = state.itemsById[id];
+  if (!base) return undefined;
+  if (!ctx) return base;
+  return getEffectiveCatalogItem(
+    ctx.mlAccountId,
+    base,
+    ctx.localShippingPolicyOverrides,
+    ctx.financialSettings
+  );
+}
+
 function isCriticoRow(row: UnifiedCatalogItem): boolean {
   return (
     row.decisionState.decision.stockStatus === "critical" ||
@@ -19,7 +39,7 @@ function isCriticoRow(row: UnifiedCatalogItem): boolean {
   );
 }
 
-export function makeCatalogFilterImpactKey(f: CatalogFilterState): string {
+export function makeCatalogFilterImpactKey(f: CatalogFilterState, localShippingFingerprint = ""): string {
   return [
     f.q,
     f.statusFilter,
@@ -27,15 +47,20 @@ export function makeCatalogFilterImpactKey(f: CatalogFilterState): string {
     f.margenFilter,
     f.costFilter,
     f.stockFilter,
-    f.activePill ?? ""
+    f.activePill ?? "",
+    localShippingFingerprint
   ].join("\x1f");
 }
 
-export function selectCatalogFilteredIds(state: CatalogState, f: CatalogFilterState): string[] {
+export function selectCatalogFilteredIds(
+  state: CatalogState,
+  f: CatalogFilterState,
+  ctx?: CatalogEffectiveContext
+): string[] {
   const qq = f.q.trim().toLowerCase();
   const out: string[] = [];
   for (const id of state.orderedIds) {
-    const row = state.itemsById[id];
+    const row = resolveEffectiveRow(state, id, ctx);
     if (!row) continue;
 
     if (f.activePill === "critico") {
@@ -87,16 +112,20 @@ export function selectCatalogFilteredIds(state: CatalogState, f: CatalogFilterSt
   return out;
 }
 
-export function selectCatalogVisibleRows(state: CatalogState, filteredIds: string[]): UnifiedCatalogItem[] {
+export function selectCatalogVisibleRows(
+  state: CatalogState,
+  filteredIds: string[],
+  ctx?: CatalogEffectiveContext
+): UnifiedCatalogItem[] {
   const out: UnifiedCatalogItem[] = [];
   for (const id of filteredIds) {
-    const r = state.itemsById[id];
+    const r = resolveEffectiveRow(state, id, ctx);
     if (r) out.push(r);
   }
   return out;
 }
 
-export function selectCatalogCounts(state: CatalogState): {
+export function selectCatalogCounts(state: CatalogState, ctx?: CatalogEffectiveContext): {
   critico: number;
   reponer: number;
   margenRiesgo: number;
@@ -107,7 +136,7 @@ export function selectCatalogCounts(state: CatalogState): {
   let margenRiesgo = 0;
   let ok = 0;
   for (const id of state.orderedIds) {
-    const i = state.itemsById[id];
+    const i = resolveEffectiveRow(state, id, ctx);
     if (!i) continue;
     if (isCriticoRow(i)) critico += 1;
     if (i.stock_status === "reponer") reponer += 1;
@@ -129,11 +158,11 @@ export function selectCatalogCounts(state: CatalogState): {
   return { critico, reponer, margenRiesgo, ok };
 }
 
-export function selectCatalogPromMargenReal(state: CatalogState): number | null {
+export function selectCatalogPromMargenReal(state: CatalogState, ctx?: CatalogEffectiveContext): number | null {
   let w = 0;
   let acc = 0;
   for (const id of state.orderedIds) {
-    const row = state.itemsById[id];
+    const row = resolveEffectiveRow(state, id, ctx);
     if (!row) continue;
     if (!row.tiene_costo || row.margen_real_pct === null || row.costo === null || row.costo <= 0) continue;
     w += row.costo;

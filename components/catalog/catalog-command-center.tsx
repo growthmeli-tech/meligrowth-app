@@ -6,6 +6,14 @@ import { FixedSizeList, type ListChildComponentProps } from "react-window";
 import { ChevronDown, ChevronRight, Download, Filter, RefreshCw } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { mergeCatalogRowAfterCostSave, mergeCatalogRowAfterMlPricePush } from "@/lib/data-v2/unified-catalog";
+import {
+  catalogOrderedEffectiveItems,
+  getEffectiveCatalogItem,
+  localShippingPolicyOverridesFingerprint,
+  type CatalogEffectiveContext,
+  type LocalShippingPolicyOverrides
+} from "@/lib/data-v2/catalog-effective-row";
+import { CATALOG_ENVIO_GRATIS_SIMULADO_LABEL } from "@/lib/data-v2/catalog-ui-copy";
 import { getCachedDecisionState, invalidateDecisionCacheBySkuId, invalidateDecisionCacheByAccountId, sellerFinancialSettingsFingerprint } from "@/lib/pricing/decision-state-cache";
 import type { BuildSkuDecisionStateInput } from "@/lib/pricing/sku-decision-state";
 import {
@@ -28,8 +36,7 @@ import {
   makeCatalogFilterImpactKey,
   selectCatalogCounts,
   selectCatalogFilteredIds,
-  selectCatalogPromMargenReal,
-  selectCatalogVisibleRows
+  selectCatalogPromMargenReal
 } from "@/lib/data-v2/catalog-selectors";
 import {
   CatalogGridRowMemo,
@@ -160,6 +167,8 @@ export function CatalogCommandCenter({
   const [financialSettings, setFinancialSettings] = useState<SellerFinancialSettings | null>(initialFinancialSettings);
   /** Catalog dataset (indexed reconciliation). */
   const [catalog, setCatalog] = useState(() => catalogStateFromItems(initialItems));
+  /** Simulación de envío gratis por sesión (no persiste; no muta ML). */
+  const [localShippingPolicyOverrides, setLocalShippingPolicyOverrides] = useState<LocalShippingPolicyOverrides>({});
 
   useEffect(() => {
     setFinancialSettings(initialFinancialSettings);
@@ -170,6 +179,40 @@ export function CatalogCommandCenter({
   }, [initialItems]);
 
   const items = useMemo(() => catalogOrderedItems(catalog), [catalog]);
+
+  const shipFp = useMemo(
+    () => localShippingPolicyOverridesFingerprint(localShippingPolicyOverrides),
+    [localShippingPolicyOverrides]
+  );
+
+  const catalogEffectiveCtx = useMemo<CatalogEffectiveContext>(
+    () => ({
+      mlAccountId,
+      financialSettings,
+      localShippingPolicyOverrides
+    }),
+    [mlAccountId, financialSettings, localShippingPolicyOverrides]
+  );
+
+  const rowFor = useCallback(
+    (itemId: string): UnifiedCatalogItem | null => {
+      const base = catalog.itemsById[itemId];
+      if (!base) return null;
+      return getEffectiveCatalogItem(mlAccountId, base, localShippingPolicyOverrides, financialSettings);
+    },
+    [catalog.itemsById, mlAccountId, localShippingPolicyOverrides, financialSettings]
+  );
+
+  const onLocalShippingPolicyOverridesChange = useCallback((itemId: string, mode: "ml" | "yes" | "no" | "unk") => {
+    setLocalShippingPolicyOverrides((prev) => {
+      const n = { ...prev };
+      if (mode === "ml") delete n[itemId];
+      else if (mode === "yes") n[itemId] = { overrideFreeShipping: true };
+      else if (mode === "no") n[itemId] = { overrideFreeShipping: false };
+      else n[itemId] = { overrideFreeShipping: null };
+      return n;
+    });
+  }, []);
 
   const partitionSkuCacheId = useCallback(
     (row: UnifiedCatalogItem) => row.pricing_sku_id ?? `calc:${mlAccountId}:${row.item_id}`,
@@ -278,39 +321,52 @@ export function CatalogCommandCenter({
 
   const filterKey = useMemo(
     () =>
-      makeCatalogFilterImpactKey({
-        q,
-        statusFilter,
-        logFilter,
-        margenFilter,
-        costFilter,
-        stockFilter,
-        activePill
-      }),
-    [q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, activePill]
+      makeCatalogFilterImpactKey(
+        {
+          q,
+          statusFilter,
+          logFilter,
+          margenFilter,
+          costFilter,
+          stockFilter,
+          activePill
+        },
+        shipFp
+      ),
+    [q, statusFilter, logFilter, margenFilter, costFilter, stockFilter, activePill, shipFp]
   );
 
   const filteredIds = useMemo(
     () =>
-      selectCatalogFilteredIds(catalog, {
-        q,
-        statusFilter,
-        logFilter,
-        margenFilter,
-        costFilter,
-        stockFilter,
-        activePill
-      }),
-    [catalog, filterKey]
+      selectCatalogFilteredIds(
+        catalog,
+        {
+          q,
+          statusFilter,
+          logFilter,
+          margenFilter,
+          costFilter,
+          stockFilter,
+          activePill
+        },
+        catalogEffectiveCtx
+      ),
+    [catalog, filterKey, catalogEffectiveCtx]
   );
 
-  const filtered = useMemo(() => selectCatalogVisibleRows(catalog, filteredIds), [catalog, filteredIds]);
+  const counts = useMemo(() => selectCatalogCounts(catalog, catalogEffectiveCtx), [catalog, catalogEffectiveCtx]);
 
-  const counts = useMemo(() => selectCatalogCounts(catalog), [catalog]);
+  const promMargenReal = useMemo(
+    () => selectCatalogPromMargenReal(catalog, catalogEffectiveCtx),
+    [catalog, catalogEffectiveCtx]
+  );
 
-  const promMargenReal = useMemo(() => selectCatalogPromMargenReal(catalog), [catalog]);
+  const effectiveOrderedItems = useMemo(
+    () => catalogOrderedEffectiveItems(catalog, catalogEffectiveCtx),
+    [catalog, catalogEffectiveCtx]
+  );
 
-  const insights = useMemo(() => buildInsights(items), [items]);
+  const insights = useMemo(() => buildInsights(effectiveOrderedItems), [effectiveOrderedItems]);
 
   const catalogDetailIdsSorted = useMemo(() => {
     const want = new Set<string>();
@@ -451,13 +507,15 @@ export function CatalogCommandCenter({
   const renderCatalogVirtualRow = useCallback(
     ({ index, style }: ListChildComponentProps<Record<string, never>>) => {
       const rowId = filteredIds[index];
-      const row = catalog.itemsById[rowId];
+      const row = rowFor(rowId);
       if (!row) return null;
       const draft = costForms[rowId];
       const draftKey = draft
         ? `${draft.costo}\x1f${draft.logistica}\x1f${draft.margen}\x1f${draft.pub}`
         : "";
-      const mlKey = `${row.price_ml ?? "∅"}\x1f${row.stock ?? "∅"}\x1f${row.precio_calculado ?? "∅"}\x1f${row.decisionState.decision.profitabilityStatus}\x1f${row.decisionState.decision.stockStatus}`;
+      const shipKey =
+        rowId in localShippingPolicyOverrides ? String(localShippingPolicyOverrides[rowId].overrideFreeShipping) : "";
+      const mlKey = `${row.price_ml ?? "∅"}\x1f${row.stock ?? "∅"}\x1f${row.precio_calculado ?? "∅"}\x1f${row.decisionState.decision.profitabilityStatus}\x1f${row.decisionState.decision.stockStatus}\x1f${shipKey}`;
       const fsFp = sellerFinancialSettingsFingerprint(financialSettings);
       const rowKey = `${row.pricing_sku_id ?? ""}\x1f${row.last_synced_at}\x1f${fsFp}`;
       const ra = resolveRowAction(row) as CatalogGridRowAction;
@@ -506,6 +564,8 @@ export function CatalogCommandCenter({
     [
       filteredIds,
       catalog,
+      rowFor,
+      localShippingPolicyOverrides,
       costForms,
       rowHints,
       expanded,
@@ -785,12 +845,14 @@ export function CatalogCommandCenter({
               </FixedSizeList>
             </div>
             {catalogDetailIdsSorted.map((id) => {
-              const row = catalog.itemsById[id];
+              const row = rowFor(id);
               if (!row) return null;
               return (
                 <CatalogRows
                   key={id}
                   row={row}
+                  localShippingPolicyOverrides={localShippingPolicyOverrides}
+                  onLocalShippingPolicyOverridesChange={onLocalShippingPolicyOverridesChange}
                   expanded={expanded === id}
                   onToggleExpand={() => setExpanded(expanded === id ? null : id)}
                   pending={pending}
@@ -832,6 +894,8 @@ export function CatalogCommandCenter({
 
 function CatalogRows({
   row,
+  localShippingPolicyOverrides,
+  onLocalShippingPolicyOverridesChange,
   expanded,
   onToggleExpand,
   pending,
@@ -858,6 +922,8 @@ function CatalogRows({
   onLinkSkuValue
 }: {
   row: UnifiedCatalogItem;
+  localShippingPolicyOverrides: LocalShippingPolicyOverrides;
+  onLocalShippingPolicyOverridesChange: (itemId: string, mode: "ml" | "yes" | "no" | "unk") => void;
   expanded: boolean;
   onToggleExpand: () => void;
   pending: boolean;
@@ -1146,6 +1212,29 @@ function CatalogRows({
                     {ds.decision.shippingAction ? ` · ${ds.decision.shippingAction}` : ""}
                   </p>
                 ) : null}
+                <label className="mt-2 block text-xs font-semibold text-[#6B6B6B]">
+                  {CATALOG_ENVIO_GRATIS_SIMULADO_LABEL}
+                  <select
+                    className="mt-1 w-full max-w-xs rounded border border-[#E8E8E2] px-2 py-1.5 text-sm text-[#1A1A1A]"
+                    value={
+                      row.item_id in localShippingPolicyOverrides
+                        ? localShippingPolicyOverrides[row.item_id].overrideFreeShipping === true
+                          ? "yes"
+                          : localShippingPolicyOverrides[row.item_id].overrideFreeShipping === false
+                            ? "no"
+                            : "unk"
+                        : "ml"
+                    }
+                    onChange={(e) =>
+                      onLocalShippingPolicyOverridesChange(row.item_id, e.target.value as "ml" | "yes" | "no" | "unk")
+                    }
+                  >
+                    <option value="ml">Datos ML</option>
+                    <option value="yes">Sí</option>
+                    <option value="no">No</option>
+                    <option value="unk">Sin dato</option>
+                  </select>
+                </label>
                 {row.price_ml !== null && row.tiene_costo && ds.computed.financialBreakdown !== null ? (
                   <>
                     {netMarginDisplayLabel(ds.computed) ? (
@@ -1434,8 +1523,10 @@ function InlinePriceCalculator({
         lastSaleDate: row.decisionState.ml.lastSaleDate,
         shippingMode: row.logistic_type,
         listingType: null,
-        freeShipping: null,
-        categoryId: null
+        freeShipping: row.decisionState.ml.freeShipping,
+        categoryId: null,
+        condition: row.decisionState.ml.condition,
+        packageWeightKg: row.decisionState.ml.packageWeightKg
       },
       inputs: {
         productCost: costo,
@@ -1478,6 +1569,9 @@ function InlinePriceCalculator({
     row.pricing_sku_id,
     row.decisionState.ml.revenue30d,
     row.decisionState.ml.lastSaleDate,
+    row.decisionState.ml.freeShipping,
+    row.decisionState.ml.condition,
+    row.decisionState.ml.packageWeightKg,
     financialSettings
   ]);
 

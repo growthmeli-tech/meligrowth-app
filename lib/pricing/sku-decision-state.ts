@@ -546,6 +546,9 @@ function pickShippingShortSignal(
   if (!breakdown) return { msg: null, action: null };
   const mode = mapMlLogisticTypeToShippingMode(shippingModeRaw);
   if (freeShipping === false) return { msg: null, action: null };
+  if (freeShipping === null) {
+    return { msg: "Falta dato de envío", action: "Definir envío gratis" };
+  }
   if (mode === "retire" && freeShipping === true) {
     return { msg: "No soporta envío gratis", action: "Quitar envío gratis o subir precio" };
   }
@@ -569,8 +572,7 @@ function pickShippingShortSignal(
  * Read-only on orchestration outputs — no calculator / shipping / API calls.
  */
 export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusinessDecision {
-  // [1] SYSTEM BLOCKERS
-  if (state.sync.calculationStatus === "error" || state.sync.calculationStatus === "missing_inputs") {
+  if (state.sync.calculationStatus === "missing_inputs") {
     return {
       type: "complete_shipping_data",
       priority: "critical",
@@ -606,6 +608,26 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
     };
   }
 
+  if (state.ml.freeShipping === null) {
+    return {
+      type: "complete_shipping_data",
+      priority: "high",
+      message: "Falta dato de envío",
+      action: "Definir envío gratis",
+      impactAmount: null
+    };
+  }
+
+  if (state.sync.calculationStatus === "error") {
+    return {
+      type: "complete_shipping_data",
+      priority: "critical",
+      message: "No se puede calcular este producto",
+      action: "Completar datos",
+      impactAmount: null
+    };
+  }
+
   const freeTrue = state.ml.freeShipping === true;
   const missWeight = shipMiss.includes("package_weight");
   const missPriceBand = shipMiss.includes("price");
@@ -630,7 +652,7 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
     return {
       type: "fix_shipping",
       priority: "critical",
-      message: "No podés vender con envío gratis",
+      message: "No rentable con envío gratis",
       action: "Quitar envío gratis",
       impactAmount: null
     };
@@ -837,8 +859,11 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       skuAdditionalFixedCost: additionalCosts,
       rowInternalLogisticsCost,
       sellerShippingAtPrice: (p) => {
+        const fsShip = input.ml.freeShipping ?? null;
+        if (fsShip === false) return 0;
+        if (fsShip === null) return Number.NaN;
         const e = estimateSellerShippingCostAr({ ...shippingOmit(), price: p });
-        return e.completeness === "complete" && e.sellerShippingCost !== null ? e.sellerShippingCost : 0;
+        return e.completeness === "complete" && e.sellerShippingCost !== null ? e.sellerShippingCost : Number.NaN;
       }
     });
     if (sellResult.converged && Number.isFinite(sellResult.precio_venta) && sellResult.precio_venta > 0) {

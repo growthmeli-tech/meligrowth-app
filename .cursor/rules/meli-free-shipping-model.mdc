@@ -1,0 +1,46 @@
+---
+name: Meli free shipping / official data
+description: Mercado Libre shipping cost model — no invented costs; freeShipping vs logistics mode.
+globs: ["lib/pricing/**", "components/catalog/**", "lib/data-v2/unified-catalog*.ts"]
+alwaysApply: false
+---
+
+# MELIGROWTH OPS — FREE SHIPPING MODEL CORRECTION
+
+Fix the shipping-cost application model.
+
+- Do not invent Mercado Libre costs.
+- Do not use approximations unless explicitly marked and approved.
+- Do not use flat percentages.
+- Do not use logistics mode as a shipping-cost proxy.
+- Do not add unrelated features.
+
+## Official-data rule
+
+All shipping-cost values must come from: official ML API response, official ML AR table in code, explicit seller/account configuration, or explicit row-level override. If none exists: do not invent, do not default silently, do not estimate silently — mark partial.
+
+## ML compliance
+
+- `shippingMode` = how the item is delivered.
+- `freeShipping` = who absorbs shipping.
+- Full / Flex / ME2 / Retiro do **not** imply free shipping.
+- Seller absorbs shipping only if `freeShipping=true`. If `freeShipping=false`, buyer pays and `sellerShippingCost=0`.
+
+## Engine
+
+- `freeShipping` is the only switch for subtracting `sellerShippingCost` from profit.
+- Logistics mode affects **logistics operating cost** only, never `sellerShippingCost` from the ML table.
+
+## Business copy (es-AR)
+
+- Loss with free shipping: message `No rentable con envío gratis`, action `Quitar envío gratis`.
+- Missing free shipping flag: `complete_shipping_data` — `Falta dato de envío` / `Definir envío gratis`.
+
+## Session simulation (catálogo)
+
+- Estado: `localShippingPolicyOverrides` (solo sesión; no Supabase; no ML).
+- Toda vista local (grilla, filtros, contadores, insights, margen header) debe usar `getEffectiveCatalogItem` / `CatalogEffectiveContext`, nunca mezclar fila base en un sitio y efectiva en otro.
+
+## Forbidden
+
+Fake ML cost, unofficial multipliers, percentage fallbacks, default green reputation, default package weight, `shippingMode` → `freeShipping` inference, React-side ML cost formulas, client-side ML API calls for shipping tables.

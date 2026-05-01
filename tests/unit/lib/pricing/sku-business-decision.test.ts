@@ -235,7 +235,7 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       })
     );
     expect(s.type).toBe("fix_shipping");
-    expect(s.message).toBe("No podés vender con envío gratis");
+    expect(s.message).toBe("No rentable con envío gratis");
     expect(s.priority).toBe("critical");
   });
 
@@ -300,6 +300,57 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
       })
     );
     expect(partial.impactAmount).toBeNull();
+  });
+
+  it("[2.6] freeShipping null → complete_shipping_data after logistics OK", () => {
+    const ship = {
+      sellerShippingCost: null,
+      source: "missing_data" as const,
+      completeness: "partial" as const,
+      priceBand: null,
+      weightBand: null,
+      reputationGroup: "unknown" as const,
+      missing: ["free_shipping"],
+      reasons: []
+    };
+    const b = {
+      productCost: 3000,
+      mlFeeAmount: 100,
+      mlFeePct: 0.1,
+      fixedUnitCost: null,
+      adsAmount: 0,
+      adsPct: 0,
+      iibbAmount: 0,
+      iibbPct: 0,
+      taxAmount: 0,
+      taxPct: 0,
+      mlShippingAmount: null,
+      fulfillmentAmount: null,
+      internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
+      additionalCostsAmount: null,
+      totalCost: 5000,
+      netProfit: 5000,
+      netMarginPct: 0.5,
+      shipping: ship,
+      reasons: [],
+      missing: ["shipping_free_shipping"] as string[]
+    };
+    const s = deriveSkuBusinessDecision(
+      base({
+        ml: { ...base().ml, freeShipping: null },
+        computed: {
+          ...base().computed,
+          financialBreakdown: b,
+          realProfit: 5000,
+          profitCompleteness: "net_partial"
+        }
+      })
+    );
+    expect(s.type).toBe("complete_shipping_data");
+    expect(s.message).toBe("Falta dato de envío");
+    expect(s.action).toBe("Definir envío gratis");
   });
 
   it("[2.5] flex logistics cost partial → complete_shipping_data", () => {

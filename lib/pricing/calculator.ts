@@ -193,7 +193,7 @@ export function calculateFinancialCostBreakdown(input: {
   publicidad_pct: number | null | undefined;
   financialSettings: SellerFinancialSettings | null | undefined;
   skuAdditionalFixedCost: number | null | undefined;
-  /** Costo de envío absorbido (AR tabla / política envío gratis). Omisión → freeShipping=false. */
+  /** Costo de envío absorbido (AR tabla / política envío gratis). Si se omite `shipping`, no se infiere `freeShipping` → estado parcial. */
   shipping?: Omit<ShippingCostInput, "price">;
   /** Costo interno Flex por SKU (prioridad sobre cuenta). */
   rowInternalLogisticsCost?: number | null;
@@ -344,7 +344,7 @@ export function calculateFinancialCostBreakdown(input: {
           packageWeightKg: null,
           reputation: "unknown",
           shippingMode: "unknown",
-          freeShipping: false,
+          freeShipping: null,
           condition: "unknown"
         }
       : {
@@ -364,23 +364,26 @@ export function calculateFinancialCostBreakdown(input: {
     if (!missing.includes(tag)) missing.push(tag);
   }
 
+  /** Solo `freeShipping===true` + estimación oficial completa resta costo absorbido; nunca inferir desde modo logístico. */
   const shipSubtract =
-    shipEst.source === "buyer_pays_shipping"
-      ? 0
-      : shipEst.completeness === "complete" &&
-          shipEst.sellerShippingCost !== null &&
-          Number.isFinite(shipEst.sellerShippingCost)
-        ? roundMoney(shipEst.sellerShippingCost)
-        : 0;
+    shipInput.freeShipping === true &&
+    shipEst.completeness === "complete" &&
+    shipEst.sellerShippingCost !== null &&
+    Number.isFinite(shipEst.sellerShippingCost)
+      ? roundMoney(shipEst.sellerShippingCost)
+      : 0;
 
   for (const r of shipEst.reasons) {
     if (!reasons.includes(r)) reasons.push(r);
   }
 
   const mlShippingOut: number | null =
-    shipEst.source === "buyer_pays_shipping"
+    shipInput.freeShipping === false
       ? 0
-      : shipEst.completeness === "complete" && shipEst.sellerShippingCost !== null
+      : shipInput.freeShipping === true &&
+          shipEst.completeness === "complete" &&
+          shipEst.sellerShippingCost !== null &&
+          Number.isFinite(shipEst.sellerShippingCost)
         ? roundMoney(shipEst.sellerShippingCost)
         : null;
   const fulfillmentOut: number | null = null;

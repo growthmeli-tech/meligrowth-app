@@ -62,7 +62,15 @@ function stockUrgencyFromDecision(s: SkuDecisionState["decision"]["stockStatus"]
   return "ok";
 }
 
-function mlSliceFromUnifiedCatalogItem(row: UnifiedCatalogItem): MlSlice {
+/** Override de sesión (simulación); no persiste. Si se omite, se usa `decisionState.ml.freeShipping` sincronizado. */
+export type LocalShippingPolicyOverride = { overrideFreeShipping: boolean | null };
+
+function mlSliceFromUnifiedCatalogItem(
+  row: UnifiedCatalogItem,
+  shippingPolicy?: LocalShippingPolicyOverride
+): MlSlice {
+  const free_shipping =
+    shippingPolicy !== undefined ? shippingPolicy.overrideFreeShipping : row.decisionState.ml.freeShipping;
   return {
     price: row.price_ml,
     available_quantity: row.stock,
@@ -78,7 +86,7 @@ function mlSliceFromUnifiedCatalogItem(row: UnifiedCatalogItem): MlSlice {
     revenue_30d: row.decisionState.ml.revenue30d,
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
-    free_shipping: row.decisionState.ml.freeShipping,
+    free_shipping,
     shipping_mode: row.decisionState.ml.shippingMode,
     condition: row.decisionState.ml.condition,
     package_weight_kg: row.decisionState.ml.packageWeightKg
@@ -116,11 +124,12 @@ export function recomputeCatalogItemFinancials(
     sellerReputationLevel: string | null;
     sellerPowerSellerStatus: string | null;
     sellerReputationSyncedAt: string | null;
-  } | null = null
+  } | null = null,
+  shippingPolicy?: LocalShippingPolicyOverride
 ): UnifiedCatalogItem {
   const derived = computeUnifiedCatalogDerived(
     mlAccountId,
-    mlSliceFromUnifiedCatalogItem(row),
+    mlSliceFromUnifiedCatalogItem(row, shippingPolicy),
     pricingSkuFromUnifiedItem(row, mlAccountId),
     accountFinancialSettings,
     accountReputation

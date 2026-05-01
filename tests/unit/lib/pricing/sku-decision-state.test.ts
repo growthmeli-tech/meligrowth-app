@@ -234,4 +234,38 @@ describe("buildSkuDecisionState", () => {
     expect((retire.computed.realProfit as number) - (flex.computed.realProfit as number)).toBeCloseTo(1200, 0);
     expect((retire.computed.optimalPrice ?? 0) < (flex.computed.optimalPrice ?? 0)).toBe(true);
   });
+
+  it("freeShipping null no inventa precio óptimo (sin envío tabla)", () => {
+    const s = buildSkuDecisionState({
+      accountId: "acc",
+      accountReputation: {
+        sellerReputationLevel: "yellow",
+        sellerPowerSellerStatus: null,
+        sellerReputationSyncedAt: "2026-01-01T00:00:00.000Z"
+      },
+      financialSettings: { iibbPct: 0, taxPct: 0, internalLogisticsCost: 0 },
+      ml: {
+        itemId: "MLA1",
+        title: "P",
+        sku: "S",
+        currentPrice: 40_000,
+        stock: 10,
+        ventas30d: 5,
+        freeShipping: null,
+        shippingMode: "fulfillment",
+        packageWeightKg: 0.4,
+        condition: "new"
+      },
+      inputs: {
+        reputacion: "Verde / MercadoLíder",
+        productCost: 10_000,
+        logistics: "Flex",
+        publicidadPct: 0,
+        targetMarginPct: 0.2
+      }
+    });
+    expect(s.computed.optimalPrice).toBeNull();
+    expect(s.sync.calculationStatus).toBe("error");
+    expect(s.businessDecision.type).toBe("complete_shipping_data");
+  });
 });
