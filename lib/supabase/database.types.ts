@@ -354,6 +354,7 @@ export type Database = {
           seller_reputation_level: string | null;
           seller_power_seller_status: string | null;
           seller_reputation_synced_at: string | null;
+          default_free_shipping: boolean | null;
           created_at: string;
           updated_at: string;
         };
@@ -664,6 +665,7 @@ export type Database = {
           reputacion: string | null;
           publicidad_pct: number | null;
           margen_pct: number | null;
+          free_shipping: boolean | null;
           precio_venta: number | null;
           ganancia_unit: number | null;
           roi: number | null;

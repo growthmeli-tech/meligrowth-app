@@ -16,6 +16,7 @@ import {
 } from "@/lib/pricing/shipping-costs-argentina";
 import { resolveLogisticsOperatingCostBreakdown } from "@/lib/pricing/logistics-operating-cost";
 import { deriveSellerReputationStateFromPersistedAccount, type SellerReputationState } from "@/lib/pricing/seller-reputation-state";
+import { buildSkuFieldSources, type FieldSource, type SkuFieldSources } from "@/lib/pricing/ml-official-data-contract";
 
 /** V3 forced single action — derived only from `SkuDecisionStateBase` (no recomputation). */
 export type SkuBusinessDecision = {
@@ -102,6 +103,9 @@ export type SkuDecisionStateBase = {
   sync: {
     calculationStatus: "valid" | "partial" | "missing_inputs" | "error";
   };
+
+  /** Contrato de datos: fuente por campo clave (precio / envío / decisiones). */
+  fieldSources: SkuFieldSources;
 };
 
 export type SkuDecisionState = SkuDecisionStateBase & {
@@ -112,6 +116,8 @@ export type BuildSkuDecisionStateInput = {
   accountId: string;
   /** Config financiera de cuenta (sin persistencia obligatoria). */
   financialSettings?: SellerFinancialSettings | null;
+  /** Procedencia de `ml.freeShipping` luego de resolución catálogo (ml→sku→cuenta→sim). */
+  freeShippingSource?: FieldSource;
   ml: {
     itemId?: string | null;
     sku?: string | null;
@@ -128,6 +134,8 @@ export type BuildSkuDecisionStateInput = {
     listingType?: string | null;
     condition?: string | null;
     packageWeightKg?: number | null;
+    /** ML `shipping.logistic_type` (texto crudo) — solo trazas / envío, sin inferir `freeShipping`. */
+    logisticType?: string | null;
   };
   /** Reputación vendedor ML (API/sync + fallback pricing). */
   accountReputation?: {
@@ -649,10 +657,11 @@ export function deriveSkuBusinessDecision(state: SkuDecisionStateBase): SkuBusin
 
   // [4] SHIPPING STRATEGY BREAK (strictly after [3] so “complete” path still evaluated)
   if (freeTrue && netProfit !== null && netProfit < 0) {
+    const sim = state.fieldSources.freeShipping === "local_simulation";
     return {
       type: "fix_shipping",
       priority: "critical",
-      message: "No rentable con envío gratis",
+      message: sim ? "Simulación: no rentable con envío gratis" : "No rentable con envío gratis",
       action: "Quitar envío gratis",
       impactAmount: null
     };
@@ -787,8 +796,12 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     input.ml.packageWeightKg !== undefined &&
     Number.isFinite(Number(input.ml.packageWeightKg))
       ? Number(input.ml.packageWeightKg)
-      : pesoKg;
-  const shipMode = mapMlLogisticTypeToShippingMode(input.ml.shippingMode ?? null);
+      : null;
+  const shipMode = mapMlLogisticTypeToShippingMode(
+    (input.ml.shippingMode && String(input.ml.shippingMode).trim() !== "" ? input.ml.shippingMode : null) ??
+      input.ml.logisticType ??
+      null
+  );
 
   const shippingOmit = (): Omit<ShippingCostInput, "price"> => ({
     packageWeightKg: packageKg,
@@ -1007,6 +1020,23 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     realProfit
   });
 
+  const freeShipSrc: FieldSource =
+    input.freeShippingSource ??
+    (input.ml.freeShipping === true || input.ml.freeShipping === false ? "ml_api" : "missing");
+
+  const hasShipMode = input.ml.shippingMode !== null && String(input.ml.shippingMode ?? "").trim() !== "";
+  const hasLog = input.ml.logisticType !== null && String(input.ml.logisticType ?? "").trim() !== "";
+  const fieldSources = buildSkuFieldSources({
+    freeShipping: freeShipSrc,
+    shippingModeFromMl: { hasMode: hasShipMode, hasLogistic: hasLog },
+    packageWeightKg: packageKg,
+    accountReputation: acc
+      ? { sellerReputationSyncedAt: acc.sellerReputationSyncedAt, sellerReputationLevel: acc.sellerReputationLevel }
+      : null,
+    logisticsBreakdown: loForOptimal,
+    rowInternalLogisticsSet: rowInternalLogisticsCost !== null
+  });
+
   const base: SkuDecisionStateBase = {
     ml,
     inputs: inputsOut,
@@ -1039,7 +1069,8 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
       shippingMessage: shipSig.msg,
       shippingAction: shipSig.action
     },
-    sync: { calculationStatus }
+    sync: { calculationStatus },
+    fieldSources
   };
 
   return {

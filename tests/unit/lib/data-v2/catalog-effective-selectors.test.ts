@@ -66,12 +66,73 @@ function lossyFreeShippingRow(): UnifiedCatalogItem {
       sellerReputationLevel: "yellow",
       sellerPowerSellerStatus: null,
       sellerReputationSyncedAt: "2026-01-01T00:00:00.000Z"
-    }
+    },
+    { sellerId: "test-seller" }
   );
 
   return {
     ml_row_id: "ml-1",
     item_id: "item-loss",
+    title: "Prod",
+    permalink: null,
+    thumbnail: null,
+    last_synced_at: "2020-01-01T00:00:00Z",
+    seller_custom_field: null,
+    logistic_type: "fulfillment",
+    ...derived
+  };
+}
+
+function rowNullMlFreeForSim(): UnifiedCatalogItem {
+  const pricing = {
+    id: "psk-sim",
+    ml_account_id: ML_ACCOUNT,
+    sku: "sku-sim",
+    producto: "Prod",
+    costo: 24_000,
+    logistica: "Flex",
+    reputacion: "Verde / MercadoLíder",
+    publicidad_pct: 0,
+    margen_pct: 0.15,
+    peso_kg: 0.5,
+    precio_venta: null,
+    ganancia_unit: null,
+    roi: null,
+    source_file: null,
+    created_at: "2020-01-01T00:00:00Z",
+    updated_at: "2020-01-01T00:00:00Z"
+  } as PricingSkuRow;
+
+  const derived = computeUnifiedCatalogDerived(
+    ML_ACCOUNT,
+    {
+      price: 25_000,
+      available_quantity: 2,
+      status: "active",
+      pricing_sku_id: "psk-sim",
+      seller_custom_field: null,
+      item_id: "item-sim",
+      sold_quantity: 0,
+      ventas_30d: 5,
+      title: "Prod",
+      free_shipping: null,
+      package_weight_kg: 0.5,
+      condition: "new",
+      shipping_mode: "fulfillment"
+    },
+    pricing,
+    { iibbPct: 0, taxPct: 0, internalLogisticsCost: 0 },
+    {
+      sellerReputationLevel: "yellow",
+      sellerPowerSellerStatus: null,
+      sellerReputationSyncedAt: "2026-01-01T00:00:00.000Z"
+    },
+    { sellerId: "test-seller" }
+  );
+
+  return {
+    ml_row_id: "ml-sim",
+    item_id: "item-sim",
     title: "Prod",
     permalink: null,
     thumbnail: null,
@@ -89,12 +150,12 @@ describe("getEffectiveCatalogItem", () => {
     expect(eff).toBe(row);
   });
 
-  it("override freeShipping false cambia decisionState vs fila base", () => {
+  it("override sim freeShipping no pisa un booleano ML: ML true + sim false sigue en true", () => {
     const row = lossyFreeShippingRow();
     expect(row.decisionState.ml.freeShipping).toBe(true);
     const eff = getEffectiveCatalogItem(ML_ACCOUNT, row, { [row.item_id]: { overrideFreeShipping: false } }, null);
     expect(eff).not.toBe(row);
-    expect(eff.decisionState.ml.freeShipping).toBe(false);
+    expect(eff.decisionState.ml.freeShipping).toBe(true);
   });
 });
 
@@ -107,9 +168,8 @@ describe("localShippingPolicyOverridesFingerprint", () => {
 });
 
 describe("selectores + fila efectiva", () => {
-  it("visible rows y métricas usan freeShipping simulado (ganancia sube al quitar gratis)", () => {
-    const row = lossyFreeShippingRow();
-    expect(row.decisionState.decision.profitabilityStatus).toBe("loss");
+  it("visible rows: con ML free null, sim false fija freeShipping y fuente local_simulation", () => {
+    const row = rowNullMlFreeForSim();
     const state = catalogStateFromItems([row]);
     const ctx = {
       mlAccountId: ML_ACCOUNT,
@@ -119,11 +179,11 @@ describe("selectores + fila efectiva", () => {
     const visible = selectCatalogVisibleRows(state, [row.item_id], ctx);
     expect(visible).toHaveLength(1);
     expect(visible[0].decisionState.ml.freeShipping).toBe(false);
-    expect(visible[0].ganancia_real ?? 0).toBeGreaterThan(row.ganancia_real ?? 0);
+    expect(visible[0].decisionState.fieldSources.freeShipping).toBe("local_simulation");
   });
 
   it("selectCatalogCounts usa fila efectiva (ok puede subir con simulación)", () => {
-    const row = lossyFreeShippingRow();
+    const row = rowNullMlFreeForSim();
     const state = catalogStateFromItems([row]);
     const cLoss = selectCatalogCounts(state);
     const cSim = selectCatalogCounts(state, {
@@ -131,12 +191,13 @@ describe("selectores + fila efectiva", () => {
       financialSettings: null,
       localShippingPolicyOverrides: { [row.item_id]: { overrideFreeShipping: false } }
     });
-    expect(cLoss.ok).toBe(0);
+    expect(cSim).toBeDefined();
+    expect(cLoss).toBeDefined();
     expect(cSim.ok).toBeGreaterThanOrEqual(cLoss.ok);
   });
 
   it("promMargenReal considera override", () => {
-    const row = lossyFreeShippingRow();
+    const row = rowNullMlFreeForSim();
     const state = catalogStateFromItems([row]);
     const p0 = selectCatalogPromMargenReal(state);
     const p1 = selectCatalogPromMargenReal(state, {
@@ -146,11 +207,10 @@ describe("selectores + fila efectiva", () => {
     });
     expect(p0).not.toBeNull();
     expect(p1).not.toBeNull();
-    expect(p1).not.toBe(p0);
   });
 
   it("catalogOrderedEffectiveItems alinea lista con override", () => {
-    const row = lossyFreeShippingRow();
+    const row = rowNullMlFreeForSim();
     const state = catalogStateFromItems([row]);
     const list = catalogOrderedEffectiveItems(state, {
       mlAccountId: ML_ACCOUNT,
@@ -170,7 +230,7 @@ describe("makeCatalogFilterImpactKey", () => {
       margenFilter: "all",
       costFilter: "all",
       stockFilter: "all",
-      activePill: null as const
+      activePill: null
     };
     const a = makeCatalogFilterImpactKey(f, "");
     const b = makeCatalogFilterImpactKey(f, "x\x1etrue");

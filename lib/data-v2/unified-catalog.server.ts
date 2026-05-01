@@ -10,13 +10,15 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionResult<UnifiedCatalogItem[]>> {
   const supabase = await createServerSupabaseClient();
-  const [catRes, priceRes, financialRes, accRepRes] = await Promise.all([
+  const [catRes, priceRes, financialRes, accRes] = await Promise.all([
     listMlCatalogItems(mlAccountId),
     listPricingSkus(mlAccountId),
     getFinancialSettingsForAccount(mlAccountId),
     supabase
       .from("ml_accounts")
-      .select("seller_reputation_level, seller_power_seller_status, seller_reputation_synced_at")
+      .select(
+        "seller_id, default_free_shipping, seller_reputation_level, seller_power_seller_status, seller_reputation_synced_at"
+      )
       .eq("id", mlAccountId)
       .maybeSingle()
   ]);
@@ -25,13 +27,15 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
 
   const accountFinancialSettings = financialRes;
 
-  const accountReputation = accRepRes.data
+  const accountReputation = accRes.data
     ? {
-        sellerReputationLevel: accRepRes.data.seller_reputation_level,
-        sellerPowerSellerStatus: accRepRes.data.seller_power_seller_status,
-        sellerReputationSyncedAt: accRepRes.data.seller_reputation_synced_at
+        sellerReputationLevel: accRes.data.seller_reputation_level,
+        sellerPowerSellerStatus: accRes.data.seller_power_seller_status,
+        sellerReputationSyncedAt: accRes.data.seller_reputation_synced_at
       }
     : null;
+  const sellerId = accRes.data?.seller_id?.trim() || "unknown_seller";
+  const accountDefaultFree = accRes.data?.default_free_shipping ?? null;
 
   const { byId, bySkuKey } = buildPricingIndexes(priceRes.data);
 
@@ -61,7 +65,8 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
       },
       pricing,
       accountFinancialSettings,
-      accountReputation
+      accountReputation,
+      { sellerId, accountDefaultFreeShipping: accountDefaultFree }
     );
 
     return {

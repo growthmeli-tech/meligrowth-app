@@ -99,7 +99,7 @@ export function reconcileCatalogFinancialSettings(
   for (const itemId of state.orderedIds) {
     const prev = itemsById[itemId];
     if (!prev) continue;
-    const next = recomputeCatalogItemFinancials(mlAccountId, prev, financialSettings);
+    const next = recomputeCatalogItemFinancials(mlAccountId, prev, financialSettings, undefined);
     if (!changed) {
       itemsById = { ...state.itemsById };
       changed = true;

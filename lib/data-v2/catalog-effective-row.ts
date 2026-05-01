@@ -30,7 +30,7 @@ export function getEffectiveCatalogItem(
   }
   const pol = localShippingPolicyOverrides[row.item_id];
   if (pol === undefined) return row;
-  return recomputeCatalogItemFinancials(mlAccountId, row, financialSettings, null, pol);
+  return recomputeCatalogItemFinancials(mlAccountId, row, financialSettings, row.accountReputation, pol);
 }
 
 export function localShippingPolicyOverridesFingerprint(o: LocalShippingPolicyOverrides): string {

@@ -72,7 +72,14 @@ function base(over: Partial<SkuDecisionStateBase> = {}): SkuDecisionStateBase {
       shippingMessage: null,
       shippingAction: null
     },
-    sync: { calculationStatus: "valid" }
+    sync: { calculationStatus: "valid" },
+    fieldSources: {
+      freeShipping: "ml_api",
+      shippingMode: "ml_api",
+      packageWeightKg: "ml_api",
+      sellerReputationState: "missing",
+      logisticsOperating: "account_config"
+    }
   };
   return { ...d, ...over, ml: { ...d.ml, ...over.ml }, inputs: { ...d.inputs, ...over.inputs } };
 }

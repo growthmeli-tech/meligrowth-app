@@ -137,6 +137,7 @@ export function createMockMLAccount(overrides: Partial<MLAccountRow> = {}): MLAc
     seller_reputation_level: null,
     seller_power_seller_status: null,
     seller_reputation_synced_at: null,
+    default_free_shipping: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides

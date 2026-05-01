@@ -64,6 +64,7 @@ export function makeDecisionCacheKey(skuId: string, input: BuildSkuDecisionState
     i.additionalCosts === null || i.additionalCosts === undefined ? "" : keyNum(i.additionalCosts),
     financialSettingsKey(input.financialSettings),
     String(ml.freeShipping),
+    String(input.freeShippingSource ?? ""),
     String(ml.shippingMode ?? ""),
     keyNum(ml.packageWeightKg ?? undefined),
     reputationState,

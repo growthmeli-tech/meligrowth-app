@@ -1,4 +1,5 @@
 import type { SkuDecisionState } from "@/lib/pricing/sku-decision-state";
+import type { MlOfficialItemState } from "@/lib/pricing/ml-official-data-contract";
 
 export interface UnifiedCatalogItem {
   ml_row_id: string;
@@ -15,6 +16,15 @@ export interface UnifiedCatalogItem {
   thumbnail: string | null;
   last_synced_at: string;
   seller_custom_field: string | null;
+  /** Sincronizado con ML; la UI y el motor efectivo usan resolución jerárquica + fieldSources. */
+  mlOfficial: MlOfficialItemState;
+  /** `ml_accounts.default_free_shipping` (no pisa un booleano ML). */
+  accountDefaultFreeShipping: boolean | null;
+  accountReputation: {
+    sellerReputationLevel: string | null;
+    sellerPowerSellerStatus: string | null;
+    sellerReputationSyncedAt: string | null;
+  };
 
   pricing_sku_id: string | null;
   sku: string | null;

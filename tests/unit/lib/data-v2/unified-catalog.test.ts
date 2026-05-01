@@ -18,6 +18,7 @@ function basePricing(over: Partial<PricingSkuRow>): PricingSkuRow {
     reputacion: "Verde / MercadoLíder",
     publicidad_pct: 0.1,
     margen_pct: 0.15,
+    free_shipping: null,
     precio_venta: null,
     ganancia_unit: null,
     roi: null,

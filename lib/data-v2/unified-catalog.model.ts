@@ -4,6 +4,7 @@ import {
   deriveSellerReputationStateFromPersistedAccount,
   formatSellerReputationStateForOps
 } from "@/lib/pricing/seller-reputation-state";
+import { buildMlOfficialItemState, resolveFreeShippingProvenance } from "@/lib/pricing/ml-official-data-contract";
 import type { BuildSkuDecisionStateInput, SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink, MlSlice, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
@@ -62,15 +63,19 @@ function stockUrgencyFromDecision(s: SkuDecisionState["decision"]["stockStatus"]
   return "ok";
 }
 
-/** Override de sesión (simulación); no persiste. Si se omite, se usa `decisionState.ml.freeShipping` sincronizado. */
+/** Override de sesión (simulación); no persiste. Resolución: ML boolean gana sobre simulación. */
 export type LocalShippingPolicyOverride = { overrideFreeShipping: boolean | null };
 
-function mlSliceFromUnifiedCatalogItem(
-  row: UnifiedCatalogItem,
-  shippingPolicy?: LocalShippingPolicyOverride
-): MlSlice {
-  const free_shipping =
-    shippingPolicy !== undefined ? shippingPolicy.overrideFreeShipping : row.decisionState.ml.freeShipping;
+export type ComputeUnifiedCatalogOptions = {
+  sellerId: string;
+  accountDefaultFreeShipping?: boolean | null;
+  /** Solo simulación de catálogo; `undefined` = no hay fila de simulación para este item. */
+  localSimulationFreeShipping?: boolean | null | undefined;
+  categoryId?: string | null;
+  listingTypeId?: string | null;
+};
+
+function buildRawMlSliceFromRow(row: UnifiedCatalogItem): MlSlice {
   return {
     price: row.price_ml,
     available_quantity: row.stock,
@@ -86,10 +91,10 @@ function mlSliceFromUnifiedCatalogItem(
     revenue_30d: row.decisionState.ml.revenue30d,
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
-    free_shipping,
-    shipping_mode: row.decisionState.ml.shippingMode,
-    condition: row.decisionState.ml.condition,
-    package_weight_kg: row.decisionState.ml.packageWeightKg
+    free_shipping: row.mlOfficial.freeShipping,
+    shipping_mode: row.mlOfficial.shippingModeRaw,
+    condition: row.mlOfficial.conditionRaw,
+    package_weight_kg: row.mlOfficial.packageWeightKg
   };
 }
 
@@ -120,35 +125,37 @@ export function recomputeCatalogItemFinancials(
   mlAccountId: string,
   row: UnifiedCatalogItem,
   accountFinancialSettings: SellerFinancialSettings | null,
-  accountReputation: {
-    sellerReputationLevel: string | null;
-    sellerPowerSellerStatus: string | null;
-    sellerReputationSyncedAt: string | null;
-  } | null = null,
+  accountReputationParam:
+    | {
+        sellerReputationLevel: string | null;
+        sellerPowerSellerStatus: string | null;
+        sellerReputationSyncedAt: string | null;
+      }
+    | null
+    | undefined,
   shippingPolicy?: LocalShippingPolicyOverride
 ): UnifiedCatalogItem {
+  const accountReputation =
+    accountReputationParam === undefined ? row.accountReputation : accountReputationParam;
+  const localSim = shippingPolicy !== undefined ? shippingPolicy.overrideFreeShipping : undefined;
   const derived = computeUnifiedCatalogDerived(
     mlAccountId,
-    mlSliceFromUnifiedCatalogItem(row, shippingPolicy),
+    buildRawMlSliceFromRow(row),
     pricingSkuFromUnifiedItem(row, mlAccountId),
     accountFinancialSettings,
-    accountReputation
+    accountReputation,
+    {
+      sellerId: row.mlOfficial.sellerId,
+      accountDefaultFreeShipping: row.accountDefaultFreeShipping,
+      localSimulationFreeShipping: localSim
+    }
   );
-  return {
-    ml_row_id: row.ml_row_id,
-    item_id: row.item_id,
-    title: row.title,
-    permalink: row.permalink,
-    thumbnail: row.thumbnail,
-    last_synced_at: row.last_synced_at,
-    seller_custom_field: row.seller_custom_field,
-    logistic_type: row.logistic_type,
-    ...derived
-  };
+  return { ...row, ...derived };
 }
 
 /**
  * Pure derivation for tests, `listUnifiedCatalog` (server), and client reconciliation.
+ * `ml.free_shipping` debe ser el booleano bruto de ML; la resolución aplica en este paso.
  */
 export function computeUnifiedCatalogDerived(
   mlAccountId: string,
@@ -159,7 +166,8 @@ export function computeUnifiedCatalogDerived(
     sellerReputationLevel: string | null;
     sellerPowerSellerStatus: string | null;
     sellerReputationSyncedAt: string | null;
-  } | null = null
+  } | null = null,
+  options?: ComputeUnifiedCatalogOptions
 ): Omit<
   UnifiedCatalogItem,
   | "ml_row_id"
@@ -184,15 +192,41 @@ export function computeUnifiedCatalogDerived(
   const productCost =
     pricing && Number.isFinite(Number(pricing.costo)) && Number(pricing.costo) >= 0 ? Number(pricing.costo) : null;
 
-  const pkgFromMl =
-    ml.package_weight_kg !== null && ml.package_weight_kg !== undefined && Number.isFinite(Number(ml.package_weight_kg))
-      ? Number(ml.package_weight_kg)
-      : null;
-  const pkgFromPricing =
-    pricing?.peso_kg !== null && pricing?.peso_kg !== undefined && Number.isFinite(Number(pricing.peso_kg))
-      ? Number(pricing.peso_kg)
-      : null;
-  const packageWeightCombined = pkgFromMl ?? pkgFromPricing;
+  const sellerId = options?.sellerId ?? "unknown_seller";
+  const accountDefFs = options?.accountDefaultFreeShipping ?? null;
+  const localSimFs = options?.localSimulationFreeShipping;
+
+  const accountRepForOfficial = {
+    sellerReputationLevel: accountReputation?.sellerReputationLevel ?? null,
+    sellerPowerSellerStatus: accountReputation?.sellerPowerSellerStatus ?? null,
+    sellerReputationSyncedAt: accountReputation?.sellerReputationSyncedAt ?? null
+  };
+
+  const mlOfficial = buildMlOfficialItemState({
+    itemId: ml.item_id,
+    sellerId,
+    price: price_ml,
+    availableQuantity: stock,
+    status: ml.status,
+    shippingModeRaw: ml.shipping_mode ?? null,
+    logisticType: ml.logistic_type ?? null,
+    freeShipping: ml.free_shipping === true || ml.free_shipping === false ? ml.free_shipping : null,
+    conditionRaw: ml.condition !== null && ml.condition !== undefined && String(ml.condition).trim() !== "" ? String(ml.condition) : null,
+    packageWeightKgRaw: ml.package_weight_kg as number | null,
+    packageDimensionsRaw: null,
+    categoryId: options?.categoryId ?? null,
+    listingTypeId: options?.listingTypeId ?? null,
+    sellerReputationSyncedAt: accountRepForOfficial.sellerReputationSyncedAt,
+    sellerReputationLevel: accountRepForOfficial.sellerReputationLevel,
+    sellerPowerSellerStatus: accountRepForOfficial.sellerPowerSellerStatus
+  });
+
+  const freeRes = resolveFreeShippingProvenance({
+    mlApi: mlOfficial.freeShipping,
+    skuConfig: pricing?.free_shipping === true || pricing?.free_shipping === false ? pricing.free_shipping : null,
+    accountConfig: accountDefFs === true || accountDefFs === false ? accountDefFs : null,
+    localSimulation: localSimFs
+  });
 
   const accountRepState = deriveSellerReputationStateFromPersistedAccount(
     accountReputation?.sellerReputationSyncedAt ?? null,
@@ -204,6 +238,7 @@ export function computeUnifiedCatalogDerived(
   const decisionInput: BuildSkuDecisionStateInput = {
     accountId: mlAccountId,
     accountReputation: accountReputation ?? undefined,
+    freeShippingSource: freeRes.source,
     ml: {
       itemId: ml.item_id,
       sku: pricing?.sku ?? ml.seller_custom_field ?? null,
@@ -218,11 +253,12 @@ export function computeUnifiedCatalogDerived(
           : Number(ml.revenue_30d),
       lastSaleDate: ml.last_sale_date ?? null,
       shippingMode: ml.shipping_mode ?? null,
-      freeShipping: ml.free_shipping ?? null,
-      categoryId: null,
-      listingType: null,
+      freeShipping: freeRes.value,
+      categoryId: options?.categoryId ?? null,
+      listingType: options?.listingTypeId ?? null,
       condition: ml.condition ?? null,
-      packageWeightKg: packageWeightCombined
+      packageWeightKg: mlOfficial.packageWeightKg,
+      logisticType: ml.logistic_type ?? null
     },
     inputs: {
       productCost,
@@ -308,7 +344,14 @@ export function computeUnifiedCatalogDerived(
     stock_urgency: stockUrgencyFromDecision(decisionState.decision.stockStatus),
     precio_vs_objetivo,
     desviacion_precio_pct,
-    decisionState
+    decisionState,
+    mlOfficial,
+    accountDefaultFreeShipping: accountDefFs,
+    accountReputation: {
+      sellerReputationLevel: accountRepForOfficial.sellerReputationLevel,
+      sellerPowerSellerStatus: accountRepForOfficial.sellerPowerSellerStatus,
+      sellerReputationSyncedAt: accountRepForOfficial.sellerReputationSyncedAt
+    }
   };
 }
 
@@ -341,10 +384,10 @@ export function mergeCatalogRowAfterCostSave(
     revenue_30d: row.decisionState.ml.revenue30d,
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
-    free_shipping: row.decisionState.ml.freeShipping,
-    shipping_mode: row.decisionState.ml.shippingMode,
-    condition: row.decisionState.ml.condition,
-    package_weight_kg: row.decisionState.ml.packageWeightKg
+    free_shipping: row.mlOfficial.freeShipping,
+    shipping_mode: row.mlOfficial.shippingModeRaw,
+    condition: row.mlOfficial.conditionRaw,
+    package_weight_kg: row.mlOfficial.packageWeightKg
   };
   const pricingMinimal = {
     id: saved.pricing_sku_id,
@@ -359,7 +402,14 @@ export function mergeCatalogRowAfterCostSave(
     peso_kg: row.peso_kg
   } as PricingSkuRow;
 
-  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricingMinimal, accountFinancialSettings, null);
+  const derived = computeUnifiedCatalogDerived(
+    mlAccountId,
+    ml,
+    pricingMinimal,
+    accountFinancialSettings,
+    row.accountReputation,
+    { sellerId: row.mlOfficial.sellerId, accountDefaultFreeShipping: row.accountDefaultFreeShipping }
+  );
   return {
     ml_row_id: row.ml_row_id,
     item_id: row.item_id,
@@ -396,10 +446,10 @@ export function mergeCatalogRowAfterMlPricePush(
     revenue_30d: row.decisionState.ml.revenue30d,
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
-    free_shipping: row.decisionState.ml.freeShipping,
-    shipping_mode: row.decisionState.ml.shippingMode,
-    condition: row.decisionState.ml.condition,
-    package_weight_kg: row.decisionState.ml.packageWeightKg
+    free_shipping: row.mlOfficial.freeShipping,
+    shipping_mode: row.mlOfficial.shippingModeRaw,
+    condition: row.mlOfficial.conditionRaw,
+    package_weight_kg: row.mlOfficial.packageWeightKg
   };
   const pricing =
     row.pricing_sku_id && row.tiene_costo
@@ -417,7 +467,14 @@ export function mergeCatalogRowAfterMlPricePush(
         } as PricingSkuRow)
       : null;
 
-  const derived = computeUnifiedCatalogDerived(mlAccountId, ml, pricing, accountFinancialSettings, null);
+  const derived = computeUnifiedCatalogDerived(
+    mlAccountId,
+    ml,
+    pricing,
+    accountFinancialSettings,
+    row.accountReputation,
+    { sellerId: row.mlOfficial.sellerId, accountDefaultFreeShipping: row.accountDefaultFreeShipping }
+  );
   return {
     ml_row_id: row.ml_row_id,
     item_id: row.item_id,
@@ -461,10 +518,10 @@ export function mapPricingSkusToMlLinks(pricingRows: PricingSkuRow[], unified: U
         logistic_type: fuzzy.logistic_type,
         thumbnail: fuzzy.thumbnail,
         title: fuzzy.title,
-        free_shipping: fuzzy.decisionState.ml.freeShipping,
-        shipping_mode: fuzzy.decisionState.ml.shippingMode,
-        condition: fuzzy.decisionState.ml.condition,
-        package_weight_kg: fuzzy.decisionState.ml.packageWeightKg
+        free_shipping: fuzzy.mlOfficial.freeShipping,
+        shipping_mode: fuzzy.mlOfficial.shippingModeRaw,
+        condition: fuzzy.mlOfficial.conditionRaw,
+        package_weight_kg: fuzzy.mlOfficial.packageWeightKg
       });
     }
   }

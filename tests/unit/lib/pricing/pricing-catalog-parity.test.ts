@@ -19,6 +19,7 @@ function samplePricingRow(over: Partial<PricingSkuRow>): PricingSkuRow {
     reputacion: "Verde / MercadoLíder",
     publicidad_pct: 0.08,
     margen_pct: 0.18,
+    free_shipping: null,
     precio_venta: null,
     ganancia_unit: null,
     roi: null,
@@ -46,12 +47,15 @@ describe("pricing vs catalog decision parity", () => {
       permalink: "https://example.com",
       revenue_30d: 100,
       last_sale_date: null,
-      logistic_type: "fulfillment"
+      logistic_type: "fulfillment",
+      shipping_mode: "me2",
+      free_shipping: null
     };
-    const u = computeUnifiedCatalogDerived(ACC, ml, r);
+    const u = computeUnifiedCatalogDerived(ACC, ml, r, null, null, { sellerId: "parity-seller" });
 
     const pricingDecision = buildSkuDecisionState({
       accountId: ACC,
+      freeShippingSource: u.decisionState.fieldSources.freeShipping,
       ml: {
         itemId: ml.item_id,
         sku: r.sku,
@@ -61,8 +65,12 @@ describe("pricing vs catalog decision parity", () => {
         ventas30d: ml.ventas_30d,
         revenue30d: ml.revenue_30d,
         lastSaleDate: ml.last_sale_date,
-        shippingMode: ml.logistic_type,
-        imageUrl: ml.thumbnail
+        shippingMode: ml.shipping_mode,
+        imageUrl: ml.thumbnail,
+        freeShipping: u.decisionState.ml.freeShipping,
+        condition: (ml as { condition?: string }).condition ?? null,
+        packageWeightKg: u.decisionState.ml.packageWeightKg,
+        logisticType: ml.logistic_type
       },
       inputs: {
         productCost: r.costo,

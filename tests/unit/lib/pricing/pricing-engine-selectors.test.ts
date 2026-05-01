@@ -24,6 +24,7 @@ function samplePricingRow(over: Partial<PricingSkuRow>): PricingSkuRow {
     reputacion: "Verde / MercadoLíder",
     publicidad_pct: 0.08,
     margen_pct: 0.18,
+    free_shipping: null,
     precio_venta: null,
     ganancia_unit: null,
     roi: null,
