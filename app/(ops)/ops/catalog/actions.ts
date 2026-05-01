@@ -164,6 +164,7 @@ export async function saveCostForItem(
       .from("pricing_skus")
       .insert({
         ml_account_id: mlAccountId,
+        ml_item_id: itemId,
         sku,
         peso_kg: null,
         source_file: "ops_catalog_inline",

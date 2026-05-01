@@ -1,52 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { resolveFreeShippingProvenance, parsePackageWeightKgFromMl } from "@/lib/pricing/ml-official-data-contract";
+import { resolveFreeShippingProvenance, parsePackageWeightKgFromMl, formatMlLogisticsPublicationLabel } from "@/lib/pricing/ml-official-data-contract";
 
 describe("resolveFreeShippingProvenance", () => {
-  it("ML boolean gana sobre simulación y configuración", () => {
+  it("ML boolean gana sobre simulación", () => {
     const r = resolveFreeShippingProvenance({
       mlApi: true,
-      skuConfig: false,
-      accountConfig: false,
       localSimulation: false
     });
     expect(r).toEqual({ value: true, source: "ml_api" });
   });
 
-  it("sin ML, aplica sku → account → sim", () => {
+  it("sin ML boolean, aplica solo simulación explícita", () => {
     expect(
       resolveFreeShippingProvenance({
         mlApi: null,
-        skuConfig: true,
-        accountConfig: true,
-        localSimulation: true
-      })
-    ).toEqual({ value: true, source: "sku_config" });
-
-    expect(
-      resolveFreeShippingProvenance({
-        mlApi: null,
-        skuConfig: null,
-        accountConfig: false,
-        localSimulation: true
-      })
-    ).toEqual({ value: false, source: "account_config" });
-
-    expect(
-      resolveFreeShippingProvenance({
-        mlApi: null,
-        skuConfig: null,
-        accountConfig: null,
         localSimulation: true
       })
     ).toEqual({ value: true, source: "local_simulation" });
-  });
 
-  it("todo null → missing", () => {
     expect(
       resolveFreeShippingProvenance({
         mlApi: null,
-        skuConfig: null,
-        accountConfig: null,
+        localSimulation: false
+      })
+    ).toEqual({ value: false, source: "local_simulation" });
+  });
+
+  it("simulación explícita null (operador: sin dato) → local_simulation partial", () => {
+    expect(
+      resolveFreeShippingProvenance({
+        mlApi: null,
+        localSimulation: null
+      })
+    ).toEqual({ value: null, source: "local_simulation" });
+  });
+
+  it("sin ML ni simulación → missing", () => {
+    expect(
+      resolveFreeShippingProvenance({
+        mlApi: null,
         localSimulation: undefined
       })
     ).toEqual({ value: null, source: "missing" });
@@ -62,5 +54,24 @@ describe("parsePackageWeightKgFromMl", () => {
 
   it("acepta positivo", () => {
     expect(parsePackageWeightKgFromMl(0.5)).toBe(0.5);
+  });
+});
+
+describe("formatMlLogisticsPublicationLabel", () => {
+  it("arma etiqueta desde columnas crudas ML", () => {
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "fulfillment",
+        shipping_mode: "me2",
+        free_shipping: true
+      })
+    ).toBe("Full gratis");
+    expect(
+      formatMlLogisticsPublicationLabel({
+        logistic_type: "self_service",
+        shipping_mode: null,
+        free_shipping: false
+      })
+    ).toBe("Flex");
   });
 });

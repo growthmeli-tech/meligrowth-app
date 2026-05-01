@@ -5,6 +5,7 @@ import {
   formatSellerReputationStateForOps
 } from "@/lib/pricing/seller-reputation-state";
 import { buildMlOfficialItemState, resolveFreeShippingProvenance } from "@/lib/pricing/ml-official-data-contract";
+import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-argentina";
 import type { BuildSkuDecisionStateInput, SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import type { Database } from "@/lib/supabase/database.types";
 import type { MlPublicationLink, MlSlice, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
@@ -110,7 +111,7 @@ function pricingSkuFromUnifiedItem(row: UnifiedCatalogItem, mlAccountId: string)
     producto: row.title,
     costo: costoVal,
     ml_item_id: null,
-    logistica: (row.logistica ?? "Flex") as LogisticaType,
+    logistica: (row.logistica ?? shippingModeToOperatorLogistica(row.mlOfficial.shippingMode)) as LogisticaType,
     reputacion: row.reputacion,
     publicidad_pct: row.publicidad_pct,
     margen_pct: row.margen_pct,
@@ -230,8 +231,6 @@ export function computeUnifiedCatalogDerived(
 
   const freeRes = resolveFreeShippingProvenance({
     mlApi: mlOfficial.freeShipping,
-    skuConfig: pricing?.free_shipping === true || pricing?.free_shipping === false ? pricing.free_shipping : null,
-    accountConfig: accountDefFs === true || accountDefFs === false ? accountDefFs : null,
     localSimulation: localSimFs
   });
 
@@ -497,6 +496,31 @@ export function mergeCatalogRowAfterMlPricePush(
     ...derived,
     cuenta_reputacion_ml: row.cuenta_reputacion_ml
   };
+}
+
+/** Una fila de pricing por publicación ML, mismo orden que el catálogo unificado (cobertura 1:1). */
+export function orderPricingSkusByUnifiedCatalog(
+  unified: UnifiedCatalogItem[],
+  pricingRows: PricingSkuRow[]
+): PricingSkuRow[] {
+  const byId = new Map(pricingRows.map((r) => [r.id, r]));
+  const byMlItem = new Map<string, PricingSkuRow>();
+  for (const r of pricingRows) {
+    const k = r.ml_item_id?.trim();
+    if (k && !byMlItem.has(k)) byMlItem.set(k, r);
+  }
+  const ordered: PricingSkuRow[] = [];
+  const seen = new Set<string>();
+  for (const u of unified) {
+    const itemKey = u.item_id?.trim();
+    let r = u.pricing_sku_id ? byId.get(u.pricing_sku_id) : undefined;
+    if (!r && itemKey) r = byMlItem.get(itemKey);
+    if (r && !seen.has(r.id)) {
+      ordered.push(r);
+      seen.add(r.id);
+    }
+  }
+  return ordered;
 }
 
 /** Maps pricing SKU rows to ML publication data for `/ops/pricing`. */

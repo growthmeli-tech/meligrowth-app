@@ -2,6 +2,8 @@ import "server-only";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
+import { normalizeOfficialShippingMode } from "@/lib/pricing/ml-official-data-contract";
+import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-argentina";
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
@@ -19,7 +21,7 @@ export async function ensurePricingSkuForMlItem(
 
   const { data: cat, error: catErr } = await supabase
     .from("ml_catalog_items")
-    .select("id, item_id, title, seller_custom_field, pricing_sku_id")
+    .select("id, item_id, title, seller_custom_field, pricing_sku_id, logistic_type, shipping_mode")
     .eq("ml_account_id", mlAccountId)
     .eq("item_id", trimmedItem)
     .maybeSingle();
@@ -47,6 +49,9 @@ export async function ensurePricingSkuForMlItem(
 
   const skuKey = trimmedItem;
   const producto = (cat.title?.trim() || trimmedItem).slice(0, 2000);
+  const shellLogistica = shippingModeToOperatorLogistica(
+    normalizeOfficialShippingMode(cat.logistic_type ?? null, cat.shipping_mode ?? null)
+  );
 
   const insertPayload: Database["public"]["Tables"]["pricing_skus"]["Insert"] = {
     ml_account_id: mlAccountId,
@@ -55,7 +60,7 @@ export async function ensurePricingSkuForMlItem(
     producto,
     costo: null,
     source_file: "ml_item_shell",
-    logistica: "Flex",
+    logistica: shellLogistica,
     publicidad_pct: 0,
     margen_pct: null,
     reputacion: null,

@@ -12,5 +12,6 @@ export {
   mapPricingSkusToMlLinks,
   mergeCatalogRowAfterCostSave,
   mergeCatalogRowAfterMlPricePush,
+  orderPricingSkusByUnifiedCatalog,
   recomputeCatalogItemFinancials
 } from "./unified-catalog.model";

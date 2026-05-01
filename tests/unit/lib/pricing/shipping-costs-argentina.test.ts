@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { calculateFinancialCostBreakdown } from "@/lib/pricing/calculator";
 import {
   mapMlSellerReputation,
+  mapMlLogisticTypeToShippingMode,
+  formatMlLogisticsLabel,
   resolvePriceBand,
   resolveShippingReputationGroup,
   resolveWeightBand,
@@ -306,5 +308,30 @@ describe("decision cache key — shipping drivers", () => {
       }
     });
     expect(a).not.toBe(noTier);
+  });
+});
+
+describe("formatMlLogisticsLabel", () => {
+  it("etiquetas Full/Flex/ME2 + gratis y Retiro", () => {
+    expect(formatMlLogisticsLabel("full", true)).toBe("Full gratis");
+    expect(formatMlLogisticsLabel("full", false)).toBe("Full");
+    expect(formatMlLogisticsLabel("flex", true)).toBe("Flex gratis");
+    expect(formatMlLogisticsLabel("flex", false)).toBe("Flex");
+    expect(formatMlLogisticsLabel("me2", true)).toBe("ME2 gratis");
+    expect(formatMlLogisticsLabel("me2", false)).toBe("ME2");
+    expect(formatMlLogisticsLabel("retire", true)).toBe("Retiro");
+    expect(formatMlLogisticsLabel("me2", null)).toBe("ME2");
+    expect(formatMlLogisticsLabel(null, null)).toBe("Sin dato");
+  });
+});
+
+describe("mapMlLogisticTypeToShippingMode — contrato ML", () => {
+  it("self_service → flex, drop_off / xd → me2, fulfillment → full", () => {
+    expect(mapMlLogisticTypeToShippingMode("fulfillment")).toBe("full");
+    expect(mapMlLogisticTypeToShippingMode("self_service")).toBe("flex");
+    expect(mapMlLogisticTypeToShippingMode("xd_drop_off")).toBe("me2");
+    expect(mapMlLogisticTypeToShippingMode("drop_off")).toBe("me2");
+    expect(mapMlLogisticTypeToShippingMode("cross_docking")).toBe("me2");
+    expect(mapMlLogisticTypeToShippingMode("")).toBe("unknown");
   });
 });

@@ -4,7 +4,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings.server";
 import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
-import { mapPricingSkusToMlLinks, type MlPublicationLink } from "@/lib/data-v2/unified-catalog";
+import { mapPricingSkusToMlLinks, orderPricingSkusByUnifiedCatalog } from "@/lib/data-v2/unified-catalog";
+import type { MlPublicationLink } from "@/lib/data-v2/unified-catalog";
 import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
 import { getPrimaryAccountForOperator } from "@/lib/data-v2/viewer";
 export default async function OpsPricingPage() {
@@ -28,11 +29,15 @@ export default async function OpsPricingPage() {
   }
 
   const unified = await listUnifiedCatalog(accountResult.data.id);
+  const rowsForEngine =
+    unified.success && unified.data.length > 0
+      ? orderPricingSkusByUnifiedCatalog(unified.data, skusResult.data)
+      : skusResult.data;
   const mlLinksRecord: Record<string, MlPublicationLink> = unified.success
-    ? Object.fromEntries(mapPricingSkusToMlLinks(skusResult.data, unified.data))
+    ? Object.fromEntries(mapPricingSkusToMlLinks(rowsForEngine, unified.data))
     : {};
 
-  const rows = skusResult.data;
+  const rows = rowsForEngine;
 
   if (rows.length === 0) {
     return (

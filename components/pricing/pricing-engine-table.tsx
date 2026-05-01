@@ -27,6 +27,7 @@ import {
 } from "@/lib/pricing/pricing-row-model";
 import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
+import { formatMlLogisticsPublicationLabel } from "@/lib/pricing/ml-official-data-contract";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
@@ -549,6 +550,13 @@ const PricingEngineRow = memo(function PricingEngineRow({
             </Link>
             <div className="mt-1 text-[#6B6B6B]">
               Stock: {mlLink?.stock === null || mlLink?.stock === undefined ? "—" : mlLink.stock}
+            </div>
+            <div className="mt-0.5 text-[10px] font-medium text-[#1A1A1A]">
+              {formatMlLogisticsPublicationLabel({
+                logistic_type: mlLink.logistic_type,
+                shipping_mode: mlLink.shipping_mode,
+                free_shipping: mlLink.free_shipping
+              })}
             </div>
             {decision.decision.stockStatus === "syncing" ? (
               <div className="mt-0.5 text-[10px] text-amber-800">Ventas: Sincronizando…</div>

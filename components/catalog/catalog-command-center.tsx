@@ -55,9 +55,14 @@ import {
   type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
+import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-argentina";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+
+function operatorLogisticaDefault(row: UnifiedCatalogItem): LogisticaType {
+  return (row.logistica ?? shippingModeToOperatorLogistica(row.mlOfficial.shippingMode)) as LogisticaType;
+}
 
 type PricingChoice = { id: string; sku: string | null; producto: string };
 
@@ -127,22 +132,26 @@ function resolveRowAction(row: UnifiedCatalogItem):
   | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" }
   | { kind: "sin_stock" }
   | { kind: "config_cost" }
+  | { kind: "edit_cost" }
   | { kind: "none" } {
   const d = row.decisionState.decision;
+  if (!row.tiene_costo) {
+    return { kind: "config_cost" };
+  }
   if (row.tiene_costo && d.profitabilityStatus === "loss") {
     return { kind: "calc", reason: "pierde" };
   }
   if (row.status === "active" && row.stock === 0) {
     return { kind: "sin_stock" };
   }
-  if (!row.tiene_costo) {
-    return { kind: "config_cost" };
-  }
   if (row.tiene_costo && (d.profitabilityStatus === "risk" || d.profitabilityStatus === "low_margin") && row.price_ml !== null) {
     return { kind: "calc", reason: "optimizar" };
   }
   if (row.precio_vs_objetivo === "bajo") {
     return { kind: "calc", reason: "subir" };
+  }
+  if (row.tiene_costo) {
+    return { kind: "edit_cost" };
   }
   return { kind: "none" };
 }
@@ -491,7 +500,7 @@ export function CatalogCommandCenter({
               {
                 pricing_sku_id: row.pricing_sku_id,
                 costo: row.costo ?? 0,
-                logistica: (row.logistica ?? "Flex") as LogisticaType,
+                logistica: operatorLogisticaDefault(row),
                 margen_pct: marg,
                 publicidad_pct: 0,
                 reputacion: row.reputacion
@@ -559,6 +568,31 @@ export function CatalogCommandCenter({
               if (res.data?.item) {
                 setCatalog((c) => reconcileItemReplace(c, res.data!.item!));
                 if (res.data.item.pricing_sku_id) invalidateDecisionCacheBySkuId(res.data.item.pricing_sku_id);
+              }
+              const merged = res.data?.item ?? rowFor(rowId);
+              if (merged) {
+                const mPct = merged.margen_pct;
+                const margenStr =
+                  mPct !== null && mPct !== undefined && Number.isFinite(Number(mPct))
+                    ? String(Number(mPct) <= 1 ? Math.round(Number(mPct) * 10_000) / 100 : Number(mPct))
+                    : "";
+                const pPct = merged.publicidad_pct;
+                const pubStr =
+                  pPct !== null && pPct !== undefined && Number.isFinite(Number(pPct))
+                    ? String(Number(pPct) <= 1 ? Math.round(Number(pPct) * 10_000) / 100 : Number(pPct))
+                    : "0";
+                setCostForms((prev) => ({
+                  ...prev,
+                  [rowId]: {
+                    costo:
+                      merged.costo !== null && merged.costo !== undefined && Number.isFinite(Number(merged.costo))
+                        ? String(merged.costo)
+                        : prev[rowId]?.costo ?? "",
+                    logistica: operatorLogisticaDefault(merged),
+                    margen: margenStr || prev[rowId]?.margen || "",
+                    pub: pubStr
+                  }
+                }));
               }
               const cid = res.data?.item?.pricing_sku_id ?? `calc:${mlAccountId}:${rowId}`;
               invalidateDecisionCacheBySkuId(cid);
@@ -1052,9 +1086,9 @@ function CatalogRows({
         </div>
       ) : null}
 
-      {inlineCostOpen && !row.tiene_costo ? (
+      {inlineCostOpen ? (
         <div className="border-b border-[#E8E8E2] bg-neutral-50 p-4">
-            <p className="text-sm font-semibold text-[#1A1A1A]">Configurar costo</p>
+            <p className="text-sm font-semibold text-[#1A1A1A]">{row.tiene_costo ? "Editar costo" : "Configurar costo"}</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-xs font-semibold text-[#6B6B6B]">
                 Costo $
@@ -1067,7 +1101,7 @@ function CatalogRows({
                       ...prev,
                       [row.item_id]: {
                         costo: e.target.value,
-                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
                         margen: prev[row.item_id]?.margen ?? "",
                         pub: prev[row.item_id]?.pub ?? "0"
                       }
@@ -1079,7 +1113,7 @@ function CatalogRows({
                 Logística
                 <select
                   className="mt-1 w-full rounded border border-[#E8E8E2] px-2 py-1 text-sm"
-                  value={costForms[row.item_id]?.logistica ?? "Flex"}
+                  value={costForms[row.item_id]?.logistica ?? operatorLogisticaDefault(row)}
                   onChange={(e) =>
                     setCostForms((prev) => ({
                       ...prev,
@@ -1109,7 +1143,7 @@ function CatalogRows({
                       ...prev,
                       [row.item_id]: {
                         costo: prev[row.item_id]?.costo ?? "",
-                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
                         margen: prev[row.item_id]?.margen ?? "",
                         pub: e.target.value
                       }
@@ -1130,7 +1164,7 @@ function CatalogRows({
                       ...prev,
                       [row.item_id]: {
                         costo: prev[row.item_id]?.costo ?? "",
-                        logistica: prev[row.item_id]?.logistica ?? "Flex",
+                        logistica: prev[row.item_id]?.logistica ?? operatorLogisticaDefault(row),
                         margen: e.target.value,
                         pub: prev[row.item_id]?.pub ?? "0"
                       }
@@ -1163,7 +1197,7 @@ function CatalogRows({
                     return;
                   }
                   const publicidad_pct = normalizePct(Number(f?.pub ?? 0));
-                  const logisticaIns = (f?.logistica ?? "Flex") as "Full" | "Flex" | "Retiro domicilio";
+                  const logisticaIns = (f?.logistica ?? operatorLogisticaDefault(row)) as "Full" | "Flex" | "Retiro domicilio";
                   onRowHint(null);
                   startTransition(async () => {
                     const res = await saveCostForItem(mlAccountId, row.item_id, {
@@ -1529,7 +1563,7 @@ function InlinePriceCalculator({
   const [costoStr, setCostoStr] = useState(defaultCost);
   const [pubStr, setPubStr] = useState(defaultPub);
   const [margStr, setMargStr] = useState(defaultMarg);
-  const [logistica, setLogistica] = useState<LogisticaType>((row.logistica ?? "Flex") as LogisticaType);
+  const [logistica, setLogistica] = useState<LogisticaType>(operatorLogisticaDefault(row));
   const [reputacion, setReputacion] = useState<ReputacionType>(coerceReputacion(row.reputacion));
   const [debounced, setDebounced] = useState({ costoStr: defaultCost, pubStr: defaultPub, margStr: defaultMarg });
 
@@ -1558,9 +1592,8 @@ function InlinePriceCalculator({
         ventas30d: row.ventas_30d,
         revenue30d: row.decisionState.ml.revenue30d,
         lastSaleDate: row.decisionState.ml.lastSaleDate,
-        shippingMode: row.logistic_type,
-        listingType: null,
-        freeShipping: row.decisionState.ml.freeShipping,
+        shippingMode: row.mlOfficial.shippingModeRaw,
+        logisticType: row.logistic_type ?? null,
         categoryId: null,
         condition: row.decisionState.ml.condition,
         packageWeightKg: row.decisionState.ml.packageWeightKg
@@ -1603,6 +1636,7 @@ function InlinePriceCalculator({
     row.ventas_30d,
     row.peso_kg,
     row.logistic_type,
+    row.mlOfficial.shippingModeRaw,
     row.pricing_sku_id,
     row.decisionState.ml.revenue30d,
     row.decisionState.ml.lastSaleDate,

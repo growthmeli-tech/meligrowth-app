@@ -10,14 +10,20 @@ import {
 } from "@/lib/pricing/calculator";
 import {
   estimateSellerShippingCostAr,
-  mapMlLogisticTypeToShippingMode,
   parseMlItemCondition,
   resolveSellerReputationForRow,
-  type ShippingCostInput
+  shippingModeToOperatorLogistica,
+  type ShippingCostInput,
+  type ShippingMode
 } from "@/lib/pricing/shipping-costs-argentina";
 import { resolveLogisticsOperatingCostBreakdown } from "@/lib/pricing/logistics-operating-cost";
 import { deriveSellerReputationStateFromPersistedAccount, type SellerReputationState } from "@/lib/pricing/seller-reputation-state";
-import { buildSkuFieldSources, type FieldSource, type SkuFieldSources } from "@/lib/pricing/ml-official-data-contract";
+import {
+  buildSkuFieldSources,
+  normalizeOfficialShippingMode,
+  type FieldSource,
+  type SkuFieldSources
+} from "@/lib/pricing/ml-official-data-contract";
 
 /** V3 forced single action — derived only from `SkuDecisionStateBase` (no recomputation). */
 export type SkuBusinessDecision = {
@@ -120,7 +126,7 @@ export type BuildSkuDecisionStateInput = {
   accountId: string;
   /** Config financiera de cuenta (sin persistencia obligatoria). */
   financialSettings?: SellerFinancialSettings | null;
-  /** Procedencia de `ml.freeShipping` luego de resolución catálogo (ml→sku→cuenta→sim). */
+  /** Procedencia de `ml.freeShipping` luego de resolución catálogo (ML API + simulación explícita de sesión). */
   freeShippingSource?: FieldSource;
   ml: {
     itemId?: string | null;
@@ -163,9 +169,11 @@ export type BuildSkuDecisionStateInput = {
   };
 };
 
-function resolveLogistics(raw: string | null | undefined): LogisticaType {
+function operatorLogisticaFromMl(input: BuildSkuDecisionStateInput): LogisticaType {
+  const raw = input.inputs.logistics;
   if (raw === "Full" || raw === "Flex" || raw === "Retiro domicilio") return raw;
-  return "Flex";
+  const mode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null);
+  return shippingModeToOperatorLogistica(mode);
 }
 
 function mergeSellerFinancialSettings(
@@ -552,11 +560,11 @@ function priorityScoreFrom(input: {
 function pickShippingShortSignal(
   freeShipping: boolean | null,
   breakdown: FinancialCostBreakdown | null,
-  shippingModeRaw: string | null,
+  shippingModeNorm: ShippingMode,
   accountReputationState: SellerReputationState
 ): { msg: string | null; action: string | null } {
   if (!breakdown) return { msg: null, action: null };
-  const mode = mapMlLogisticTypeToShippingMode(shippingModeRaw);
+  const mode = shippingModeNorm;
   if (freeShipping === false) return { msg: null, action: null };
   if (freeShipping === null) {
     return { msg: "Falta dato de envío", action: "Definir envío gratis" };
@@ -807,7 +815,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     input.inputs.iibbPct
   );
 
-  const logistica = resolveLogistics(input.inputs.logistics ?? null);
+  const logistica = operatorLogisticaFromMl(input);
   const rep = coerceReputacion(input.inputs.reputacion ?? null);
   const pesoKg = input.inputs.pesoKg ?? null;
 
@@ -838,11 +846,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
     Number.isFinite(Number(input.ml.packageWeightKg))
       ? Number(input.ml.packageWeightKg)
       : null;
-  const shipMode = mapMlLogisticTypeToShippingMode(
-    (input.ml.shippingMode && String(input.ml.shippingMode).trim() !== "" ? input.ml.shippingMode : null) ??
-      input.ml.logisticType ??
-      null
-  );
+  const shipMode = normalizeOfficialShippingMode(input.ml.logisticType ?? null, input.ml.shippingMode ?? null);
 
   const shippingOmit = (): Omit<ShippingCostInput, "price"> => ({
     packageWeightKg: packageKg,
@@ -1063,7 +1067,7 @@ export function buildSkuDecisionState(input: BuildSkuDecisionStateInput): SkuDec
   const shipSig = pickShippingShortSignal(
     input.ml.freeShipping ?? null,
     financialBreakdown,
-    input.ml.shippingMode ?? null,
+    shipMode,
     accountReputationState
   );
 

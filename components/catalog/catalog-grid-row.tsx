@@ -3,7 +3,7 @@
 import { memo, useRef, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
-import { catalogLogisticsModeColumnLabel } from "@/lib/pricing/shipping-costs-argentina";
+import { formatMlLogisticsLabel } from "@/lib/pricing/shipping-costs-argentina";
 import { cn } from "@/lib/utils";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 
@@ -30,6 +30,7 @@ export type CatalogGridRowAction =
   | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" }
   | { kind: "sin_stock" }
   | { kind: "config_cost" }
+  | { kind: "edit_cost" }
   | { kind: "none" };
 
 export type CatalogGridRowOwnProps = {
@@ -185,7 +186,7 @@ function CatalogGridRowInner({
         {row.price_ml === null ? "—" : ars.format(row.price_ml)}
       </div>
       <div role="cell" className="p-2 text-xs font-medium text-[#1A1A1A]">
-        {catalogLogisticsModeColumnLabel(row.mlOfficial.shippingMode)}
+        {formatMlLogisticsLabel(row.mlOfficial.shippingMode, row.decisionState.ml.freeShipping)}
       </div>
       <div role="cell" className="p-2 tabular-nums">
         {row.costo === null ? "—" : ars.format(row.costo)}
@@ -203,6 +204,14 @@ function CatalogGridRowInner({
               onClick={onToggleInlineCost}
             >
               Configurar →
+            </button>
+          ) : rowAction.kind === "edit_cost" ? (
+            <button
+              type="button"
+              className="text-left font-semibold text-[#1A1A1A] underline decoration-[#1A1A1A] underline-offset-2"
+              onClick={onToggleInlineCost}
+            >
+              Editar costo →
             </button>
           ) : rowAction.kind === "sin_stock" ? (
             <span className="font-semibold text-amber-900">⚠ Sin stock</span>

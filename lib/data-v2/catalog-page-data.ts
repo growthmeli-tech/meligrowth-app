@@ -1,3 +1,4 @@
+import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { getLatestCatalogSyncAt } from "@/lib/data-v2/ml-catalog-items";
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
@@ -14,6 +15,7 @@ export async function loadCatalogPageData(mlAccountId: string): Promise<{
   loadError: string | null;
   financialSettings: SellerFinancialSettings | null;
 }> {
+  await ensurePricingSkuShellsForAccount(mlAccountId);
   const [unified, syncAt, pricingSkus, financialSettings] = await Promise.all([
     listUnifiedCatalog(mlAccountId),
     getLatestCatalogSyncAt(mlAccountId),

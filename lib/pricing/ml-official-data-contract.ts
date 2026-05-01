@@ -1,4 +1,5 @@
 import {
+  formatMlLogisticsLabel,
   mapMlLogisticTypeToShippingMode,
   parseMlItemCondition,
   type ShippingMode
@@ -25,7 +26,7 @@ export type MlOfficialItemState = {
   price: number | null;
   availableQuantity: number | null;
   status: string | null;
-  /** Normalized from `shippingModeRaw` + `logisticTypeRaw` (synced; no inference from freeShipping). */
+  /** Normalized from `logistic_type` first, then `shipping.mode` (API ML; no inference from freeShipping). */
   shippingMode: ShippingMode;
   /** ML `shipping.mode` (API). */
   shippingModeRaw: string | null;
@@ -62,21 +63,11 @@ export function parsePackageWeightKgFromMl(kg: number | null | undefined): numbe
 export function resolveFreeShippingProvenance(input: {
   /** From ml_catalog_items.free_shipping (ML API sync). */
   mlApi: boolean | null;
-  /** pricing_skus.free_shipping */
-  skuConfig: boolean | null;
-  /** ml_accounts.default_free_shipping */
-  accountConfig: boolean | null;
-  /** Session simulation when ML+SKU+account are absent or null. */
-  localSimulation: boolean | null | undefined;
+  /** Session simulation only — explicit operator override; never cuenta/planilla. */
+  localSimulation?: boolean | null;
 }): { value: boolean | null; source: FieldSource } {
   if (input.mlApi === true || input.mlApi === false) {
     return { value: input.mlApi, source: "ml_api" };
-  }
-  if (input.skuConfig === true || input.skuConfig === false) {
-    return { value: input.skuConfig, source: "sku_config" };
-  }
-  if (input.accountConfig === true || input.accountConfig === false) {
-    return { value: input.accountConfig, source: "account_config" };
   }
   if (input.localSimulation === true || input.localSimulation === false) {
     return { value: input.localSimulation, source: "local_simulation" };
@@ -147,14 +138,26 @@ export function buildSkuFieldSources(input: {
   };
 }
 
+/** Prioriza `logistic_type` (API ML); `shipping.mode` solo si el tipo no clasifica. */
 export function normalizeOfficialShippingMode(
-  shippingModeRaw: string | null | undefined,
-  logisticType: string | null | undefined
+  logisticType: string | null | undefined,
+  shippingModeRaw: string | null | undefined
 ): ShippingMode {
-  if (shippingModeRaw !== null && shippingModeRaw !== undefined && String(shippingModeRaw).trim() !== "") {
-    return mapMlLogisticTypeToShippingMode(String(shippingModeRaw).trim());
-  }
-  return mapMlLogisticTypeToShippingMode(logisticType);
+  const fromLt = mapMlLogisticTypeToShippingMode(logisticType);
+  if (fromLt !== "unknown") return fromLt;
+  return mapMlLogisticTypeToShippingMode(shippingModeRaw);
+}
+
+/** Etiqueta OPS única a partir de columnas ML crudas (catálogo / `MlPublicationLink`). */
+export function formatMlLogisticsPublicationLabel(input: {
+  logistic_type?: string | null;
+  shipping_mode?: string | null;
+  free_shipping?: boolean | null;
+}): string {
+  const mode = normalizeOfficialShippingMode(input.logistic_type ?? null, input.shipping_mode ?? null);
+  const fs =
+    input.free_shipping === true || input.free_shipping === false ? input.free_shipping : null;
+  return formatMlLogisticsLabel(mode, fs);
 }
 
 /**
@@ -190,7 +193,7 @@ export function buildMlOfficialItemState(input: {
     price: input.price,
     availableQuantity: input.availableQuantity,
     status: input.status,
-    shippingMode: normalizeOfficialShippingMode(input.shippingModeRaw, input.logisticType),
+    shippingMode: normalizeOfficialShippingMode(input.logisticType, input.shippingModeRaw),
     shippingModeRaw: input.shippingModeRaw,
     logisticTypeRaw: input.logisticType,
     freeShipping: input.freeShipping === true || input.freeShipping === false ? input.freeShipping : null,
