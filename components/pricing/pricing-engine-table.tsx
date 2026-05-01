@@ -439,7 +439,13 @@ const PricingEngineRow = memo(function PricingEngineRow({
     decision.computed.optimalPrice !== null && Number.isFinite(decision.computed.optimalPrice)
       ? Math.round(decision.computed.optimalPrice)
       : null;
-  const showPush = Boolean(hasMlPrice && optimal !== null && mlLink?.item_id && Math.round(priceMl as number) !== optimal);
+  const showPush = Boolean(
+    hasMlPrice &&
+      optimal !== null &&
+      mlLink?.item_id &&
+      mlLink.operabilityStatus !== "blocked" &&
+      Math.round(priceMl as number) !== optimal
+  );
 
   const update = (patch: Partial<PricingDraft>) => {
     patchRowDraft(row.id, patch);

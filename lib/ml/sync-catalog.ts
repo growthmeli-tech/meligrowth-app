@@ -1,10 +1,11 @@
+import { auditFreeShippingContractFromParsedCatalog } from "@/lib/pricing/data-reliability";
 import { getItemCatalog } from "@/lib/ml/endpoints/catalog";
 import { getSellerReputation } from "@/lib/ml/endpoints/users";
 import { getSalesLast30Days } from "@/lib/ml/endpoints/sales";
 import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { invalidateDecisionCacheByAccountId } from "@/lib/pricing/decision-state-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, Json } from "@/lib/supabase/database.types";
 
 type CatalogInsert = Database["public"]["Tables"]["ml_catalog_items"]["Insert"];
 
@@ -24,6 +25,19 @@ export async function syncMlCatalog(
     return [];
   });
 
+  const fsAudit = auditFreeShippingContractFromParsedCatalog(
+    items.map((i) => ({ free_shipping: i.free_shipping, free_shipping_key_present: i.free_shipping_key_present }))
+  );
+  console.info("[ml-catalog:free_shipping_data_contract]", {
+    mlAccountId,
+    sellerId,
+    total: fsAudit.total,
+    freeShippingKeyMissing: fsAudit.freeShippingKeyMissing,
+    freeShippingExplicitNull: fsAudit.freeShippingExplicitNull,
+    pctKeyMissing: fsAudit.total ? Math.round((1000 * fsAudit.freeShippingKeyMissing) / fsAudit.total) / 10 : 0,
+    pctExplicitNull: fsAudit.total ? Math.round((1000 * fsAudit.freeShippingExplicitNull) / fsAudit.total) / 10 : 0
+  });
+
   const supabase = await createServerSupabaseClient();
   const now = new Date().toISOString();
 
@@ -41,8 +55,11 @@ export async function syncMlCatalog(
     thumbnail: row.thumbnail,
     logistic_type: row.logistic_type,
     free_shipping: row.free_shipping,
+    free_shipping_key_present: row.free_shipping_key_present,
     shipping_mode: row.shipping_mode,
     package_weight_kg: row.package_weight_kg,
+    shipping_tags: row.shipping_tags as unknown as Json,
+    shipping_methods: row.shipping_methods as unknown as Json,
     last_synced_at: now
   }));
 

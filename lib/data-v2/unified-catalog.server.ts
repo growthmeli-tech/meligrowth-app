@@ -4,6 +4,7 @@ import { listMlCatalogItems, updateCatalogItemPricingLink } from "@/lib/data-v2/
 import { listPricingSkus } from "@/lib/data-v2/pricing-skus";
 import { getFinancialSettingsForAccount } from "@/lib/data-v2/financial-settings.server";
 import type { ActionResult } from "@/lib/types/api";
+import { coerceShippingMethodsFromJson, coerceShippingTagsFromJson } from "@/lib/pricing/data-reliability";
 import { buildPricingIndexes, computeUnifiedCatalogDerived, resolvePricingRow } from "@/lib/data-v2/unified-catalog.model";
 import type { CatalogHealthSummary, UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog.types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -59,9 +60,12 @@ export async function listUnifiedCatalog(mlAccountId: string): Promise<ActionRes
         last_sale_date: row.last_sale_date ?? null,
         logistic_type: row.logistic_type,
         free_shipping: row.free_shipping,
+        ml_free_shipping_key_present: row.free_shipping_key_present,
         shipping_mode: row.shipping_mode,
         condition: row.condition,
-        package_weight_kg: row.package_weight_kg === null || row.package_weight_kg === undefined ? null : Number(row.package_weight_kg)
+        package_weight_kg: row.package_weight_kg === null || row.package_weight_kg === undefined ? null : Number(row.package_weight_kg),
+        shipping_tags: coerceShippingTagsFromJson(row.shipping_tags),
+        shipping_methods: coerceShippingMethodsFromJson(row.shipping_methods)
       },
       pricing,
       accountFinancialSettings,

@@ -118,6 +118,7 @@ function rowNullMlFreeForSim(): UnifiedCatalogItem {
       ventas_30d: 5,
       title: "Prod",
       free_shipping: null,
+      ml_free_shipping_key_present: true,
       package_weight_kg: 0.5,
       condition: "new",
       shipping_mode: "fulfillment"

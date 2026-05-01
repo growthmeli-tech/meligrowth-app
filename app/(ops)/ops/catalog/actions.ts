@@ -240,6 +240,17 @@ export async function pushOptimalPriceToML(
     return { success: false, error: "Precio objetivo inválido." };
   }
 
+  const unifiedGate = await listUnifiedCatalog(mlAccountId);
+  if (unifiedGate.success) {
+    const u = unifiedGate.data.find((i) => i.item_id === itemId);
+    if (u?.dataTrust.operabilityStatus === "blocked") {
+      return {
+        success: false,
+        error: "Operación bloqueada: faltan precio ML o costo en pricing_sku. Completá datos antes de publicar."
+      };
+    }
+  }
+
   const supabase = gate.data.supabase;
   const { data: itemRow, error: itemErr } = await supabase
     .from("ml_catalog_items")

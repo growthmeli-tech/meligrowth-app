@@ -19,10 +19,16 @@ export interface MlCatalogItem {
   logistic_type: string | null;
   /** ML `shipping.free_shipping` — política comercial, distinta del modo logístico. */
   free_shipping: boolean | null;
+  /** False cuando la clave `free_shipping` no viene en `shipping` (bug de integración / payload incompleto). */
+  free_shipping_key_present: boolean;
   /** ML `shipping.mode` (me2, custom, …). */
   shipping_mode: string | null;
   /** Peso empaquetado (kg) desde `shipping.dimensions` cuando ML lo envía. */
   package_weight_kg: number | null;
+  /** ML `shipping.tags` — señales p.ej. Flex (`self_service`). */
+  shipping_tags: string[];
+  /** ML `shipping.methods` — estructura variable por sitio. */
+  shipping_methods: unknown[];
   last_updated: string;
 }
 
@@ -50,11 +56,16 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
         : null;
 
   let free_shipping: boolean | null = null;
+  let free_shipping_key_present = false;
   let shipping_mode: string | null = null;
   let package_weight_kg: number | null = null;
+  const shipping_tags: string[] = [];
+  const shipping_methods: unknown[] = [];
   if (shipping && typeof shipping === "object") {
     const sh = shipping as Record<string, unknown>;
+    free_shipping_key_present = Object.prototype.hasOwnProperty.call(sh, "free_shipping");
     if (typeof sh.free_shipping === "boolean") free_shipping = sh.free_shipping;
+    else if (sh.free_shipping === null) free_shipping = null;
     if (typeof sh.mode === "string" && sh.mode.trim()) shipping_mode = sh.mode.trim();
     if (typeof sh.dimensions === "string" && sh.dimensions.trim()) {
       const dim = sh.dimensions.trim();
@@ -66,6 +77,14 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
           package_weight_kg = wn / 1000;
         }
       }
+    }
+    if (Array.isArray(sh.tags)) {
+      for (const t of sh.tags) {
+        if (typeof t === "string" && t.trim()) shipping_tags.push(t.trim());
+      }
+    }
+    if (Array.isArray(sh.methods)) {
+      for (const m of sh.methods) shipping_methods.push(m);
     }
   }
 
@@ -120,8 +139,11 @@ function parseItemBody(body: Record<string, unknown>): MlCatalogItem | null {
     thumbnail: thumb,
     logistic_type: logisticType,
     free_shipping,
+    free_shipping_key_present,
     shipping_mode,
     package_weight_kg,
+    shipping_tags,
+    shipping_methods,
     last_updated: lastUpdated
   };
 }

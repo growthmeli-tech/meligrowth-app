@@ -111,7 +111,8 @@ export function pricingMlLinkFieldsEqual(a: MlPublicationLink | undefined, b: Ml
     a.free_shipping === b.free_shipping &&
     a.shipping_mode === b.shipping_mode &&
     a.condition === b.condition &&
-    a.package_weight_kg === b.package_weight_kg
+    a.package_weight_kg === b.package_weight_kg &&
+    a.operabilityStatus === b.operabilityStatus
   );
 }
 
@@ -170,6 +171,7 @@ export function makeMlLinksImpactKey(mlLinks: Record<string, MlPublicationLink> 
     h = fnv1aStr(h, m.logistic_type ?? "");
     h = fnv1aU32(h, m.free_shipping ? 1 : 0);
     h = fnv1aStr(h, m.shipping_mode ?? "");
+    h = fnv1aStr(h, m.operabilityStatus ?? "");
   }
   return `${keys.length}:${h.toString(16)}`;
 }

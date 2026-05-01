@@ -1030,6 +1030,7 @@ function CatalogRows({
   const canPushMlPrice =
     row.status === "active" &&
     row.tiene_costo &&
+    row.dataTrust.operabilityStatus !== "blocked" &&
     row.precio_calculado !== null &&
     row.price_ml !== null &&
     Number.isFinite(row.precio_calculado) &&

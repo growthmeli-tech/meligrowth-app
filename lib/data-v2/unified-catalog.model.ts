@@ -1,6 +1,12 @@
 import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { getCachedDecisionState } from "@/lib/pricing/decision-state-cache";
 import {
+  buildCatalogDataTrust,
+  coerceShippingMethodsFromJson,
+  coerceShippingTagsFromJson,
+  resolveMlFreeShippingKeyPresentForRow
+} from "@/lib/pricing/data-reliability";
+import {
   deriveSellerReputationStateFromPersistedAccount,
   formatSellerReputationStateForOps
 } from "@/lib/pricing/seller-reputation-state";
@@ -93,9 +99,12 @@ function buildRawMlSliceFromRow(row: UnifiedCatalogItem): MlSlice {
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
     free_shipping: row.mlOfficial.freeShipping,
+    ml_free_shipping_key_present: row.dataTrust.mlFreeShippingKeyPresent,
     shipping_mode: row.mlOfficial.shippingModeRaw,
     condition: row.mlOfficial.conditionRaw,
-    package_weight_kg: row.mlOfficial.packageWeightKg
+    package_weight_kg: row.mlOfficial.packageWeightKg,
+    shipping_tags: row.mlShippingTags,
+    shipping_methods: row.mlShippingMethods
   };
 }
 
@@ -316,6 +325,28 @@ export function computeUnifiedCatalogDerived(
 
   const sin_configurar = !tiene_costo;
 
+  const mlKeyPresent = resolveMlFreeShippingKeyPresentForRow(ml.ml_free_shipping_key_present, ml.free_shipping);
+  const shippingTagsSrc = ml.shipping_tags;
+  const shippingTags = Array.isArray(shippingTagsSrc)
+    ? shippingTagsSrc.filter((x): x is string => typeof x === "string")
+    : coerceShippingTagsFromJson(shippingTagsSrc);
+  const shippingMethodsSrc = ml.shipping_methods;
+  const shippingMethods = Array.isArray(shippingMethodsSrc)
+    ? [...shippingMethodsSrc]
+    : coerceShippingMethodsFromJson(shippingMethodsSrc);
+  const mlRawFsBool = ml.free_shipping === true || ml.free_shipping === false ? ml.free_shipping : null;
+  const dataTrust = buildCatalogDataTrust({
+    priceMl: price_ml,
+    productCost,
+    stock,
+    mlFreeShippingBoolean: mlRawFsBool,
+    mlFreeShippingKeyPresent: mlKeyPresent,
+    mlPackageWeightKg: mlOfficial.packageWeightKg,
+    effectiveFreeShipping: freeRes.value,
+    shippingTags,
+    shippingMethods
+  });
+
   return {
     price_ml,
     stock,
@@ -360,7 +391,10 @@ export function computeUnifiedCatalogDerived(
       sellerReputationLevel: accountRepForOfficial.sellerReputationLevel,
       sellerPowerSellerStatus: accountRepForOfficial.sellerPowerSellerStatus,
       sellerReputationSyncedAt: accountRepForOfficial.sellerReputationSyncedAt
-    }
+    },
+    mlShippingTags: shippingTags,
+    mlShippingMethods: shippingMethods,
+    dataTrust
   };
 }
 
@@ -394,9 +428,12 @@ export function mergeCatalogRowAfterCostSave(
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
     free_shipping: row.mlOfficial.freeShipping,
+    ml_free_shipping_key_present: row.dataTrust.mlFreeShippingKeyPresent,
     shipping_mode: row.mlOfficial.shippingModeRaw,
     condition: row.mlOfficial.conditionRaw,
-    package_weight_kg: row.mlOfficial.packageWeightKg
+    package_weight_kg: row.mlOfficial.packageWeightKg,
+    shipping_tags: row.mlShippingTags,
+    shipping_methods: row.mlShippingMethods
   };
   const pricingMinimal = {
     id: saved.pricing_sku_id,
@@ -456,9 +493,12 @@ export function mergeCatalogRowAfterMlPricePush(
     last_sale_date: row.decisionState.ml.lastSaleDate,
     logistic_type: row.logistic_type,
     free_shipping: row.mlOfficial.freeShipping,
+    ml_free_shipping_key_present: row.dataTrust.mlFreeShippingKeyPresent,
     shipping_mode: row.mlOfficial.shippingModeRaw,
     condition: row.mlOfficial.conditionRaw,
-    package_weight_kg: row.mlOfficial.packageWeightKg
+    package_weight_kg: row.mlOfficial.packageWeightKg,
+    shipping_tags: row.mlShippingTags,
+    shipping_methods: row.mlShippingMethods
   };
   const pricing =
     row.pricing_sku_id && row.tiene_costo
@@ -555,7 +595,8 @@ export function mapPricingSkusToMlLinks(pricingRows: PricingSkuRow[], unified: U
         free_shipping: fuzzy.mlOfficial.freeShipping,
         shipping_mode: fuzzy.mlOfficial.shippingModeRaw,
         condition: fuzzy.mlOfficial.conditionRaw,
-        package_weight_kg: fuzzy.mlOfficial.packageWeightKg
+        package_weight_kg: fuzzy.mlOfficial.packageWeightKg,
+        operabilityStatus: fuzzy.dataTrust.operabilityStatus
       });
     }
   }

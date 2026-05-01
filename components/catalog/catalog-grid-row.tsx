@@ -137,6 +137,7 @@ function CatalogGridRowInner({
   const canPushMlPrice =
     row.status === "active" &&
     row.tiene_costo &&
+    row.dataTrust.operabilityStatus !== "blocked" &&
     row.precio_calculado !== null &&
     row.price_ml !== null &&
     Number.isFinite(row.precio_calculado) &&
@@ -171,7 +172,19 @@ function CatalogGridRowInner({
       </div>
       <div role="cell" className="min-h-0 min-w-0 overflow-hidden p-2">
         <div className="line-clamp-2 font-semibold leading-snug text-[#1A1A1A]">{row.title}</div>
-        <div className="mt-1 font-mono text-xs text-[#6B6B6B]">{row.item_id}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-[#6B6B6B]">
+          <span
+            className="select-none"
+            title={`Operabilidad: ${row.dataTrust.operabilityStatus} · Confianza: ${row.dataTrust.decisionConfidence.level}${
+              row.dataTrust.decisionConfidence.reasons.length
+                ? ` · ${row.dataTrust.decisionConfidence.reasons.slice(0, 5).join("; ")}`
+                : ""
+            }`}
+          >
+            {row.dataTrust.operabilityStatus === "operable" ? "🟢" : row.dataTrust.operabilityStatus === "partial" ? "🟡" : "🔴"}
+          </span>
+          <span>{row.item_id}</span>
+        </div>
         {row.sku ? <div className="text-xs text-[#6B6B6B]">SKU costos: {row.sku}</div> : null}
         {!row.tiene_costo ? (
           <span className="mt-2 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-semibold text-neutral-800">

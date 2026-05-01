@@ -1,5 +1,6 @@
 import type { SkuDecisionState } from "@/lib/pricing/sku-decision-state";
 import type { MlOfficialItemState } from "@/lib/pricing/ml-official-data-contract";
+import type { CatalogDataTrust, OperabilityStatus } from "@/lib/pricing/data-reliability";
 
 export interface UnifiedCatalogItem {
   ml_row_id: string;
@@ -62,6 +63,12 @@ export interface UnifiedCatalogItem {
 
   /** Estado derivado compartido con `/ops/pricing` y vistas internas. */
   decisionState: SkuDecisionState;
+
+  /** Señales ML crudas persistidas (tags / methods) para Flex y auditoría. */
+  mlShippingTags: string[];
+  mlShippingMethods: unknown[];
+  /** Completitud, operabilidad y confianza determinística (sin inferir ML). */
+  dataTrust: CatalogDataTrust;
 }
 
 export type MlSlice = {
@@ -81,9 +88,13 @@ export type MlSlice = {
   logistic_type?: string | null;
   /** ML API / sync — política envío gratis (≠ modo logístico). */
   free_shipping?: boolean | null;
+  /** Persistido en sync ML; null = fila legacy sin auditoría de clave. */
+  ml_free_shipping_key_present?: boolean | null;
   shipping_mode?: string | null;
   condition?: string | null;
   package_weight_kg?: number | null;
+  shipping_tags?: string[];
+  shipping_methods?: unknown[];
 };
 
 export type MlPublicationLink = {
@@ -101,6 +112,8 @@ export type MlPublicationLink = {
   shipping_mode?: string | null;
   condition?: string | null;
   package_weight_kg?: number | null;
+  /** Cuando el link viene del catálogo unificado — gate de ejecución ML. */
+  operabilityStatus?: OperabilityStatus;
 };
 
 export type CatalogHealthSummary = {

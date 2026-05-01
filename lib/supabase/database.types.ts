@@ -707,8 +707,11 @@ export type Database = {
           last_price_push_value: number | null;
           last_price_push_status: "pending" | "success" | "error" | null;
           free_shipping: boolean | null;
+          free_shipping_key_present: boolean | null;
           shipping_mode: string | null;
           package_weight_kg: number | null;
+          shipping_tags: Json;
+          shipping_methods: Json;
         };
         Insert: Partial<Database["public"]["Tables"]["ml_catalog_items"]["Row"]> & {
           ml_account_id: string;
