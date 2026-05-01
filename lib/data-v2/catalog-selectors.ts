@@ -164,7 +164,37 @@ export function selectCatalogPromMargenReal(state: CatalogState, ctx?: CatalogEf
   for (const id of state.orderedIds) {
     const row = resolveEffectiveRow(state, id, ctx);
     if (!row) continue;
-    if (!row.tiene_costo || row.margen_real_pct === null || row.costo === null || row.costo <= 0) continue;
+    if (
+      !row.tiene_costo ||
+      row.decisionState.computed.profitCompleteness !== "net_full" ||
+      row.margen_real_pct === null ||
+      row.costo === null ||
+      row.costo <= 0
+    ) {
+      continue;
+    }
+    w += row.costo;
+    acc += row.margen_real_pct * row.costo;
+  }
+  if (w <= 0) return null;
+  return acc / w;
+}
+
+export function selectCatalogPromMargenEstimado(state: CatalogState, ctx?: CatalogEffectiveContext): number | null {
+  let w = 0;
+  let acc = 0;
+  for (const id of state.orderedIds) {
+    const row = resolveEffectiveRow(state, id, ctx);
+    if (!row) continue;
+    if (
+      !row.tiene_costo ||
+      row.decisionState.computed.profitCompleteness === "net_full" ||
+      row.margen_real_pct === null ||
+      row.costo === null ||
+      row.costo <= 0
+    ) {
+      continue;
+    }
     w += row.costo;
     acc += row.margen_real_pct * row.costo;
   }

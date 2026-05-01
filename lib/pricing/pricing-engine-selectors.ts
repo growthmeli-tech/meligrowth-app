@@ -64,11 +64,13 @@ export function selectHeaderMetrics(
   mlOverride: Record<string, number>,
   mlAccountId: string,
   financialSettings: SellerFinancialSettings | null
-): { weightedMargenObj: number | null; weightedReal: number | null } {
+): { weightedMargenObj: number | null; weightedReal: number | null; weightedEstimated: number | null } {
   let wM = 0;
   let accM = 0;
   let wR = 0;
   let accR = 0;
+  let wE = 0;
+  let accE = 0;
   for (const r of rows) {
     const d = getDraft(r.id);
     if (!d) continue;
@@ -82,12 +84,18 @@ export function selectHeaderMetrics(
     const dec = getCachedDecisionState(r.id, buildPricingRowInput(mlAccountId, r, d, ml, financialSettings));
     const m = dec.computed.realMarginPct;
     if (m !== null && Number.isFinite(m)) {
-      wR += c;
-      accR += m * c;
+      if (dec.computed.profitCompleteness === "net_full") {
+        wR += c;
+        accR += m * c;
+      } else {
+        wE += c;
+        accE += m * c;
+      }
     }
   }
   return {
     weightedMargenObj: wM <= 0 ? null : accM / wM,
-    weightedReal: wR <= 0 ? null : accR / wR
+    weightedReal: wR <= 0 ? null : accR / wR,
+    weightedEstimated: wE <= 0 ? null : accE / wE
   };
 }

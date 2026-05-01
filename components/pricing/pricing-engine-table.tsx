@@ -25,9 +25,10 @@ import {
   type PricingDraft,
   type PricingSkuRow
 } from "@/lib/pricing/pricing-row-model";
-import { normalizePct, explainCashInUnavailable, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
+import { normalizePct, type LogisticaType, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
 import { formatMlLogisticsPublicationLabel } from "@/lib/pricing/ml-official-data-contract";
+import { canTriggerMlPricePush, toCashInDisplay, toOptimalPriceDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
 import { savePricingSkuInputs } from "@/app/(ops)/ops/pricing/actions";
 import { pushOptimalPriceToML } from "@/app/(ops)/ops/catalog/actions";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
@@ -245,6 +246,9 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
           <span className="rounded-lg border border-[#E8E8E2] bg-white px-3 py-1 font-semibold text-[#1A1A1A]">
             Margen real prom.: {headerMetrics.weightedReal === null ? "—" : pctLabel(headerMetrics.weightedReal)}
           </span>
+          <span className="rounded-lg border border-[#E8E8E2] bg-white px-3 py-1 font-semibold text-[#1A1A1A]">
+            Margen estimado prom.: {headerMetrics.weightedEstimated === null ? "—" : pctLabel(headerMetrics.weightedEstimated)}
+          </span>
         </div>
       </div>
 
@@ -322,7 +326,7 @@ export function PricingEngineTable({ rows, mlLinks, mlAccountId, initialFinancia
               <th className="p-2">Ads</th>
               <th className="p-2">Margen</th>
               <th className="border-l-2 border-[#E8E8E2] p-2">Precio óptimo</th>
-              <th className="border-l-2 border-[#E8E8E2] p-2">Ganancia / margen</th>
+              <th className="border-l-2 border-[#E8E8E2] p-2">Ganancia real/estimada · Margen real/estimado</th>
               <th className="p-2">ML</th>
             </tr>
           </thead>
@@ -456,27 +460,42 @@ const PricingEngineRow = memo(function PricingEngineRow({
     patchRowDraft(row.id, patch);
   };
 
-  const gananciaReal = decision.computed.realProfit;
-  const margenReal = decision.computed.realMarginPct;
-  const cashIn = decision.computed.cashInAmount;
-  const cashInReason = explainCashInUnavailable(
-    hasMlPrice ? (priceMl as number) : null,
-    decision.computed.financialBreakdown,
-    decision.ml.freeShipping
-  );
+  const profitDisplay = toProfitDisplay(decision.computed);
+  const cashInDisplay = toCashInDisplay({
+    computed: decision.computed,
+    currentPrice: hasMlPrice ? (priceMl as number) : null,
+    freeShipping: decision.ml.freeShipping
+  });
+  const optimalDisplay = toOptimalPriceDisplay({
+    optimalPrice: optimal,
+    calculationStatus: decision.sync.calculationStatus
+  });
+  const canPushMl =
+    showPush &&
+    canTriggerMlPricePush({
+      decision,
+      cashInDisplay,
+      operabilityStatus: mlLink?.operabilityStatus,
+      optimalPrice: optimal
+    });
   const ganObj = decision.computed.optimalGananciaUnit;
   const margObj = decision.inputs.targetMarginPct;
 
   const resultadoBlock = (() => {
-    if (hasMlPrice && gananciaReal !== null && margenReal !== null && !Number.isNaN(gananciaReal)) {
-      const tone = resultadoTone(gananciaReal, margenReal);
+    if (hasMlPrice && profitDisplay.kind !== "unavailable") {
+      const amount = profitDisplay.amount;
+      const margin = profitDisplay.marginPct;
+      const tone = resultadoTone(amount, margin ?? 0);
       return (
         <div className={cn("space-y-0.5 tabular-nums", tone)}>
           <div className="font-semibold">
-            {gananciaReal >= 0 ? "+" : ""}
-            {ars.format(gananciaReal)}
+            {amount >= 0 ? "+" : ""}
+            {profitDisplay.kind === "estimated" ? "≈ " : ""}
+            {ars.format(amount)}
           </div>
-          <div className="text-xs">{(margenReal * 100).toFixed(1)}% real</div>
+          <div className="text-xs">
+            {margin !== null ? `${(margin * 100).toFixed(1)}%` : "—"} {profitDisplay.kind === "estimated" ? "estimado" : "real"}
+          </div>
           {netMarginDisplayLabel(decision.computed) ? (
             <div className="text-[10px] text-amber-900">{netMarginDisplayLabel(decision.computed)}</div>
           ) : null}
@@ -498,14 +517,9 @@ const PricingEngineRow = memo(function PricingEngineRow({
     return <span className="text-[#6B6B6B]">—</span>;
   })();
 
-  const optimalSubtitle =
-    d.margen_pct === null ? (
-      <div className="text-[10px] font-normal text-amber-800">Falta margen objetivo</div>
-    ) : decision.sync.calculationStatus === "error" ? (
-      <div className="text-[10px] font-normal text-amber-800">Sin convergencia</div>
-    ) : decision.sync.calculationStatus === "partial" ? (
-      <div className="text-[10px] font-normal text-amber-800">Cálculo parcial (fiscal o logística incompleta)</div>
-    ) : null;
+  const optimalSubtitle = optimalDisplay.kind !== "real" ? (
+    <div className="text-[10px] font-normal text-amber-800">{optimalDisplay.subtitle}</div>
+  ) : null;
 
   return (
     <tr
@@ -594,12 +608,15 @@ const PricingEngineRow = memo(function PricingEngineRow({
         {hasMlPrice ? ars.format(priceMl as number) : "—"}
       </td>
       <td className="p-2 tabular-nums text-xs text-[#1A1A1A]">
-        <span
-          className={cn(cashIn !== null && Number.isFinite(cashIn) ? "" : "font-sans text-amber-900")}
-          title={cashInReason ?? undefined}
-        >
-          {cashIn !== null && Number.isFinite(cashIn) ? ars.format(cashIn) : (cashInReason ?? "—")}
-        </span>
+        {cashInDisplay.kind === "real" ? (
+          <span>{ars.format(cashInDisplay.amount)}</span>
+        ) : cashInDisplay.kind === "estimated" ? (
+          <span className="font-semibold text-amber-900">≈ {ars.format(cashInDisplay.amount)}</span>
+        ) : (
+          <span className="font-sans text-amber-900" title={cashInDisplay.reason}>
+            {cashInDisplay.reason}
+          </span>
+        )}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-1">
         {editingField === "costo" ? (
@@ -689,7 +706,11 @@ const PricingEngineRow = memo(function PricingEngineRow({
         )}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 tabular-nums text-sm font-semibold text-[#1A1A1A]">
-        {optimal !== null ? ars.format(optimal) : "—"}
+        {optimalDisplay.kind === "real"
+          ? ars.format(optimalDisplay.amount)
+          : optimalDisplay.kind === "estimated"
+            ? `≈ ${ars.format(optimalDisplay.amount)}`
+            : "—"}
         {optimalSubtitle}
       </td>
       <td className="border-l-2 border-[#E8E8E2] p-2 text-sm">{resultadoBlock}</td>
@@ -706,7 +727,7 @@ const PricingEngineRow = memo(function PricingEngineRow({
           >
             Configurar
           </button>
-        ) : showPush && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
+        ) : canPushMl && mlLink?.item_id && optimal !== null && priceMl !== undefined ? (
           <div className="space-y-2">
             {!pushOpen ? (
               <button
@@ -762,7 +783,9 @@ const PricingEngineRow = memo(function PricingEngineRow({
             )}
           </div>
         ) : (
-          <span className="text-[#6B6B6B]">—</span>
+          <span className="text-[#6B6B6B]">
+            {decision.computed.profitCompleteness === "net_full" ? "—" : "Completar datos"}
+          </span>
         )}
       </td>
     </tr>

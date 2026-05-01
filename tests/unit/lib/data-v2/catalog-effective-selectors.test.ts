@@ -8,6 +8,7 @@ import {
 } from "@/lib/data-v2/catalog-effective-row";
 import {
   selectCatalogCounts,
+  selectCatalogPromMargenEstimado,
   selectCatalogPromMargenReal,
   selectCatalogVisibleRows,
   makeCatalogFilterImpactKey
@@ -208,8 +209,17 @@ describe("selectores + fila efectiva", () => {
       financialSettings: null,
       localShippingPolicyOverrides: { [row.item_id]: { overrideFreeShipping: false } }
     });
-    expect(p0).not.toBeNull();
-    expect(p1).not.toBeNull();
+    expect(p0).toBeNull();
+    expect(p1).toBeNull();
+  });
+
+  it("margen real excluye parciales y margen estimado los incluye", () => {
+    const row = rowNullMlFreeForSim();
+    const state = catalogStateFromItems([row]);
+    const real = selectCatalogPromMargenReal(state);
+    const estimated = selectCatalogPromMargenEstimado(state);
+    expect(real).toBeNull();
+    expect(estimated).not.toBeNull();
   });
 
   it("catalogOrderedEffectiveItems alinea lista con override", () => {

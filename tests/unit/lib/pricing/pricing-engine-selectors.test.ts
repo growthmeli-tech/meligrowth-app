@@ -68,6 +68,7 @@ describe("pricing-engine-selectors", () => {
     const m = selectHeaderMetrics(rows, (id) => drafts[id], undefined, {}, ACC, null);
     expect(m.weightedMargenObj).not.toBeNull();
     expect(typeof m.weightedReal === "number" || m.weightedReal === null).toBe(true);
+    expect(typeof m.weightedEstimated === "number" || m.weightedEstimated === null).toBe(true);
   });
 });
 

@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { cn } from "@/lib/utils";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
+import { canTriggerMlPricePush, toCashInDisplay, toProfitDisplay } from "@/lib/pricing/financial-display";
 
 const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 
@@ -26,7 +27,7 @@ function isCriticoRow(row: UnifiedCatalogItem): boolean {
 }
 
 export type CatalogGridRowAction =
-  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" }
+  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" | "completar" }
   | { kind: "sin_stock" }
   | { kind: "config_cost" }
   | { kind: "edit_cost" }
@@ -102,19 +103,18 @@ function CatalogGridRowInner({
 
   const ds = row.decisionState;
 
+  const profitDisplay = toProfitDisplay(ds.computed);
   const gananciaRealLabel =
-    !row.tiene_costo || row.costo === null
+    !row.tiene_costo || row.costo === null || profitDisplay.kind === "unavailable"
       ? "—"
-      : ds.computed.realProfit !== null && Number.isFinite(ds.computed.realProfit)
-        ? ars.format(ds.computed.realProfit)
-        : "—";
+      : `${profitDisplay.kind === "estimated" ? "≈ " : ""}${ars.format(profitDisplay.amount)}`;
 
   const margenRealLabel =
-    !row.tiene_costo || ds.computed.realMarginPct === null
+    !row.tiene_costo || profitDisplay.kind === "unavailable"
       ? "—"
-      : `${(ds.computed.realMarginPct * 100).toFixed(1)}% real${
-          netMarginDisplayLabel(ds.computed) ? ` · ${netMarginDisplayLabel(ds.computed)}` : ""
-        }`;
+      : `${profitDisplay.marginPct === null ? "—" : `${(profitDisplay.marginPct * 100).toFixed(1)}%`} ${
+          profitDisplay.kind === "estimated" ? "estimado" : "real"
+        }${netMarginDisplayLabel(ds.computed) ? ` · ${netMarginDisplayLabel(ds.computed)}` : ""}`;
 
   const pierde = ds.decision.profitabilityStatus === "loss";
   const riesgoMargen = ds.decision.profitabilityStatus === "risk" || ds.decision.profitabilityStatus === "low_margin";
@@ -132,15 +132,24 @@ function CatalogGridRowInner({
   const precioCellClass = row.precio_vs_objetivo === "bajo" ? "bg-orange-50 font-semibold text-orange-950" : "";
 
   const stockSt = ds.decision.stockStatus;
+  const cashInDisplay = toCashInDisplay({
+    computed: ds.computed,
+    currentPrice: row.price_ml,
+    freeShipping: ds.ml.freeShipping
+  });
 
   const canPushMlPrice =
     row.status === "active" &&
-    row.tiene_costo &&
-    row.dataTrust.operabilityStatus !== "blocked" &&
     row.precio_calculado !== null &&
     row.price_ml !== null &&
     Number.isFinite(row.precio_calculado) &&
     Number.isFinite(row.price_ml) &&
+    canTriggerMlPricePush({
+      decision: ds,
+      cashInDisplay,
+      operabilityStatus: row.dataTrust.operabilityStatus,
+      optimalPrice: row.precio_calculado
+    }) &&
     Math.round(row.precio_calculado) !== Math.round(row.price_ml);
 
   const stockBadgeClass =
@@ -240,7 +249,9 @@ function CatalogGridRowInner({
                 ? "🔴 Pierde dinero"
                 : rowAction.reason === "optimizar"
                   ? "📈 Optimizar precio"
-                  : "↑ Subir precio"}
+                  : rowAction.reason === "completar"
+                    ? "Completar datos"
+                    : "↑ Subir precio"}
             </button>
           ) : (
             <span className="text-[#6B6B6B]"> </span>

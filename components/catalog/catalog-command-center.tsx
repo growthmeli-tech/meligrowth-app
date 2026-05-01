@@ -37,6 +37,7 @@ import {
   makeCatalogFilterImpactKey,
   selectCatalogCounts,
   selectCatalogFilteredIds,
+  selectCatalogPromMargenEstimado,
   selectCatalogPromMargenReal
 } from "@/lib/data-v2/catalog-selectors";
 import { catalogDetailPanelOrderedIds } from "@/lib/data-v2/catalog-detail-panel-ids";
@@ -49,7 +50,6 @@ import {
 import { cn } from "@/lib/utils";
 import {
   coerceReputacion,
-  explainCashInUnavailable,
   mlComisionRate,
   normalizePct,
   type LogisticaType,
@@ -57,6 +57,7 @@ import {
   type SellerFinancialSettings
 } from "@/lib/pricing/calculator";
 import { netMarginDisplayLabel } from "@/lib/pricing/profit-labels";
+import { canTriggerMlPricePush, toCashInDisplay } from "@/lib/pricing/financial-display";
 import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-argentina";
 import { AccountFiscalConfigPanel } from "@/components/pricing/account-fiscal-config-panel";
 
@@ -131,7 +132,7 @@ function isCriticoRow(row: UnifiedCatalogItem): boolean {
 }
 
 function resolveRowAction(row: UnifiedCatalogItem):
-  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" }
+  | { kind: "calc"; reason: "pierde" | "optimizar" | "subir" | "completar" }
   | { kind: "sin_stock" }
   | { kind: "config_cost" }
   | { kind: "edit_cost" }
@@ -145,6 +146,9 @@ function resolveRowAction(row: UnifiedCatalogItem):
   }
   if (row.status === "active" && row.stock === 0) {
     return { kind: "sin_stock" };
+  }
+  if (row.decisionState.computed.profitCompleteness !== "net_full") {
+    return { kind: "calc", reason: "completar" };
   }
   if (row.tiene_costo && (d.profitabilityStatus === "risk" || d.profitabilityStatus === "low_margin") && row.price_ml !== null) {
     return { kind: "calc", reason: "optimizar" };
@@ -370,6 +374,10 @@ export function CatalogCommandCenter({
 
   const promMargenReal = useMemo(
     () => selectCatalogPromMargenReal(catalog, catalogEffectiveCtx),
+    [catalog, catalogEffectiveCtx]
+  );
+  const promMargenEstimado = useMemo(
+    () => selectCatalogPromMargenEstimado(catalog, catalogEffectiveCtx),
     [catalog, catalogEffectiveCtx]
   );
 
@@ -635,7 +643,8 @@ export function CatalogCommandCenter({
           <div>
             <h1 className="text-xl font-black text-[#1A1A1A]">CATÁLOGO MELIGROWTH</h1>
             <p className="mt-1 text-sm text-[#6B6B6B]">
-              {items.length} publicaciones · Margen real: {promMargenReal === null ? "—" : `${(promMargenReal * 100).toFixed(1)}%`} · Sync:{" "}
+              {items.length} publicaciones · Margen real: {promMargenReal === null ? "—" : `${(promMargenReal * 100).toFixed(1)}%`} · Margen estimado:{" "}
+              {promMargenEstimado === null ? "—" : `${(promMargenEstimado * 100).toFixed(1)}%`} · Sync:{" "}
               {formatSyncLabel(lastSyncedAt)}
               {stale ? <span className="ml-2 font-semibold text-amber-800">· Datos desactualizados</span> : null}
             </p>
@@ -1016,8 +1025,11 @@ function CatalogRows({
 }) {
   const ds = row.decisionState;
   const fb = ds.computed.financialBreakdown;
-  const cashIn = ds.computed.cashInAmount;
-  const cashInReason = explainCashInUnavailable(row.price_ml, fb, ds.ml.freeShipping);
+  const cashInDisplay = toCashInDisplay({
+    computed: ds.computed,
+    currentPrice: row.price_ml,
+    freeShipping: ds.ml.freeShipping
+  });
   const rep = coerceReputacion(row.reputacion);
 
   const dailySales = ds.computed.velocity30d;
@@ -1030,12 +1042,16 @@ function CatalogRows({
 
   const canPushMlPrice =
     row.status === "active" &&
-    row.tiene_costo &&
-    row.dataTrust.operabilityStatus !== "blocked" &&
     row.precio_calculado !== null &&
     row.price_ml !== null &&
     Number.isFinite(row.precio_calculado) &&
     Number.isFinite(row.price_ml) &&
+    canTriggerMlPricePush({
+      decision: ds,
+      cashInDisplay,
+      operabilityStatus: row.dataTrust.operabilityStatus,
+      optimalPrice: row.precio_calculado
+    }) &&
     Math.round(row.precio_calculado) !== Math.round(row.price_ml);
 
   const comisionPctLabel = `${(mlComisionRate(rep) * 100).toFixed(2)}%`;
@@ -1311,11 +1327,13 @@ function CatalogRows({
                         <span>En caja:</span>
                         <span
                           className="max-w-[min(280px,55vw)] text-right font-sans text-xs leading-snug"
-                          title={cashInReason ?? undefined}
+                          title={cashInDisplay.kind === "unavailable" ? cashInDisplay.reason : undefined}
                         >
-                          {cashIn !== null && Number.isFinite(cashIn)
-                            ? ars.format(cashIn)
-                            : (cashInReason ?? "—")}
+                          {cashInDisplay.kind === "real"
+                            ? ars.format(cashInDisplay.amount)
+                            : cashInDisplay.kind === "estimated"
+                              ? `≈ ${ars.format(cashInDisplay.amount)}`
+                              : cashInDisplay.reason}
                         </span>
                       </li>
                       {fb ? (
@@ -1411,7 +1429,7 @@ function CatalogRows({
                         <li className="flex justify-between gap-4 font-sans text-amber-900">
                           <span>Estado:</span>
                           <span className="max-w-[min(280px,55vw)] text-right leading-snug">
-                            {cashInReason ?? "Sin desglose financiero"}
+                            {cashInDisplay.kind === "unavailable" ? cashInDisplay.reason : "Sin desglose financiero"}
                           </span>
                         </li>
                       )}

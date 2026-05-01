@@ -26,7 +26,7 @@ vi.mock("@/app/(ops)/ops/catalog/actions", () => ({
 
 vi.mock("@/lib/pricing/pricing-engine-selectors", () => ({
   selectFilteredPricingRowIds: (rows: Array<{ id: string }>) => rows.map((r) => r.id),
-  selectHeaderMetrics: () => ({ weightedMargenObj: null, weightedReal: null }),
+  selectHeaderMetrics: () => ({ weightedMargenObj: null, weightedReal: null, weightedEstimated: null }),
   selectVisiblePricingRows: (rowsById: Map<string, unknown>, filteredIds: string[]) => filteredIds.map((id) => rowsById.get(id)),
   pricingTierFromDecision: () => "ok"
 }));
@@ -38,6 +38,7 @@ vi.mock("@/lib/pricing/decision-state-cache", () => ({
   invalidateDecisionCacheByAccountId: vi.fn(),
   getCachedDecisionState: (_id: string, input: { ml: { currentPrice: number | null; freeShipping: boolean | null }; inputs: { productCost: number | null; targetMarginPct: number | null } }) => {
     const missingCost = input.inputs.productCost === null;
+    const partial = input.ml.freeShipping === null;
     return {
       ml: {
         currentPrice: input.ml.currentPrice ?? 20000,
@@ -52,7 +53,8 @@ vi.mock("@/lib/pricing/decision-state-cache", () => ({
         realProfit: missingCost ? null : 700,
         realMarginPct: missingCost ? null : 0.12,
         cashInAmount: 17000,
-        financialBreakdown: null
+        profitCompleteness: partial ? "net_partial" : "net_full",
+        financialBreakdown: partial ? { missing: ["iibb"] } : { missing: [] }
       },
       decision: {
         profitabilityStatus: missingCost ? "risk" : "healthy",
@@ -73,7 +75,7 @@ vi.mock("@/lib/pricing/decision-state-cache", () => ({
             action: "Ninguna"
           },
       sync: {
-        calculationStatus: "ok"
+        calculationStatus: partial ? "partial" : "valid"
       }
     };
   }
@@ -99,6 +101,32 @@ describe("PricingEngineTable - Configurar flow", () => {
     savePricingSkuInputs.mockReset();
     savePricingSkuInputs.mockResolvedValue({ success: true, data: { id: "sku-1" } });
     pushOptimalPriceToML.mockReset();
+  });
+
+  it("partial profit and cash-in show estimated markers and CTA stays blocked", async () => {
+    const partialRow = { ...(rowWithoutCost() as Record<string, unknown>), id: "sku-2", costo: 10000 } as never;
+    render(
+      <PricingEngineTable
+        rows={[rowWithoutCost(), partialRow]}
+        mlLinks={{
+          "sku-2": {
+            item_id: "MLA2",
+            price_ml: 20000,
+            stock: 10,
+            free_shipping: null,
+            logistic_type: "self_service",
+            shipping_mode: "me2",
+            permalink: "https://example.com/mla2",
+            operabilityStatus: "operable"
+          } as never
+        }}
+        mlAccountId="acc-1"
+        initialFinancialSettings={null}
+      />
+    );
+
+    expect(screen.getAllByText(/\u2248/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Completar datos")).toBeTruthy();
   });
 
   it("click Configurar abre editor de costo y Enter guarda cambios", async () => {

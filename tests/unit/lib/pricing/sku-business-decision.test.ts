@@ -502,6 +502,56 @@ describe("deriveSkuBusinessDecision V3 precedence", () => {
     expect(s.message).toBe("Margen bajo");
   });
 
+  it("prioritizes missing fiscal over optimize price", () => {
+    const b = {
+      productCost: 3000,
+      mlFeeAmount: 100,
+      mlFeePct: 0.1,
+      fixedUnitCost: null,
+      adsAmount: 0,
+      adsPct: 0,
+      iibbAmount: null,
+      iibbPct: null,
+      taxAmount: null,
+      taxPct: null,
+      mlShippingAmount: 0,
+      fulfillmentAmount: null,
+      internalLogisticsAmount: null,
+      logisticsOperatingAmount: null,
+      logisticsOperating: logisticsRetireComplete(),
+      additionalCostsAmount: null,
+      totalCost: 5000,
+      netProfit: 1000,
+      netMarginPct: 0.1,
+      cashInAmount: null,
+      shipping: {
+        sellerShippingCost: 0,
+        source: "buyer_pays_shipping" as const,
+        completeness: "complete" as const,
+        priceBand: null,
+        weightBand: null,
+        reputationGroup: "unknown" as const,
+        missing: [] as string[],
+        reasons: [] as string[]
+      },
+      reasons: [],
+      missing: ["iibb", "tax"] as string[]
+    };
+    const s = deriveSkuBusinessDecision(
+      base({
+        computed: {
+          ...base().computed,
+          financialBreakdown: b,
+          realProfit: 1000,
+          realMarginPct: 0.08,
+          profitCompleteness: "net_partial"
+        }
+      })
+    );
+    expect(s.type).toBe("configure_fiscal");
+    expect(s.action).toBe("Configurar impuestos");
+  });
+
   it("[7] stock critical when prior rules pass", () => {
     const s = deriveSkuBusinessDecision(
       base({
