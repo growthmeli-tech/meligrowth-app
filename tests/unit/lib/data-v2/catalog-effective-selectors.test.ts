@@ -8,9 +8,9 @@ import {
 } from "@/lib/data-v2/catalog-effective-row";
 import {
   selectCatalogCounts,
-  selectCatalogFilteredIds,
   selectCatalogPromMargenReal,
-  selectCatalogVisibleRows
+  selectCatalogVisibleRows,
+  makeCatalogFilterImpactKey
 } from "@/lib/data-v2/catalog-selectors";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import type { Database } from "@/lib/supabase/database.types";
@@ -158,6 +158,23 @@ describe("selectores + fila efectiva", () => {
       localShippingPolicyOverrides: { [row.item_id]: { overrideFreeShipping: false } }
     });
     expect(list[0].decisionState.ml.freeShipping).toBe(false);
+  });
+});
+
+describe("makeCatalogFilterImpactKey", () => {
+  it("incluye fingerprint de overrides para invalidar memo de filtros", () => {
+    const f = {
+      q: "",
+      statusFilter: "all",
+      logFilter: "all",
+      margenFilter: "all",
+      costFilter: "all",
+      stockFilter: "all",
+      activePill: null as const
+    };
+    const a = makeCatalogFilterImpactKey(f, "");
+    const b = makeCatalogFilterImpactKey(f, "x\x1etrue");
+    expect(a).not.toBe(b);
   });
 });
 
