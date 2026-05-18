@@ -118,10 +118,20 @@ async function readSessionTokens(storagePath: string) {
 }
 
 export async function saveSessionTokens(storagePath: string, tokens: MlStoredTokens) {
-  const supabase = createServiceClient();
   const canonicalTokens = normalizeStoredTokens(tokens);
   const rawPayload = JSON.stringify(canonicalTokens);
-  const storedPayload = isAppEncryptionConfigured() ? encryptJsonString(rawPayload) : rawPayload;
+  if (!isAppEncryptionConfigured()) {
+    throw new Error("APP_ENCRYPTION_KEY is required to store ML session tokens");
+  }
+
+  let storedPayload: string;
+  try {
+    storedPayload = encryptJsonString(rawPayload);
+  } catch {
+    throw new Error("Could not encrypt ML session tokens");
+  }
+
+  const supabase = createServiceClient();
   const { error } = await supabase.storage.from("meli-sessions").upload(storagePath, storedPayload, {
     upsert: true,
     contentType: "application/json",
