@@ -365,6 +365,31 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["ml_accounts"]["Row"]>;
         Relationships: [];
       };
+      ml_account_invites: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          client_email: string;
+          client_name: string;
+          optional_account_label: string | null;
+          token_hash: string;
+          expires_at: string;
+          used_at: string | null;
+          status: "pending" | "connected" | "expired" | "revoked";
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ml_account_invites"]["Row"]> & {
+          ml_account_id: string;
+          client_email: string;
+          client_name: string;
+          token_hash: string;
+          expires_at: string;
+          status: "pending" | "connected" | "expired" | "revoked";
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_account_invites"]["Row"]>;
+        Relationships: [];
+      };
       ml_account_financial_settings: {
         Row: {
           id: string;
@@ -475,12 +500,14 @@ export type Database = {
           ml_account_id: string;
           expires_at: string;
           created_at: string;
+          invite_id: string | null;
         };
         Insert: {
           state: string;
           ml_account_id: string;
           expires_at: string;
           created_at?: string;
+          invite_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["ml_oauth_states"]["Row"]>;
         Relationships: [];

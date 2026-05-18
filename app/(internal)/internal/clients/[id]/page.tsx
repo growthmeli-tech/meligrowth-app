@@ -85,6 +85,9 @@ export default async function InternalClientDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/internal/clients/${id}/accounts`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
+            Invitaciones ML
+          </Link>
           <Link href={`/internal/clients/${id}/settings`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
             {needsMlConnection ? "Conectar ML" : "Configurar ML"}
           </Link>
