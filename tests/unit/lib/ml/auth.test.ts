@@ -1,12 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getAuthorizationUrl, refreshAccessToken } from "@/lib/ml/auth";
+
+vi.mock("@/lib/security/encryption", () => ({
+  decryptJsonString: vi.fn((payload: string) => payload),
+  encryptJsonString: vi.fn(),
+  isAppEncryptionConfigured: vi.fn()
+}));
+
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceSupabaseClient: vi.fn()
+}));
+
+import { getAuthorizationUrl, refreshAccessToken, saveSessionTokens } from "@/lib/ml/auth";
+import { encryptJsonString, isAppEncryptionConfigured } from "@/lib/security/encryption";
+import { createServiceSupabaseClient } from "@/lib/supabase/service";
+
+function mockStorageUpload() {
+  const upload = vi.fn().mockResolvedValue({ error: null });
+  vi.mocked(createServiceSupabaseClient).mockReturnValue({
+    storage: {
+      from: vi.fn(() => ({ upload }))
+    }
+  } as never);
+  return upload;
+}
 
 describe("ML auth", () => {
   beforeEach(() => {
     process.env.ML_CLIENT_ID = "client-id";
     process.env.ML_CLIENT_SECRET = "client-secret";
     process.env.ML_REDIRECT_URI = "https://app.local/callback";
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    vi.mocked(isAppEncryptionConfigured).mockReturnValue(true);
+    vi.mocked(encryptJsonString).mockReturnValue("{\"v\":1,\"data\":\"encrypted\"}");
   });
 
   it("construye authorization url con response_type=code", () => {
@@ -50,5 +75,100 @@ describe("ML auth", () => {
     );
 
     await expect(refreshAccessToken("bad-token")).rejects.toThrow(/refresh failed/i);
+  });
+
+  it("saveSessionTokens falla cerrado si falta APP_ENCRYPTION_KEY", async () => {
+    vi.mocked(isAppEncryptionConfigured).mockReturnValue(false);
+    const upload = mockStorageUpload();
+
+    await expect(
+      saveSessionTokens("acc-1/session.json", {
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+        expires_at: 123
+      })
+    ).rejects.toThrow("APP_ENCRYPTION_KEY is required");
+
+    expect(encryptJsonString).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("saveSessionTokens persiste solo payload cifrado cuando el cifrado funciona", async () => {
+    vi.mocked(encryptJsonString).mockReturnValue("encrypted-session-payload");
+    const upload = mockStorageUpload();
+
+    await saveSessionTokens("acc-1/session.json", {
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_at: 123
+    });
+
+    expect(encryptJsonString).toHaveBeenCalledWith(
+      JSON.stringify({
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+        expires_at: 123
+      })
+    );
+    expect(upload).toHaveBeenCalledWith("acc-1/session.json", "encrypted-session-payload", {
+      upsert: true,
+      contentType: "application/json",
+      cacheControl: "3600"
+    });
+  });
+
+  it("saveSessionTokens falla cerrado si el cifrado falla", async () => {
+    vi.mocked(encryptJsonString).mockImplementation(() => {
+      throw new Error("raw crypto details");
+    });
+    const upload = mockStorageUpload();
+
+    await expect(
+      saveSessionTokens("acc-1/session.json", {
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+        expires_at: 123
+      })
+    ).rejects.toThrow("Could not encrypt ML session tokens");
+
+    await expect(
+      saveSessionTokens("acc-1/session.json", {
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+        expires_at: 123
+      })
+    ).rejects.not.toThrow("raw crypto details");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("saveSessionTokens nunca persiste tokens planos", async () => {
+    vi.mocked(encryptJsonString).mockReturnValue("encrypted-session-payload");
+    const upload = mockStorageUpload();
+
+    await saveSessionTokens("acc-1/session.json", {
+      access_token: "plain-access-token",
+      refresh_token: "plain-refresh-token",
+      expires_at: 123
+    });
+
+    const storedPayload = upload.mock.calls[0]?.[1];
+    expect(storedPayload).toBe("encrypted-session-payload");
+    expect(storedPayload).not.toContain("plain-access-token");
+    expect(storedPayload).not.toContain("plain-refresh-token");
+  });
+
+  it("saveSessionTokens no persiste payload invalido", async () => {
+    const upload = mockStorageUpload();
+
+    await expect(
+      saveSessionTokens("acc-1/session.json", {
+        access_token: "",
+        refresh_token: "refresh-token",
+        expires_at: 123
+      })
+    ).rejects.toThrow("Invalid ML session payload");
+
+    expect(encryptJsonString).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
   });
 });
