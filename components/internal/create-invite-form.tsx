@@ -14,10 +14,10 @@ export function CreateInviteForm({ companyId }: Props) {
 
   return (
     <div className="space-y-3 rounded-xl border border-[#E8E8E2] bg-white p-4">
-      <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">Añadir cuenta (invitación)</h2>
+      <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">Generar link para el cliente</h2>
       <p className="text-sm text-[#6B6B6B]">
-        Generá un enlace seguro para que el cliente autorice Mercado Libre. El token se muestra una sola vez; guardalo o copiá el
-        link completo.
+        El cliente abre el link, inicia sesión con el email indicado y autoriza Mercado Libre. El token se muestra una sola vez; copiá
+        el link completo y enviáselo.
       </p>
       <form
         className="grid gap-3 md:grid-cols-2"
