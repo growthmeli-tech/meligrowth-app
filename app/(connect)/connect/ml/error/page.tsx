@@ -6,6 +6,9 @@ const MSGS: Record<string, string> = {
   invite_email_mismatch: "El usuario logueado no coincide con el email de la invitación.",
   session_required: "Necesitamos que inicies sesión con el email de la invitación antes de autorizar.",
   invalid_invite: "La invitación no es válida o ya fue utilizada.",
+  expired_invite: "La invitación venció. Pedile a MeliGrowth que genere un nuevo enlace.",
+  token_persist_failed:
+    "La cuenta quedó autorizada, pero no pudimos guardar la sesión de Mercado Libre. Contactá a MeliGrowth para finalizar la conexión.",
   default: "No pudimos completar la conexión. Volvé a intentar o contactá a MeliGrowth."
 };
 

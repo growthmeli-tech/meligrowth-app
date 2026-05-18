@@ -585,7 +585,15 @@ export type Database = {
           prioridad: "urgente" | "alta" | "media" | "baja";
         };
         Update: Partial<Database["public"]["Tables"]["tasks"]["Row"]>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "tasks_alert_id_fkey";
+            columns: ["alert_id"];
+            isOneToOne: false;
+            referencedRelation: "alerts";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       task_events: {
         Row: {
@@ -776,7 +784,20 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      complete_ml_account_invite_connection: {
+        Args: {
+          p_state: string;
+          p_invite_id: string;
+          p_user_id: string;
+          p_session_email: string;
+          p_seller_id: string;
+          p_account_name: string;
+          p_account_url: string | null;
+        };
+        Returns: string;
+      };
+    };
     Enums: {
       user_role: "operator" | "client";
       client_plan: "starter" | "growth" | "scale";
