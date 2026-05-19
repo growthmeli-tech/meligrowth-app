@@ -6,6 +6,36 @@ import { getCompanyById } from "@/lib/data-v2/companies";
 import { requireMeliGrowthTeamWithSupabase } from "@/lib/data-v2/internal-team";
 import { listMlAccountsByCompany } from "@/lib/data-v2/ml-accounts";
 import { getMLAuthorizationUrl } from "@/lib/ml/get-auth-url";
+import type { Database } from "@/lib/supabase/database.types";
+
+type MlAccountRow = Database["public"]["Tables"]["ml_accounts"]["Row"];
+type InviteRow = {
+  id: string;
+  ml_account_id: string;
+  client_email: string;
+  client_name: string;
+  status: string;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+};
+
+/** Cuenta ML elegible para reconexión operador: conectada vía invite completada, no legacy suelta. */
+function pickOperatorReconnectAccount(
+  accounts: MlAccountRow[],
+  invites: InviteRow[],
+  sellerById: Map<string, boolean>
+): MlAccountRow | null {
+  const completedInvites = invites
+    .filter((inv) => inv.status === "connected" || (inv.used_at != null && (sellerById.get(inv.ml_account_id) ?? false)))
+    .sort((a, b) => new Date(b.used_at ?? b.created_at).getTime() - new Date(a.used_at ?? a.created_at).getTime());
+
+  for (const inv of completedInvites) {
+    const account = accounts.find((a) => a.id === inv.ml_account_id && a.seller_id);
+    if (account) return account;
+  }
+  return null;
+}
 
 function inviteStatusLabel(row: { status: string; expires_at: string; used_at: string | null }, sellerConnected: boolean) {
   if (sellerConnected || row.status === "connected") return "Conectada";
@@ -40,7 +70,6 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
 
   const accountsResult = await listMlAccountsByCompany(id, { activeOnly: true });
   const accounts = accountsResult.success ? accountsResult.data : [];
-  const connectedAccount = accounts.find((account) => Boolean(account.seller_id)) ?? null;
 
   const { data: mlRows } = await supabase.from("ml_accounts").select("id, seller_id, account_name").eq("company_id", id);
   const accountIds = (mlRows ?? []).map((r) => r.id);
@@ -54,7 +83,9 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
         .in("ml_account_id", accountIds)
         .order("created_at", { ascending: false })
     : { data: [] as const };
-  const invites = invitesRes.data ?? [];
+  const invites = (invitesRes.data ?? []) as InviteRow[];
+
+  const connectedAccount = pickOperatorReconnectAccount(accounts, invites, sellerById);
 
   const { ml } = getServerEnv();
   let oauthUrl: string | null = null;
