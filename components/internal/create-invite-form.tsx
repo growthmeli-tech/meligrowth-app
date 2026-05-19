@@ -3,12 +3,12 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useFormState } from "react-dom";
-import {
-  createMlAccountInviteAction,
-  initialInviteFormState
-} from "@/app/(internal)/internal/clients/[id]/accounts/actions";
+import { createMlAccountInviteAction } from "@/app/(internal)/internal/clients/[id]/accounts/actions";
+import type { InviteFormState } from "@/app/(internal)/internal/clients/[id]/accounts/invite-form-state";
 
 type Props = { companyId: string };
+
+const initialInviteFormState: InviteFormState = { success: false };
 
 export function CreateInviteForm({ companyId }: Props) {
   const router = useRouter();

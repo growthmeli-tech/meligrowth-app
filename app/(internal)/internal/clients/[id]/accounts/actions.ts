@@ -4,17 +4,9 @@ import { requireMeliGrowthTeamWithSupabase } from "@/lib/data-v2/internal-team";
 import { generateInviteRawToken, hashInviteToken, normalizeInviteEmail } from "@/lib/ml/account-invite";
 import { getAppUrl } from "@/lib/config/app-url";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
+import type { InviteFormState } from "./invite-form-state";
 
 const INVITE_TTL_DAYS = 14;
-
-export type InviteFormState = {
-  success: boolean;
-  error?: string;
-  connectUrl?: string;
-  expiresAt?: string;
-};
-
-export const initialInviteFormState: InviteFormState = { success: false };
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
