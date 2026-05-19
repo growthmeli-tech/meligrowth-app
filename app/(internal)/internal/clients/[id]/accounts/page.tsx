@@ -39,15 +39,13 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
   const { supabase } = gate.data;
 
   const accountsResult = await listMlAccountsByCompany(id, { activeOnly: true });
-  let operatorAccount = accountsResult.success ? (accountsResult.data[0] ?? null) : null;
-  if (!operatorAccount) {
-    const fallbackAccountsResult = await listMlAccountsByCompany(id);
-    operatorAccount = fallbackAccountsResult.success ? (fallbackAccountsResult.data[0] ?? null) : null;
-  }
+  const accounts = accountsResult.success ? accountsResult.data : [];
+  const connectedAccount = accounts.find((account) => Boolean(account.seller_id)) ?? null;
 
-  const { data: mlRows } = await supabase.from("ml_accounts").select("id, seller_id").eq("company_id", id);
+  const { data: mlRows } = await supabase.from("ml_accounts").select("id, seller_id, account_name").eq("company_id", id);
   const accountIds = (mlRows ?? []).map((r) => r.id);
   const sellerById = new Map((mlRows ?? []).map((r) => [r.id, Boolean(r.seller_id)]));
+  const accountNameById = new Map((mlRows ?? []).map((r) => [r.id, r.account_name]));
 
   const invitesRes = accountIds.length
     ? await supabase
@@ -60,9 +58,9 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
 
   const { ml } = getServerEnv();
   let oauthUrl: string | null = null;
-  if (operatorAccount && ml.isConfigured) {
+  if (connectedAccount && ml.isConfigured) {
     try {
-      oauthUrl = await getMLAuthorizationUrl(operatorAccount.id);
+      oauthUrl = await getMLAuthorizationUrl(connectedAccount.id);
     } catch {
       oauthUrl = null;
     }
@@ -74,37 +72,41 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
         <Link href={`/internal/clients/${id}`} className="inline-flex text-sm font-semibold text-[#1A1A1A] underline underline-offset-2">
           Volver a la cuenta
         </Link>
-        <h1 className="text-xl font-bold text-[#1A1A1A]">Configurar ML</h1>
+        <h1 className="text-xl font-bold text-[#1A1A1A]">Configurar Mercado Libre</h1>
         <p className="text-sm text-[#6B6B6B]">{companyResult.data.name}</p>
         <p className="text-sm text-[#6B6B6B] max-w-2xl">
-          Para que el cliente autorice su cuenta, generá un link de invitación. La reconexión interna de abajo es solo para operadores
-          MeliGrowth.
+          Agregá cuentas ML para esta empresa. El camino habitual es crear una cuenta nueva e invitar al cliente por link. La reconexión
+          directa es solo para operadores.
         </p>
       </header>
 
       <section className="space-y-4" aria-labelledby="client-invite-heading">
         <div className="border-b border-[#E8E8E2] pb-2">
           <h2 id="client-invite-heading" className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-            1. Onboarding del cliente (recomendado)
+            Nueva cuenta ML por invitación
           </h2>
-          <p className="mt-1 text-sm text-[#6B6B6B]">El cliente recibe un link seguro y completa OAuth con su email autorizado.</p>
+          <p className="mt-1 text-sm text-[#6B6B6B]">
+            Creá una cuenta pendiente y enviá un link al cliente. Cada invitación genera una cuenta ML separada; el cliente autoriza con su
+            email.
+          </p>
         </div>
 
         <CreateInviteForm companyId={id} />
 
         <div className="rounded-xl border border-[#E8E8E2] bg-white p-4">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">Invitaciones</h3>
+          <h3 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">Cuentas e invitaciones</h3>
           {!invites.length ? (
             <p className="mt-3 text-sm text-[#6B6B6B]">
-              Todavía no hay invitaciones. Generá el primer link con el formulario de arriba para que el cliente conecte Mercado Libre.
+              Todavía no hay cuentas ML para esta empresa. Usá el formulario de arriba para crear la primera cuenta e invitar al cliente.
             </p>
           ) : (
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
+              <table className="w-full min-w-[720px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-[#E8E8E2] text-xs uppercase text-[#6B6B6B]">
                     <th className="py-2 pr-2">Cliente</th>
                     <th className="py-2 pr-2">Email</th>
+                    <th className="py-2 pr-2">Cuenta ML</th>
                     <th className="py-2 pr-2">Estado</th>
                     <th className="py-2 pr-2">Vence</th>
                     <th className="py-2">Creada</th>
@@ -115,6 +117,7 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
                     <tr key={row.id} className="border-b border-[#F5F5F0]">
                       <td className="py-2 pr-2 font-medium">{row.client_name}</td>
                       <td className="py-2 pr-2">{row.client_email}</td>
+                      <td className="py-2 pr-2">{accountNameById.get(row.ml_account_id) ?? "—"}</td>
                       <td className="py-2 pr-2">{inviteStatusLabel(row, sellerById.get(row.ml_account_id) ?? false)}</td>
                       <td className="py-2 pr-2">{new Date(row.expires_at).toLocaleString("es-AR")}</td>
                       <td className="py-2">{new Date(row.created_at).toLocaleString("es-AR")}</td>
@@ -122,37 +125,42 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
                   ))}
                 </tbody>
               </table>
-              <p className="mt-3 text-xs text-[#6B6B6B]">Los links de conexión solo se muestran al generar la invitación.</p>
+              <p className="mt-3 text-xs text-[#6B6B6B]">Los links de conexión solo se muestran al crear la invitación.</p>
             </div>
           )}
         </div>
       </section>
 
-      <section className="space-y-4" aria-labelledby="operator-reconnect-heading">
-        <div className="border-b border-[#E8E8E2] pb-2">
-          <h2 id="operator-reconnect-heading" className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-            2. Reconexión interna (operador)
-          </h2>
-          <p className="mt-1 text-sm text-[#6B6B6B]">
-            Usá esta opción solo si MeliGrowth debe reconectar la cuenta directamente. No reemplaza el link de invitación al cliente.
+      <details className="group rounded-xl border border-[#E8E8E2] bg-[#FAFAF8]">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold uppercase tracking-wide text-[#6B6B6B] marker:content-none [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex items-center gap-2">
+            <span className="text-xs transition-transform group-open:rotate-90">▶</span>
+            Reconexión interna (solo operador MeliGrowth)
+          </span>
+        </summary>
+        <div className="space-y-4 border-t border-[#E8E8E2] px-4 pb-4 pt-3">
+          <p className="text-sm text-[#6B6B6B]">
+            Usá esta opción solo si MeliGrowth debe reconectar o sincronizar una cuenta ya conectada. No reemplaza el link de invitación al
+            cliente.
           </p>
-        </div>
 
-        {operatorAccount ? (
-          <MLConnectionCard
-            mlAccountId={operatorAccount.id}
-            sellerId={operatorAccount.seller_id}
-            isConfigured={ml.isConfigured}
-            oauthUrl={oauthUrl}
-            lastSyncAt={operatorAccount.updated_at}
-          />
-        ) : (
-          <div className="rounded-xl border border-[#E8E8E2] bg-white p-4 text-sm text-[#6B6B6B]">
-            Todavía no hay una cuenta ML en esta empresa. Creá una invitación en la sección de arriba: al generar el link se crea la cuenta
-            pendiente y el cliente podrá conectarla.
-          </div>
-        )}
-      </section>
+          {connectedAccount ? (
+            <MLConnectionCard
+              operatorMode
+              accountName={connectedAccount.account_name}
+              mlAccountId={connectedAccount.id}
+              sellerId={connectedAccount.seller_id}
+              isConfigured={ml.isConfigured}
+              oauthUrl={oauthUrl}
+              lastSyncAt={connectedAccount.updated_at}
+            />
+          ) : (
+            <div className="rounded-lg border border-[#E8E8E2] bg-white p-4 text-sm text-[#6B6B6B]">
+              Cuando un cliente conecte una cuenta, acá podrás reconectarla o sincronizarla como operador.
+            </div>
+          )}
+        </div>
+      </details>
     </main>
   );
 }
