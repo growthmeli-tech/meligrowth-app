@@ -5,9 +5,10 @@ import { login, type LoginState } from "@/app/(auth)/login/actions";
 
 type LoginFormProps = {
   initialError?: string | null;
+  redirectTo?: string;
 };
 
-export function LoginForm({ initialError = null }: LoginFormProps) {
+export function LoginForm({ initialError = null, redirectTo }: LoginFormProps) {
   const [state, setState] = useState<LoginState>({ error: initialError });
   const [isPending, startTransition] = useTransition();
 
@@ -24,6 +25,7 @@ export function LoginForm({ initialError = null }: LoginFormProps) {
 
   return (
     <form action={submit} className="mt-6 space-y-3">
+      {redirectTo ? <input type="hidden" name="redirect" value={redirectTo} /> : null}
       <div className="space-y-1">
         <label htmlFor="login-email" className="text-sm font-medium text-[#1A1A1A]">
           Email

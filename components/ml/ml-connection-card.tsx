@@ -8,6 +8,8 @@ type MLConnectionCardProps = {
   isConfigured: boolean;
   oauthUrl: string | null;
   lastSyncAt: string | null;
+  operatorMode?: boolean;
+  accountName?: string | null;
 };
 
 function formatLastSync(value: string | null) {
@@ -19,7 +21,15 @@ function formatLastSync(value: string | null) {
   return date.toLocaleString("es-AR");
 }
 
-export function MLConnectionCard({ mlAccountId, sellerId, isConfigured, oauthUrl, lastSyncAt }: MLConnectionCardProps) {
+export function MLConnectionCard({
+  mlAccountId,
+  sellerId,
+  isConfigured,
+  oauthUrl,
+  lastSyncAt,
+  operatorMode = false,
+  accountName
+}: MLConnectionCardProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const isConnected = Boolean(sellerId);
@@ -53,9 +63,17 @@ export function MLConnectionCard({ mlAccountId, sellerId, isConfigured, oauthUrl
 
   return (
     <section className="rounded-xl border border-[#E8E8E2] bg-white p-5">
-      <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">Conexion con Mercado Libre</h2>
+      <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+        {operatorMode ? "Reconexión de operador" : "Conexion con Mercado Libre"}
+      </h2>
 
       <div className="mt-4 space-y-3 text-sm text-[#1A1A1A]">
+        {accountName ? (
+          <p>
+            Cuenta ML: <span className="font-semibold">{accountName}</span>
+          </p>
+        ) : null}
+
         <p className="flex items-center gap-2">
           <span className={`inline-block h-2.5 w-2.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"}`} />
           Estado: {isConnected ? "Conectada" : "No conectada"}
@@ -84,10 +102,14 @@ export function MLConnectionCard({ mlAccountId, sellerId, isConfigured, oauthUrl
           href={isConfigured && oauthUrl ? oauthUrl : "#"}
           aria-disabled={!isConfigured}
           className={`inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold ${
-            isConfigured ? "bg-[#FFD600] text-[#1A1A1A]" : "cursor-not-allowed bg-zinc-200 text-zinc-500"
+            !isConfigured
+              ? "cursor-not-allowed bg-zinc-200 text-zinc-500"
+              : operatorMode
+                ? "border border-[#E8E8E2] bg-white text-[#1A1A1A]"
+                : "bg-[#FFD600] text-[#1A1A1A]"
           }`}
         >
-          {isConnected ? "Reconectar" : "Conectar cuenta de Mercado Libre"}
+          {isConnected ? (operatorMode ? "Reconectar como operador" : "Reconectar") : "Conectar cuenta de Mercado Libre"}
         </a>
 
         {isConnected ? (
@@ -104,7 +126,9 @@ export function MLConnectionCard({ mlAccountId, sellerId, isConfigured, oauthUrl
 
       {syncMessage ? <p className="mt-3 text-sm text-[#6B6B6B]">{syncMessage}</p> : null}
 
-      <div className="mt-5 border-t border-[#E8E8E2] pt-3 text-xs text-[#6B6B6B]">ml_account_id: {mlAccountId}</div>
+      {operatorMode ? null : (
+        <div className="mt-5 border-t border-[#E8E8E2] pt-3 text-xs text-[#6B6B6B]">ml_account_id: {mlAccountId}</div>
+      )}
     </section>
   );
 }

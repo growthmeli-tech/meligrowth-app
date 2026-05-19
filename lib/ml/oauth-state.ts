@@ -3,15 +3,25 @@ import { createServiceSupabaseClient as createServiceClient } from "@/lib/supaba
 
 const TTL_MS = 15 * 60 * 1000;
 
-/** Persists a CSRF state token bound to an ml_account; returned value is sent as OAuth `state`. */
-export async function createMlOAuthState(mlAccountId: string): Promise<string> {
+export type MlOAuthStatePeek = {
+  mlAccountId: string;
+  inviteId: string | null;
+};
+
+type CreateMlOAuthStateOptions = {
+  inviteId?: string | null;
+};
+
+/** Persists a CSRF state token bound to an ml_account; optional invite context for client onboarding. */
+export async function createMlOAuthState(mlAccountId: string, options?: CreateMlOAuthStateOptions): Promise<string> {
   const supabase = createServiceClient();
   const state = randomUUID();
   const expiresAt = new Date(Date.now() + TTL_MS).toISOString();
   const { error } = await supabase.from("ml_oauth_states").insert({
     state,
     ml_account_id: mlAccountId,
-    expires_at: expiresAt
+    expires_at: expiresAt,
+    invite_id: options?.inviteId ?? null
   });
   if (error) {
     throw new Error(`ml_oauth_states insert failed: ${error.message}`);
@@ -19,12 +29,12 @@ export async function createMlOAuthState(mlAccountId: string): Promise<string> {
   return state;
 }
 
-/** Returns ml_account_id if state exists and is not expired; does not delete (so code is not exchanged if this fails). */
-export async function peekMlOAuthState(state: string): Promise<string | null> {
+/** Returns bound OAuth context if state exists and is not expired; does not delete. */
+export async function peekMlOAuthState(state: string): Promise<MlOAuthStatePeek | null> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("ml_oauth_states")
-    .select("ml_account_id, expires_at")
+    .select("ml_account_id, expires_at, invite_id")
     .eq("state", state)
     .maybeSingle();
 
@@ -33,7 +43,10 @@ export async function peekMlOAuthState(state: string): Promise<string | null> {
     await supabase.from("ml_oauth_states").delete().eq("state", state);
     return null;
   }
-  return data.ml_account_id as string;
+  return {
+    mlAccountId: data.ml_account_id as string,
+    inviteId: (data.invite_id as string | null) ?? null
+  };
 }
 
 /** Removes state after successful OAuth completion (one-time use). */

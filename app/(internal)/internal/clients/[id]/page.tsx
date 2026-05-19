@@ -75,7 +75,7 @@ export default async function InternalClientDetailPage({
             {needsMlConnection ? (
               <>
                 Sin conexión ML
-                <Link href={`/internal/clients/${id}/settings`} className="underline underline-offset-2">
+                <Link href={`/internal/clients/${id}/accounts`} className="underline underline-offset-2">
                   Configurar
                 </Link>
               </>
@@ -85,7 +85,7 @@ export default async function InternalClientDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href={`/internal/clients/${id}/settings`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
+          <Link href={`/internal/clients/${id}/accounts`} className="rounded-lg border border-[#E8E8E2] px-3 py-2 text-sm font-semibold text-[#1A1A1A]">
             {needsMlConnection ? "Conectar ML" : "Configurar ML"}
           </Link>
           <DownloadReportButton reportData={reportData ?? emptyReportData(companyResult.data.name, companyResult.data.plan)} disabled={!reportData} />
@@ -135,7 +135,7 @@ export default async function InternalClientDetailPage({
             </Link>
           </li>
           <li>
-            <Link href={`/internal/clients/${id}/settings`} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 hover:bg-[#F5F5F0]">
+            <Link href={`/internal/clients/${id}/accounts`} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 hover:bg-[#F5F5F0]">
               Configurar ML ⚙️ {needsMlConnection ? <span className="text-orange-500">🟠</span> : null}
             </Link>
           </li>
@@ -145,7 +145,7 @@ export default async function InternalClientDetailPage({
       {!account ? (
         <section className="rounded-xl border border-orange-200 bg-orange-50 p-4">
           <p className="text-sm font-semibold text-orange-700">Esta company todavia no tiene una cuenta ML asociada.</p>
-          <Link href={`/internal/clients/${id}/settings`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
+          <Link href={`/internal/clients/${id}/accounts`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
             Ir a configurar conexion ML
           </Link>
         </section>
@@ -157,7 +157,7 @@ export default async function InternalClientDetailPage({
             <p className="text-sm text-[#1A1A1A]">
               La cuenta ML {account.account_name ? `(${account.account_name}) ` : ""}esta lista para conectar/sincronizar, pero todavia no tiene diagnosticos.
             </p>
-            <Link href={`/internal/clients/${id}/settings`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
+            <Link href={`/internal/clients/${id}/accounts`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
               {needsMlConnection ? "Conectar cuenta de Mercado Libre" : "Revisar conexion ML"}
             </Link>
           </div>

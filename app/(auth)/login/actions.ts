@@ -10,6 +10,14 @@ export type LoginState = {
   error: string | null;
 };
 
+function safeRedirectPath(raw: string): string | null {
+  const p = raw.trim();
+  if (!p.startsWith("/")) return null;
+  if (p.startsWith("//")) return null;
+  if (p.includes("://")) return null;
+  return p;
+}
+
 async function getClientOperatorHome(userId: string) {
   const service = createServiceSupabaseClient();
   const { data: accessRow, error: accessError } = await service
@@ -40,6 +48,7 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const redirectRaw = String(formData.get("redirect") ?? "");
 
   if (!email || !password) {
     console.error("[login] missing_credentials", { hasEmail: Boolean(email), hasPassword: Boolean(password) });
@@ -60,6 +69,12 @@ export async function login(_previousState: LoginState, formData: FormData): Pro
 
   const userId = authData.user.id;
   const service = createServiceSupabaseClient();
+
+  const safePostLogin = safeRedirectPath(redirectRaw);
+  if (safePostLogin) {
+    redirect(safePostLogin);
+  }
+
   const { data: profileV2, error: profileV2Error } = await service.from("users_v2").select("role, company_id").eq("id", userId).maybeSingle();
   if (profileV2Error) {
     console.error("[login] users_v2_error", {

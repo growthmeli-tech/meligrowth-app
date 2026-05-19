@@ -365,6 +365,31 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["ml_accounts"]["Row"]>;
         Relationships: [];
       };
+      ml_account_invites: {
+        Row: {
+          id: string;
+          ml_account_id: string;
+          client_email: string;
+          client_name: string;
+          optional_account_label: string | null;
+          token_hash: string;
+          expires_at: string;
+          used_at: string | null;
+          status: "pending" | "connected" | "expired" | "revoked";
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ml_account_invites"]["Row"]> & {
+          ml_account_id: string;
+          client_email: string;
+          client_name: string;
+          token_hash: string;
+          expires_at: string;
+          status: "pending" | "connected" | "expired" | "revoked";
+        };
+        Update: Partial<Database["public"]["Tables"]["ml_account_invites"]["Row"]>;
+        Relationships: [];
+      };
       ml_account_financial_settings: {
         Row: {
           id: string;
@@ -475,12 +500,14 @@ export type Database = {
           ml_account_id: string;
           expires_at: string;
           created_at: string;
+          invite_id: string | null;
         };
         Insert: {
           state: string;
           ml_account_id: string;
           expires_at: string;
           created_at?: string;
+          invite_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["ml_oauth_states"]["Row"]>;
         Relationships: [];
@@ -558,7 +585,15 @@ export type Database = {
           prioridad: "urgente" | "alta" | "media" | "baja";
         };
         Update: Partial<Database["public"]["Tables"]["tasks"]["Row"]>;
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "tasks_alert_id_fkey";
+            columns: ["alert_id"];
+            isOneToOne: false;
+            referencedRelation: "alerts";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       task_events: {
         Row: {
@@ -749,7 +784,20 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      complete_ml_account_invite_connection: {
+        Args: {
+          p_state: string;
+          p_invite_id: string;
+          p_user_id: string;
+          p_session_email: string;
+          p_seller_id: string;
+          p_account_name: string;
+          p_account_url: string | null;
+        };
+        Returns: string;
+      };
+    };
     Enums: {
       user_role: "operator" | "client";
       client_plan: "starter" | "growth" | "scale";

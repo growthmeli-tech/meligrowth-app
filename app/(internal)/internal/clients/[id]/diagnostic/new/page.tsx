@@ -40,7 +40,7 @@ export default async function NewDiagnosticPage({
         </div>
         <section className="rounded-xl border border-orange-200 bg-orange-50 p-4">
           <p className="text-sm font-semibold text-orange-700">Esta company todavia no tiene una cuenta ML asociada.</p>
-          <Link href={`/internal/clients/${resolvedParams.id}/settings`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
+          <Link href={`/internal/clients/${resolvedParams.id}/accounts`} className="mt-3 inline-flex rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-semibold text-[#1A1A1A]">
             Ir a configurar conexion ML
           </Link>
         </section>
