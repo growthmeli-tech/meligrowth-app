@@ -122,6 +122,7 @@ export default async function CompanyAccountsPage({ params }: { params: Promise<
                   ))}
                 </tbody>
               </table>
+              <p className="mt-3 text-xs text-[#6B6B6B]">Los links de conexión solo se muestran al generar la invitación.</p>
             </div>
           )}
         </div>

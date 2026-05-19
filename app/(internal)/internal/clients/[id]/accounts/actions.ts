@@ -1,13 +1,20 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { requireMeliGrowthTeamWithSupabase } from "@/lib/data-v2/internal-team";
 import { generateInviteRawToken, hashInviteToken, normalizeInviteEmail } from "@/lib/ml/account-invite";
 import { getAppUrl } from "@/lib/config/app-url";
-import type { ActionResult } from "@/lib/types/api";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 
 const INVITE_TTL_DAYS = 14;
+
+export type InviteFormState = {
+  success: boolean;
+  error?: string;
+  connectUrl?: string;
+  expiresAt?: string;
+};
+
+export const initialInviteFormState: InviteFormState = { success: false };
 
 function cleanText(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
@@ -15,24 +22,25 @@ function cleanText(value: FormDataEntryValue | null) {
 
 export async function createMlAccountInviteAction(
   companyId: string,
+  _prevState: InviteFormState,
   formData: FormData
-): Promise<ActionResult<{ connectUrl: string; plainToken: string; expiresAt: string }>> {
+): Promise<InviteFormState> {
   const gate = await requireMeliGrowthTeamWithSupabase();
-  if (!gate.success) return gate;
+  if (!gate.success) return { success: false, error: gate.error ?? "Sin permiso" };
 
   const clientName = cleanText(formData.get("client_name"));
   const clientEmail = normalizeInviteEmail(cleanText(formData.get("client_email")));
   const optionalLabel = cleanText(formData.get("optional_account_label")) || null;
 
   if (!clientName || !clientEmail) {
-    return { success: false, error: "Nombre comercial y email del cliente son obligatorios.", code: "VALIDATION_ERROR" };
+    return { success: false, error: "Nombre comercial y email del cliente son obligatorios." };
   }
 
   const { supabase, userId } = gate.data;
 
   const { data: company, error: coErr } = await supabase.from("companies").select("id").eq("id", companyId).maybeSingle();
   if (coErr || !company) {
-    return { success: false, error: "Empresa no encontrada.", code: "NOT_FOUND" };
+    return { success: false, error: "Empresa no encontrada." };
   }
 
   const accountName = optionalLabel?.trim() || `Pendiente — ${clientName}`;
@@ -52,8 +60,7 @@ export async function createMlAccountInviteAction(
     logServerError("createMlAccountInvite.ml_accounts", mlErr ?? "missing_row", { companyId });
     return {
       success: false,
-      error: mlErr && isPostgresError(mlErr) ? formatSupabaseError(mlErr) : "No se pudo crear la cuenta ML pendiente",
-      code: mlErr?.code
+      error: mlErr && isPostgresError(mlErr) ? formatSupabaseError(mlErr) : "No se pudo crear la cuenta ML pendiente"
     };
   }
 
@@ -77,19 +84,16 @@ export async function createMlAccountInviteAction(
     await supabase.from("ml_accounts").delete().eq("id", mlRow.id);
     return {
       success: false,
-      error: isPostgresError(invErr) ? formatSupabaseError(invErr) : "No se pudo crear la invitación",
-      code: invErr.code
+      error: isPostgresError(invErr) ? formatSupabaseError(invErr) : "No se pudo crear la invitación"
     };
   }
 
   const base = getAppUrl();
   const connectUrl = base ? `${base}/connect/ml?token=${encodeURIComponent(plainToken)}` : `/connect/ml?token=${encodeURIComponent(plainToken)}`;
 
-  revalidatePath(`/internal/clients/${companyId}`);
-  revalidatePath(`/internal/clients/${companyId}/accounts`);
-
   return {
     success: true,
-    data: { connectUrl, plainToken, expiresAt }
+    connectUrl,
+    expiresAt
   };
 }
