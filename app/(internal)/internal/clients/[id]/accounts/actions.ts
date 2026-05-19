@@ -2,7 +2,7 @@
 
 import { requireMeliGrowthTeamWithSupabase } from "@/lib/data-v2/internal-team";
 import { generateInviteRawToken, hashInviteToken, normalizeInviteEmail } from "@/lib/ml/account-invite";
-import { getAppUrl } from "@/lib/config/app-url";
+import { getRequestAppUrl } from "@/lib/config/app-url";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
 import type { InviteFormState } from "./invite-form-state";
 
@@ -80,7 +80,7 @@ export async function createMlAccountInviteAction(
     };
   }
 
-  const base = getAppUrl();
+  const base = await getRequestAppUrl();
   const connectUrl = base ? `${base}/connect/ml?token=${encodeURIComponent(plainToken)}` : `/connect/ml?token=${encodeURIComponent(plainToken)}`;
 
   return {
