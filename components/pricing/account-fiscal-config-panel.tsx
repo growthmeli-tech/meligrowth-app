@@ -41,6 +41,7 @@ type Props = {
 export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved }: Props) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [iibb, setIibb] = useState("");
   const [tax, setTax] = useState("");
   const [logInt, setLogInt] = useState("");
@@ -69,6 +70,7 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
 
   const onSubmit = () => {
     setError(null);
+    setSaved(false);
     const input: SellerFinancialSettings = {
       iibbPct: parseOptPct(iibb),
       taxPct: parseOptPct(tax),
@@ -79,11 +81,13 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
     startTransition(async () => {
       const res = await saveFinancialSettingsForAccount(mlAccountId, input);
       if (!res.success) {
-        setError(res.error ?? "No se pudo guardar");
+        setError(res.error ?? "No pudimos guardar la configuración fiscal. Revisá los datos e intentá nuevamente.");
         return;
       }
       hydrate(res.data);
       onSaved(res.data);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
     });
   };
 
@@ -143,16 +147,25 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
           />
         </label>
       </div>
-      {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
-      <div className="mt-3">
+      {error ? (
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          {error}
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           disabled={pending}
           onClick={onSubmit}
           className="rounded-lg bg-[#1A1A1A] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
         >
-          Guardar fiscal
+          {pending ? "Guardando..." : "Guardar fiscal"}
         </button>
+        {saved ? (
+          <p role="status" className="text-xs font-semibold text-emerald-700">
+            Configuración fiscal guardada. Márgenes recalculados.
+          </p>
+        ) : null}
       </div>
     </div>
   );
