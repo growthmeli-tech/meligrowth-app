@@ -98,6 +98,97 @@ describe("CatalogGridRow inline actions", () => {
     expect(onToggleInlineCost).toHaveBeenCalled();
   });
 
+  it("missing cost row renders only the configure cost action", () => {
+    render(
+      <table>
+        <tbody>
+          <CatalogGridRowMemo
+            style={{ top: 0, height: 76 }}
+            rowId="MLA1"
+            rowKey="k"
+            draftKey=""
+            mlKey=""
+            saveStatus="idle"
+            error={null}
+            row={makeRow(false)}
+            rowActionKey="configure_cost"
+            rowAction={action({
+              primaryAction: "configure_cost",
+              label: "Configurar costo",
+              blockedReason: "Falta costo",
+              canConfigureCost: true
+            })}
+            expanded={false}
+            selected={false}
+            pending={false}
+            inlineCostOpen={false}
+            inlineCalcOpen={false}
+            margenObjDefault={null}
+            costForm={null}
+            rowHint={null}
+            rowSaveState="idle"
+            onToggleSelect={() => {}}
+            onToggleExpand={() => {}}
+            onToggleInlineCost={() => {}}
+            onInlineCostFieldChange={() => {}}
+            onInlineCostSave={() => {}}
+            onInlineCostCancel={() => {}}
+            onOpenMlPushRow={() => {}}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.getByRole("button", { name: "Configurar costo" })).toBeTruthy();
+    expect(screen.queryByText("Falta costo")).toBeNull();
+  });
+
+  it("push ML row renders the suggested price only inside the action button", () => {
+    const label = "Actualizar ML: $ 20.000 → $ 22.000";
+    render(
+      <table>
+        <tbody>
+          <CatalogGridRowMemo
+            style={{ top: 0, height: 76 }}
+            rowId="MLA1"
+            rowKey="k"
+            draftKey=""
+            mlKey=""
+            saveStatus="idle"
+            error={null}
+            row={makeRow(true)}
+            rowActionKey="push_ml_price"
+            rowAction={action({
+              primaryAction: "push_ml_price",
+              label,
+              canEditCost: true,
+              canPushMlPrice: true,
+              pushMlPriceLabel: label,
+              pushMlPricePayload: { itemId: "MLA1", currentPrice: 20000, targetPrice: 22000 }
+            })}
+            expanded={false}
+            selected={false}
+            pending={false}
+            inlineCostOpen={false}
+            inlineCalcOpen={false}
+            margenObjDefault={null}
+            costForm={null}
+            rowHint={null}
+            rowSaveState="idle"
+            onToggleSelect={() => {}}
+            onToggleExpand={() => {}}
+            onToggleInlineCost={() => {}}
+            onInlineCostFieldChange={() => {}}
+            onInlineCostSave={() => {}}
+            onInlineCostCancel={() => {}}
+            onOpenMlPushRow={() => {}}
+          />
+        </tbody>
+      </table>
+    );
+    expect(screen.getAllByText(label)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: label })).toBeTruthy();
+  });
+
   it("existing cost row shows Editar and inline cost input when opened", () => {
     render(
       <table>
