@@ -12,7 +12,7 @@ const ars = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS",
 
 /** Must match header grid in `catalog-command-center.tsx`. */
 export const CATALOG_GRID_ROW_CLASS =
-  "grid w-full min-w-[1060px] grid-cols-[32px_48px_minmax(200px,2fr)_72px_96px_72px_88px_120px_minmax(120px,1fr)_40px] gap-0 text-left text-sm align-top";
+  "grid w-full grid-cols-[minmax(0,1fr)_88px_minmax(112px,1fr)] gap-0 text-left text-sm align-top sm:min-w-[1060px] sm:grid-cols-[32px_48px_minmax(200px,2fr)_72px_96px_72px_88px_120px_minmax(120px,1fr)_40px]";
 
 /** Fixed virtual row height (main row only; detail panels render below the list). */
 export const CATALOG_MAIN_ROW_HEIGHT = 76;
@@ -158,10 +158,10 @@ function CatalogGridRowInner({
       style={{ ...style, boxSizing: "border-box" }}
       className={cn("box-border border-b border-[#E8E8E2]", CATALOG_GRID_ROW_CLASS, rowBg, borderLeft)}
     >
-      <div role="cell" className="flex items-start p-2">
+      <div role="cell" className="hidden items-start p-2 sm:flex">
         <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Seleccionar ${row.item_id}`} />
       </div>
-      <div role="cell" className="p-2">
+      <div role="cell" className="hidden p-2 sm:block">
         {row.thumbnail ? (
           // eslint-disable-next-line @next/next/no-img-element -- ML CDN thumbnails
           <img src={row.thumbnail} alt="" width={40} height={40} className="h-10 w-10 rounded-md object-cover" />
@@ -191,19 +191,19 @@ function CatalogGridRowInner({
           </span>
         ) : null}
       </div>
-      <div role="cell" className="p-2">
+      <div role="cell" className="hidden p-2 sm:block">
         <span className={cn(stockBadgeClass)}>{row.stock === null ? "—" : row.stock}</span>
       </div>
       <div role="cell" className={cn("p-2 tabular-nums", precioCellClass)}>
         {row.price_ml === null ? "—" : ars.format(row.price_ml)}
       </div>
-      <div role="cell" className="p-2 text-xs font-medium text-[#1A1A1A]" title="Envío ML (publicación, datos ML)">
+      <div role="cell" className="hidden p-2 text-xs font-medium text-[#1A1A1A] sm:block" title="Envío ML (publicación, datos ML)">
         {row.mlOfficial.publicationLogisticsLabel}
       </div>
-      <div role="cell" className="p-2 tabular-nums">
+      <div role="cell" className="hidden p-2 tabular-nums sm:block">
         {row.costo === null ? "—" : ars.format(row.costo)}
       </div>
-      <div role="cell" className="p-2 tabular-nums">
+      <div role="cell" className="hidden p-2 tabular-nums sm:block">
         <div className="font-medium">{gananciaRealLabel}</div>
         <div className="text-xs text-[#6B6B6B]">{margenRealLabel}</div>
       </div>
@@ -326,7 +326,7 @@ function CatalogGridRowInner({
           ) : null}
         </div>
       </div>
-      <div role="cell" className="p-2">
+      <div role="cell" className="hidden p-2 sm:block">
         <button
           type="button"
           onClick={onToggleExpand}
