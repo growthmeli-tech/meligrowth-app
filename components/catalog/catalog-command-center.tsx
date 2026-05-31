@@ -943,7 +943,7 @@ export function CatalogCommandCenter({
             </button>
           </div>
         ) : (
-          <div role="table" aria-label="Catálogo" className="flex min-w-[980px] flex-col text-sm">
+          <div role="table" aria-label="Catálogo" className="flex flex-col text-sm sm:min-w-[1060px]">
             <div
               role="row"
               className={cn(
@@ -951,7 +951,7 @@ export function CatalogCommandCenter({
                 "border-b border-[#E8E8E2] bg-[#F5F5F0] text-xs font-bold uppercase tracking-wide text-[#6B6B6B]"
               )}
             >
-              <div role="columnheader" className="flex items-center p-2">
+              <div role="columnheader" className="hidden items-center p-2 sm:flex">
                 <input
                   type="checkbox"
                   aria-label="Seleccionar todas"
@@ -959,31 +959,31 @@ export function CatalogCommandCenter({
                   onChange={toggleAllFiltered}
                 />
               </div>
-              <div role="columnheader" className="p-2">
+              <div role="columnheader" className="hidden p-2 sm:block">
                 IMG
               </div>
               <div role="columnheader" className="p-2">
                 Producto + MLA
               </div>
-              <div role="columnheader" className="p-2">
+              <div role="columnheader" className="hidden p-2 sm:block">
                 Stock
               </div>
               <div role="columnheader" className="p-2">
                 Precio ML
               </div>
-              <div role="columnheader" className="p-2">
+              <div role="columnheader" className="hidden p-2 sm:block">
                 Envío ML
               </div>
-              <div role="columnheader" className="p-2">
+              <div role="columnheader" className="hidden p-2 sm:block">
                 Costo
               </div>
-              <div role="columnheader" className="p-2">
+              <div role="columnheader" className="hidden p-2 sm:block">
                 Ganancia
               </div>
               <div role="columnheader" className="p-2">
                 Acción
               </div>
-              <div role="columnheader" className="w-8 p-2" />
+              <div role="columnheader" className="hidden w-8 p-2 sm:block" />
             </div>
             <div ref={listBodyRef} className="h-[min(55vh,560px)] w-full shrink-0">
               <FixedSizeList
