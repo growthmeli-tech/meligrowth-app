@@ -227,9 +227,9 @@ function CatalogGridRowInner({
             </button>
           ) : rowAction.primaryAction === "complete_data" ? (
             <span className="text-left font-semibold text-[#1A1A1A]">{rowAction.label}</span>
-          ) : (
+          ) : rowAction.primaryAction === "none" ? (
             <span className="text-[#6B6B6B]">{rowAction.label}</span>
-          )}
+          ) : null}
 
           {rowAction.primaryAction === "push_ml_price" && rowAction.canPushMlPrice && rowAction.pushMlPricePayload ? (
             <button
@@ -240,9 +240,9 @@ function CatalogGridRowInner({
             >
               {rowAction.pushMlPriceLabel}
             </button>
-          ) : (
+          ) : rowAction.primaryAction !== "configure_cost" && rowAction.primaryAction !== "push_ml_price" ? (
             <span className="mt-1 text-[10px] font-medium text-[#6B6B6B]">{rowAction.sublabel ?? rowAction.blockedReason ?? "Sin acción"}</span>
-          )}
+          ) : null}
           {inlineCostOpen ? (
             <div className="mt-1 space-y-1 rounded border border-[#E8E8E2] bg-[#FAFAF8] p-2">
               <label className="block">
