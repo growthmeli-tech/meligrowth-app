@@ -42,6 +42,7 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [iibb, setIibb] = useState("");
   const [tax, setTax] = useState("");
   const [logInt, setLogInt] = useState("");
@@ -68,6 +69,10 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
     hydrate(initialSettings);
   }, [mlAccountId, initialSettings, hydrate]);
 
+  useEffect(() => {
+    setCollapsed(false);
+  }, [mlAccountId]);
+
   const onSubmit = () => {
     setError(null);
     setSaved(false);
@@ -86,10 +91,23 @@ export function AccountFiscalConfigPanel({ mlAccountId, initialSettings, onSaved
       }
       hydrate(res.data);
       onSaved(res.data);
+      setCollapsed(true);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2000);
     });
   };
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        className="rounded-lg bg-[#1A1A1A] px-3 py-1.5 text-xs font-semibold text-white"
+      >
+        Modificar configuración fiscal
+      </button>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-[#E8E8E2] bg-[#FAFAF8] p-3 text-sm">
