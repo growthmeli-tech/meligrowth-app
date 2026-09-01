@@ -4,6 +4,8 @@ const MSGS: Record<string, string> = {
   duplicate_seller:
     "Esta cuenta de Mercado Libre ya está vinculada a otro perfil en tu empresa. Contactá a MeliGrowth para unificar el acceso.",
   invite_email_mismatch: "El usuario logueado no coincide con el email de la invitación.",
+  invite_company_mismatch:
+    "Este usuario ya pertenece a otra empresa. Pedile a MeliGrowth una invitación con un email que no esté asociado a otro cliente.",
   session_required: "Necesitamos que inicies sesión con el email de la invitación antes de autorizar.",
   invalid_invite: "La invitación no es válida o ya fue utilizada.",
   expired_invite: "La invitación venció. Pedile a MeliGrowth que genere un nuevo enlace.",

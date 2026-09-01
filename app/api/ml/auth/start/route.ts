@@ -5,6 +5,7 @@ import { requireMeliGrowthTeam } from "@/lib/data-v2/internal-team";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
 import { getInviteByRawToken, sessionEmailMatchesInvite } from "@/lib/ml/invite-lookup";
+import { inviteUserCompanyAllowed } from "@/lib/ml/invite-tenant";
 
 function loginRedirect(request: NextRequest, destinationPath: string) {
   const loginUrl = new URL("/login", request.url);
@@ -40,6 +41,17 @@ export async function GET(request: NextRequest) {
     }
 
     const service = createServiceClient();
+    const { data: profile } = await service
+      .from("users_v2")
+      .select("company_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!inviteUserCompanyAllowed(profile?.company_id, invite.companyId)) {
+      const url = new URL("/connect/ml/error", request.url);
+      url.searchParams.set("reason", "invite_company_mismatch");
+      return NextResponse.redirect(url);
+    }
+
     const { data: account, error: accErr } = await service
       .from("ml_accounts")
       .select("id, seller_id, company_id")

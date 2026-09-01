@@ -113,7 +113,7 @@ function mockInternalService(track?: { steps: string[] }) {
   } as never);
 }
 
-function mockInviteService(input: { completionCode: string; steps?: string[] }) {
+function mockInviteService(input: { completionCode: string; steps?: string[]; userCompanyId?: string | null }) {
   const rpc = vi.fn(async () => {
     input.steps?.push("invite_rpc");
     return { data: input.completionCode, error: null };
@@ -128,6 +128,21 @@ function mockInviteService(input: { completionCode: string; steps?: string[] }) 
               maybeSingle: async () => {
                 input.steps?.push("load_account");
                 return { data: { id: "acc-state", company_id: "co-1" }, error: null };
+              }
+            })
+          })
+        };
+      }
+      if (table === "users_v2") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                input.steps?.push("load_user");
+                return {
+                  data: { company_id: input.userCompanyId === undefined ? "co-1" : input.userCompanyId },
+                  error: null
+                };
               }
             })
           })
@@ -197,7 +212,7 @@ describe("GET /api/ml/auth/callback", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/connect/ml/success");
-    expect(steps).toEqual(["load_account", "ml_profile", "invite_rpc", "token_storage"]);
+    expect(steps).toEqual(["load_account", "load_user", "ml_profile", "invite_rpc", "token_storage"]);
     expect(rpc).toHaveBeenCalledWith(
       "complete_ml_account_invite_connection",
       expect.objectContaining({
@@ -247,6 +262,34 @@ describe("GET /api/ml/auth/callback", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("reason=duplicate_seller");
+    expect(saveSessionTokens).not.toHaveBeenCalled();
+  });
+
+  it("rejects invite completion when the session user already belongs to another company", async () => {
+    vi.mocked(peekMlOAuthState).mockResolvedValue({ mlAccountId: "acc-state", inviteId: "invite-1" });
+    mockTokens();
+    mockAuthUser();
+    const { rpc } = mockInviteService({ completionCode: "ok", userCompanyId: "co-other" });
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("https://app.local/connect/ml/error?reason=invite_company_mismatch");
+    expect(rpc).not.toHaveBeenCalled();
+    expect(saveSessionTokens).not.toHaveBeenCalled();
+    expect(deleteMlOAuthState).toHaveBeenCalledWith(STATE);
+  });
+
+  it("maps invite_company_mismatch RPC result to the public error page", async () => {
+    vi.mocked(peekMlOAuthState).mockResolvedValue({ mlAccountId: "acc-state", inviteId: "invite-1" });
+    mockTokens();
+    mockAuthUser();
+    mockInviteService({ completionCode: "invite_company_mismatch", userCompanyId: null });
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("reason=invite_company_mismatch");
     expect(saveSessionTokens).not.toHaveBeenCalled();
   });
 

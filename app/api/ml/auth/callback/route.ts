@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { exchangeCodeForTokens, saveSessionTokens } from "@/lib/ml/auth";
 import { deleteMlOAuthState, peekMlOAuthState } from "@/lib/ml/oauth-state";
 import type { MlOAuthStatePeek } from "@/lib/ml/oauth-state";
+import { inviteUserCompanyAllowed } from "@/lib/ml/invite-tenant";
 import { mlFetch } from "@/lib/ml/client";
 import type { MlTokenResponse } from "@/lib/ml/mappers/types";
 import { createServiceSupabaseClient as createServiceClient } from "@/lib/supabase/service";
@@ -35,6 +36,8 @@ function mapInviteRpcCodeToReason(code: string | null | undefined): string {
       return "invite_email_mismatch";
     case "duplicate_seller":
       return "duplicate_seller";
+    case "invite_company_mismatch":
+      return "invite_company_mismatch";
     case "expired_state":
     case "invalid_state":
     case "invalid_invite":
@@ -150,12 +153,24 @@ async function completeInviteOAuthCallback(input: {
   tokens: MlTokenResponse;
   sellerId: string;
   user: User;
+  mlAccount: MlAccountRef;
   service: ReturnType<typeof createServiceClient>;
 }): Promise<NextResponse> {
-  const { request, state, oauthState, tokens, sellerId, user, service } = input;
+  const { request, state, oauthState, tokens, sellerId, user, mlAccount, service } = input;
   const inviteId = oauthState.inviteId;
   if (!inviteId) {
     return connectErrorRedirect(request, "invalid_invite");
+  }
+
+  const { data: profile } = await service
+    .from("users_v2")
+    .select("company_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!inviteUserCompanyAllowed(profile?.company_id, mlAccount.company_id)) {
+    await deleteMlOAuthState(state);
+    return connectErrorRedirect(request, "invite_company_mismatch");
   }
 
   const sellerProfile = await fetchMlSellerProfile(tokens.access_token, tokens.user_id!);
@@ -331,6 +346,7 @@ export async function GET(request: Request) {
         tokens,
         sellerId,
         user,
+        mlAccount,
         service
       });
     }
