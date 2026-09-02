@@ -16,11 +16,12 @@ function moneyFieldFromModel(v: number | null | undefined): string {
   return String(v);
 }
 
+/** Percent-point field (1 = 1%). Persistence uses `normalizeFiscalPct` so `1` is not stored as 100%. */
 function parseOptPct(raw: string): number | null {
   const t = raw.trim();
   if (t === "") return null;
   const n = Number(t.replace(",", "."));
-  if (!Number.isFinite(n)) return null;
+  if (!Number.isFinite(n) || n < 0) return null;
   return n;
 }
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { normalizePct, type SellerFinancialSettings } from "@/lib/pricing/calculator";
+import { normalizeFiscalPct, type SellerFinancialSettings } from "@/lib/pricing/calculator";
 import type { Database } from "@/lib/supabase/database.types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -25,17 +25,17 @@ function rowToSellerFinancialSettings(row: FsRow): SellerFinancialSettings {
   };
 }
 
-/** Normalize percentage fields for persistence (0–1 canonical); null stays null; 0 stays 0. */
+/** Normalize percentage fields for persistence (0–1 canonical); null stays null; 0 stays 0. `1` from the fiscal form is 1%, not 100%. */
 function normalizeFinancialSettingsForDb(input: SellerFinancialSettings): SellerFinancialSettings {
   return {
     iibbPct:
       input.iibbPct === null || input.iibbPct === undefined || !Number.isFinite(input.iibbPct)
         ? null
-        : normalizePct(input.iibbPct),
+        : normalizeFiscalPct(input.iibbPct),
     taxPct:
       input.taxPct === null || input.taxPct === undefined || !Number.isFinite(input.taxPct)
         ? null
-        : normalizePct(input.taxPct),
+        : normalizeFiscalPct(input.taxPct),
     internalLogisticsCost:
       input.internalLogisticsCost === null ||
       input.internalLogisticsCost === undefined ||
@@ -47,7 +47,7 @@ function normalizeFinancialSettingsForDb(input: SellerFinancialSettings): Seller
       input.additionalCostsPct === undefined ||
       !Number.isFinite(input.additionalCostsPct)
         ? null
-        : normalizePct(input.additionalCostsPct),
+        : normalizeFiscalPct(input.additionalCostsPct),
     additionalCostsFixed:
       input.additionalCostsFixed === null ||
       input.additionalCostsFixed === undefined ||

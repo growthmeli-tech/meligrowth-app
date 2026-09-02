@@ -94,6 +94,17 @@ export function normalizePct(v: number | null | undefined): number {
   return v > 1 ? v / 100 : v;
 }
 
+/**
+ * Persist account fiscal rates (IIBB / tax / additional %) as 0–1.
+ * Ops fiscal fields are percent points: `1` means 1%, not 100%.
+ * `normalizePct` cannot be used here because it treats `1` as a complete fraction.
+ */
+export function normalizeFiscalPct(v: number): number {
+  if (!Number.isFinite(v) || v < 0) return 0;
+  if (v >= 1) return v / 100;
+  return v;
+}
+
 /** Tasa de comisión ML según reputación (INVARIANT-06). */
 export function mlComisionRate(reputacion: ReputacionType | string | null | undefined): number {
   if (reputacion == null) return COMISION_ML_VERDE;
