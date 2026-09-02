@@ -9,6 +9,7 @@ import {
   coerceReputacion,
   explainCashInUnavailable,
   mlComisionRate,
+  normalizeFiscalPct,
   normalizePct
 } from "@/lib/pricing/calculator";
 
@@ -53,6 +54,43 @@ describe("Motor ML — normalizePct", () => {
     expect(normalizePct(null)).toBe(0);
     expect(normalizePct(undefined)).toBe(0);
     expect(normalizePct(0)).toBe(0);
+  });
+
+  it("trata 1 como fracción completa (100%), no como 1%", () => {
+    expect(normalizePct(1)).toBe(1);
+  });
+});
+
+describe("Motor ML — normalizeFiscalPct", () => {
+  it("interpreta 1 como 1% (no 100%) para IIBB / impuestos de cuenta", () => {
+    expect(normalizeFiscalPct(1)).toBe(0.01);
+    expect(normalizeFiscalPct(3)).toBe(0.03);
+    expect(normalizeFiscalPct(21)).toBe(0.21);
+    expect(normalizeFiscalPct(0)).toBe(0);
+    expect(normalizeFiscalPct(0.035)).toBe(0.035);
+  });
+
+  it("IIBB 1% no absorbe el precio de venta entero", () => {
+    const wrong = calculateFinancialCostBreakdown({
+      salePrice: 20_000,
+      productCost: 8_000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: normalizePct(1), taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    const fixed = calculateFinancialCostBreakdown({
+      salePrice: 20_000,
+      productCost: 8_000,
+      logistica: "Retiro domicilio",
+      reputacion: "Verde / MercadoLíder",
+      publicidad_pct: 0,
+      financialSettings: { iibbPct: normalizeFiscalPct(1), taxPct: 0, internalLogisticsCost: null },
+      skuAdditionalFixedCost: null
+    });
+    expect(wrong.iibbAmount).toBe(20_000);
+    expect(fixed.iibbAmount).toBe(200);
   });
 });
 
