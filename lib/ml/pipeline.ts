@@ -9,7 +9,9 @@ import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { mapScraperMetricsToPrefill } from "@/lib/ml/mappers/to-diagnostic";
 import type { MlDataSource, MlDiagnosticPrefill } from "@/lib/ml/mappers/types";
 import { createIngestionRunPipeline, finishIngestionRunPipeline, type IngestionBlockEntry } from "@/lib/data-v2/ingestion-runs";
-import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
+import { createMetricSnapshot, getLatestMetricSnapshotByAccount } from "@/lib/data-v2/metric-snapshots";
+import { utcTodaySnapshotDate } from "@/lib/data-v2/snapshot-date";
+import { buildMlPipelineSnapshotPayload } from "@/lib/ml/pipeline-snapshot";
 import { runRecommendationsPipelineV2 } from "@/lib/recommendations/pipeline-v2";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -335,77 +337,63 @@ export async function fetchMLDiagnosticData(
 
   if (options?.mlAccountId) {
     try {
-      const snapshotPayload = {
-        ml_account_id: options.mlAccountId,
-        snapshot_date: new Date().toISOString().slice(0, 10),
-        source: inferSnapshotSource(dataSources),
-        reclamos: prefill.reclamos ?? null,
-        mediaciones: prefill.mediaciones ?? null,
-        cancelaciones_vendedor: prefill.cancelaciones_vendedor ?? null,
-        envios_a_tiempo: prefill.envios_a_tiempo ?? null,
-        nivel_vendedor: prefill.nivel_vendedor ?? null,
-        ventas_completadas_60d: prefill.ventas_completadas_60d ?? null,
-        periodo_reputacion: prefill.periodo_reputacion ?? null,
-        reputacion_protegida: prefill.reputacion_protegida ?? null,
-        reputacion_real_level: prefill.reputacion_real_level ?? null,
-        reputacion_level_id: prefill.reputacion_level_id ?? null,
-        listings_quota: prefill.listings_quota ?? null,
-        listings_total_items: prefill.listings_total_items ?? null,
-        pubs_activas_pct: prefill.pubs_activas_pct ?? null,
-        pubs_optimizadas_pct: prefill.pubs_optimizadas_pct ?? null,
-        ctr: prefill.ctr ?? null,
-        margen_pre_ads: null,
-        gasto_ads: prefill.gasto_ads ?? null,
-        ventas_ads: prefill.ventas_ads ?? null,
-        ventas_totales: prefill.ventas_totales ?? null,
-        acos: prefill.acos ?? null,
-        roas: prefill.roas ?? null,
-        tacos: prefill.tacos ?? null,
-        incidencias_pct: prefill.incidencias_pct ?? null,
-        uso_full_flex_pct: prefill.uso_full_flex_pct ?? null,
-        cancelaciones_stock_pct: prefill.cancelaciones_stock_pct ?? null,
-        skus_sin_stock_pct: prefill.skus_sin_stock_pct ?? null,
-        dias_stock: prefill.dias_stock ?? null,
-        lead_time_reposicion: prefill.lead_time_reposicion ?? null,
-        sistema_reposicion: null,
-        data_sources: dataSources
-      };
-
-      const snapshotResult = await createMetricSnapshot(snapshotPayload);
-      if (!snapshotResult.success) {
-        logPipelineError("v2_snapshot", snapshotResult.error, {
+      const existingSnap = await getLatestMetricSnapshotByAccount(options.mlAccountId);
+      if (!existingSnap.success) {
+        logPipelineError("v2_snapshot_load", existingSnap.error, {
           clientId,
           sellerId,
           mlAccountId: options.mlAccountId
         });
         blocksFetched.v2_persist = {
           snapshot_ok: false,
-          error: snapshotResult.error
+          error: existingSnap.error
         };
       } else {
-        blocksFetched.v2_persist = { snapshot_ok: true, metric_snapshot_id: snapshotResult.data.id };
-        const recommendationsResult = await runRecommendationsPipelineV2({
-          ml_account_id: options.mlAccountId,
-          metric_snapshot_id: snapshotResult.data.id
+        const snapshotPayload = buildMlPipelineSnapshotPayload({
+          mlAccountId: options.mlAccountId,
+          snapshotDate: utcTodaySnapshotDate(),
+          source: inferSnapshotSource(dataSources),
+          prefill,
+          dataSources,
+          existing: existingSnap.data
         });
-        if (!recommendationsResult.success) {
-          logPipelineError("v2_recommendations", recommendationsResult.error, {
+
+        const snapshotResult = await createMetricSnapshot(snapshotPayload);
+        if (!snapshotResult.success) {
+          logPipelineError("v2_snapshot", snapshotResult.error, {
             clientId,
             sellerId,
-            mlAccountId: options.mlAccountId,
-            metricSnapshotId: snapshotResult.data.id
+            mlAccountId: options.mlAccountId
           });
           blocksFetched.v2_persist = {
-            ...blocksFetched.v2_persist,
-            recommendations_ok: false,
-            recommendations_error: recommendationsResult.error
+            snapshot_ok: false,
+            error: snapshotResult.error
           };
         } else {
-          blocksFetched.v2_persist = {
-            ...blocksFetched.v2_persist,
-            recommendations_ok: true,
-            alerts_persisted: recommendationsResult.data.persisted_alerts_count
-          };
+          blocksFetched.v2_persist = { snapshot_ok: true, metric_snapshot_id: snapshotResult.data.id };
+          const recommendationsResult = await runRecommendationsPipelineV2({
+            ml_account_id: options.mlAccountId,
+            metric_snapshot_id: snapshotResult.data.id
+          });
+          if (!recommendationsResult.success) {
+            logPipelineError("v2_recommendations", recommendationsResult.error, {
+              clientId,
+              sellerId,
+              mlAccountId: options.mlAccountId,
+              metricSnapshotId: snapshotResult.data.id
+            });
+            blocksFetched.v2_persist = {
+              ...blocksFetched.v2_persist,
+              recommendations_ok: false,
+              recommendations_error: recommendationsResult.error
+            };
+          } else {
+            blocksFetched.v2_persist = {
+              ...blocksFetched.v2_persist,
+              recommendations_ok: true,
+              alerts_persisted: recommendationsResult.data.persisted_alerts_count
+            };
+          }
         }
       }
     } catch (error) {
