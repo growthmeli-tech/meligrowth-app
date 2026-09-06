@@ -11,7 +11,7 @@ import type { User } from "@supabase/supabase-js";
 const CALLBACK_TAG = "[ml-auth-callback]";
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type MlAccountRef = { id: string; company_id: string };
+type MlAccountRef = { id: string; company_id: string; seller_id: string | null };
 type MlSellerProfile = { accountName: string; accountUrl: string | null };
 
 function internalClientsRedirect(request: Request, errorCode: string) {
@@ -103,7 +103,11 @@ async function loadMlAccount(
   service: ReturnType<typeof createServiceClient>,
   mlAccountId: string
 ): Promise<MlAccountRef> {
-  const { data, error } = await service.from("ml_accounts").select("id, company_id").eq("id", mlAccountId).maybeSingle();
+  const { data, error } = await service
+    .from("ml_accounts")
+    .select("id, company_id, seller_id")
+    .eq("id", mlAccountId)
+    .maybeSingle();
   if (error || !data) {
     console.error(`${CALLBACK_TAG} ml_account_lookup_failed`, {
       mlAccountId,
@@ -208,6 +212,16 @@ async function completeInternalOAuthCallback(input: {
   const { request, state, oauthState, tokens, sellerId, user, mlAccount, service } = input;
 
   await assertNonInviteCompletion(service, user.id, mlAccount.id, mlAccount.company_id);
+
+  const existingSellerId = mlAccount.seller_id?.trim() || null;
+  if (existingSellerId && existingSellerId !== sellerId) {
+    console.warn(`${CALLBACK_TAG} seller_mismatch`, {
+      companyId: mlAccount.company_id,
+      mlAccountId: mlAccount.id
+    });
+    await deleteMlOAuthState(state);
+    return internalClientsRedirect(request, "seller_mismatch");
+  }
 
   const sellerProfile = await fetchMlSellerProfile(tokens.access_token, tokens.user_id!);
 
@@ -324,7 +338,7 @@ export async function GET(request: Request) {
         return connectErrorRedirect(request, "session_required");
       }
 
-      return completeInviteOAuthCallback({
+      return await completeInviteOAuthCallback({
         request,
         state,
         oauthState,
@@ -340,7 +354,7 @@ export async function GET(request: Request) {
       return internalClientsRedirect(request, "session_required");
     }
 
-    return completeInternalOAuthCallback({
+    return await completeInternalOAuthCallback({
       request,
       state,
       oauthState,
