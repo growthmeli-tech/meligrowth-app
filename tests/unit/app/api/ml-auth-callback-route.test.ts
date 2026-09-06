@@ -49,7 +49,8 @@ function mockMlProfile() {
   vi.mocked(mlFetch).mockResolvedValue({ id: 999, nickname: "Mi Tienda", permalink: "https://meli.test/store" } as never);
 }
 
-function mockInternalService(track?: { steps: string[] }) {
+function mockInternalService(track?: { steps: string[]; sellerId?: string | null }) {
+  const existingSellerId = track && "sellerId" in track ? track.sellerId ?? null : "999";
   vi.mocked(createServiceSupabaseClient).mockReturnValue({
     from: (table: string) => {
       if (table === "ml_accounts") {
@@ -60,7 +61,7 @@ function mockInternalService(track?: { steps: string[] }) {
                 return {
                   maybeSingle: async () => {
                     track?.steps.push("load_account");
-                    return { data: { id: "acc-123", company_id: "co-1" }, error: null };
+                    return { data: { id: "acc-123", company_id: "co-1", seller_id: existingSellerId }, error: null };
                   }
                 };
               }
@@ -176,6 +177,44 @@ describe("GET /api/ml/auth/callback", () => {
     expect(res.headers.get("location")).toContain("/internal/clients/co-1?ml_connected=true");
     expect(steps).toEqual(["load_account", "ml_profile", "duplicate_check", "account_upsert", "token_storage"]);
     expect(deleteMlOAuthState).toHaveBeenCalledWith(STATE);
+    expect(saveSessionTokens).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects internal reconnect when OAuth seller differs from the connected seller_id", async () => {
+    const steps: string[] = [];
+    vi.mocked(peekMlOAuthState).mockResolvedValue({ mlAccountId: "acc-123", inviteId: null });
+    mockTokens();
+    mockAuthUser({ id: "u1", email: "op@test.com" });
+    mockInternalService({ steps, sellerId: "12345" });
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/internal/clients?ml_error=seller_mismatch");
+    expect(steps).toEqual(["load_account"]);
+    expect(deleteMlOAuthState).toHaveBeenCalledWith(STATE);
+    expect(saveSessionTokens).not.toHaveBeenCalled();
+  });
+
+  it("allows first-time internal connect when seller_id is still null", async () => {
+    const steps: string[] = [];
+    vi.mocked(peekMlOAuthState).mockResolvedValue({ mlAccountId: "acc-123", inviteId: null });
+    mockTokens();
+    mockAuthUser({ id: "u1", email: "op@test.com" });
+    mockInternalService({ steps, sellerId: null });
+    vi.mocked(mlFetch).mockImplementation(async () => {
+      steps.push("ml_profile");
+      return { nickname: "Mi Tienda", permalink: "https://meli.test/store" } as never;
+    });
+    vi.mocked(saveSessionTokens).mockImplementation(async () => {
+      steps.push("token_storage");
+    });
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/internal/clients/co-1?ml_connected=true");
+    expect(steps).toEqual(["load_account", "ml_profile", "duplicate_check", "account_upsert", "token_storage"]);
     expect(saveSessionTokens).toHaveBeenCalledTimes(1);
   });
 
