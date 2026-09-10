@@ -7,37 +7,19 @@ import { pushPriceToML } from "@/lib/ml/endpoints/catalog";
 import { syncMlCatalog } from "@/lib/ml/sync-catalog";
 import { listMlCatalogItems } from "@/lib/data-v2/ml-catalog-items";
 import { ensurePricingSkuForMlItem } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
+import { requireOpsMlAccountAccess } from "@/lib/data-v2/ml-accounts";
 import { linkPricingSkuToItem, listUnifiedCatalog } from "@/lib/data-v2/unified-catalog.server";
 import type { UnifiedCatalogItem } from "@/lib/data-v2/unified-catalog";
 import { catalogStateFromItems, type CatalogState } from "@/lib/data-v2/catalog-state";
 import { calcSellingPrice, coerceReputacion, normalizePct } from "@/lib/pricing/calculator";
 import type { ActionResult } from "@/lib/types/api";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatSupabaseError, isPostgresError, logServerError } from "@/lib/utils/errors";
-
-async function gateMlAccount(mlAccountId: string): Promise<ActionResult<{ supabase: Awaited<ReturnType<typeof createServerSupabaseClient>> }>> {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-    error: authError
-  } = await supabase.auth.getUser();
-  if (authError || !user) {
-    return { success: false, error: "Sesión inválida. Volvé a iniciar sesión." };
-  }
-
-  const { data: account, error } = await supabase.from("ml_accounts").select("id").eq("id", mlAccountId).maybeSingle();
-  if (error || !account) {
-    return { success: false, error: "No tenés acceso a esta cuenta ML." };
-  }
-
-  return { success: true, data: { supabase } };
-}
 
 export async function ensurePricingSkuShellForItem(
   mlAccountId: string,
   itemId: string
 ): Promise<ActionResult<{ pricing_sku_id: string; item?: UnifiedCatalogItem }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   const ensured = await ensurePricingSkuForMlItem(gate.data.supabase, mlAccountId, itemId);
@@ -55,7 +37,7 @@ export async function ensurePricingSkuShellForItem(
 }
 
 export async function triggerCatalogSync(mlAccountId: string): Promise<ActionResult<{ synced: number; errors: number; durationMs: number }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   const { data: acc, error: accErr } = await gate.data.supabase.from("ml_accounts").select("seller_id").eq("id", mlAccountId).maybeSingle();
@@ -80,7 +62,7 @@ export async function exportMasterCatalog(
   mlAccountId: string,
   itemIds?: string[]
 ): Promise<ActionResult<{ base64: string; filename: string }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   try {
@@ -108,7 +90,7 @@ export async function saveCostForItem(
     reputacion?: string | null;
   }
 ): Promise<ActionResult<{ pricing_sku_id: string; item?: UnifiedCatalogItem }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   const supabase = gate.data.supabase;
@@ -213,7 +195,7 @@ export async function linkSkuToItem(
   itemId: string,
   pricingSkuId: string
 ): Promise<ActionResult<{ item?: UnifiedCatalogItem }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   const result = await linkPricingSkuToItem(mlAccountId, itemId, pricingSkuId);
@@ -233,7 +215,7 @@ export async function pushOptimalPriceToML(
   itemId: string,
   newPrice: number
 ): Promise<ActionResult<{ item_id: string; new_price: number }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   if (!Number.isFinite(newPrice) || newPrice <= 0) {
@@ -316,12 +298,14 @@ export async function pushOptimalPriceToML(
 }
 
 export async function loadUnifiedCatalogForAccount(mlAccountId: string): Promise<ActionResult<UnifiedCatalogItem[]>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
   return listUnifiedCatalog(mlAccountId);
 }
 
 export async function reloadCatalogState(mlAccountId: string): Promise<ActionResult<CatalogState>> {
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
+  if (!gate.success) return gate;
   const res = await listUnifiedCatalog(mlAccountId);
   if (!res.success) return res;
   return { success: true, data: catalogStateFromItems(res.data) };
@@ -331,7 +315,7 @@ export async function bulkMarkNoAds(
   mlAccountId: string,
   pricingSkuIds: string[]
 ): Promise<ActionResult<{ updated: number; items: UnifiedCatalogItem[] }>> {
-  const gate = await gateMlAccount(mlAccountId);
+  const gate = await requireOpsMlAccountAccess(mlAccountId);
   if (!gate.success) return gate;
 
   if (!pricingSkuIds.length) {
