@@ -19,6 +19,9 @@ function normalizePricingSkuRow(row: Row): NormalizedPricingSkuRow {
   };
 }
 
+/** Spreadsheet ingest stores `companyId/timestamp-filename`. Shells/inline use constants without `/`. */
+export const PRICING_SKU_INGEST_SOURCE_PATTERN = "%/%";
+
 export async function deletePricingSkusBySource(
   mlAccountId: string,
   sourceFile: string
@@ -28,6 +31,24 @@ export async function deletePricingSkusBySource(
   if (error) {
     logServerError("pricing-skus.deleteBySource", error, { mlAccountId, sourceFile });
     return { success: false, error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo borrar filas de pricing", code: error.code };
+  }
+  return { success: true, data: undefined };
+}
+
+export async function deleteIngestedPricingSkusForAccount(mlAccountId: string): Promise<ActionResult<void>> {
+  const supabase = await createServerSupabaseClient();
+  const { error } = await supabase
+    .from("pricing_skus")
+    .delete()
+    .eq("ml_account_id", mlAccountId)
+    .like("source_file", PRICING_SKU_INGEST_SOURCE_PATTERN);
+  if (error) {
+    logServerError("pricing-skus.deleteIngestedForAccount", error, { mlAccountId });
+    return {
+      success: false,
+      error: isPostgresError(error) ? formatSupabaseError(error) : "No se pudo borrar filas de pricing",
+      code: error.code
+    };
   }
   return { success: true, data: undefined };
 }
@@ -48,11 +69,45 @@ export async function bulkReplacePricingSkusForFile(
   sourceFile: string,
   rows: Insert[]
 ): Promise<ActionResult<Row[]>> {
-  const del = await deletePricingSkusBySource(mlAccountId, sourceFile);
+  // Empty payload is rollback of *this* upload only (unique timestamped path).
+  if (rows.length === 0) {
+    const del = await deletePricingSkusBySource(mlAccountId, sourceFile);
+    if (!del.success) return del;
+    return { success: true, data: [] };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data: previous, error: loadErr } = await supabase
+    .from("pricing_skus")
+    .select("*")
+    .eq("ml_account_id", mlAccountId)
+    .like("source_file", PRICING_SKU_INGEST_SOURCE_PATTERN);
+
+  if (loadErr) {
+    logServerError("pricing-skus.bulkReplace.loadPrevious", loadErr, { mlAccountId });
+    return {
+      success: false,
+      error: isPostgresError(loadErr) ? formatSupabaseError(loadErr) : "No se pudieron leer filas de pricing",
+      code: loadErr.code
+    };
+  }
+
+  // Each upload uses a unique storage path, so deleting only `sourceFile` is a
+  // no-op and the insert hits idx_pricing_skus_account_sku_producto.
+  const del = await deleteIngestedPricingSkusForAccount(mlAccountId);
   if (!del.success) return del;
-  if (rows.length === 0) return { success: true, data: [] };
+
   const withFile = rows.map((r) => ({ ...r, source_file: sourceFile, ml_account_id: mlAccountId } as Insert));
-  return insertPricingSkusBatch(withFile);
+  const inserted = await insertPricingSkusBatch(withFile);
+  if (!inserted.success && previous && previous.length > 0) {
+    const restore = (previous as Row[]).map(({ created_at: _c, updated_at: _u, ...rest }) => {
+      void _c;
+      void _u;
+      return rest as Insert;
+    });
+    await insertPricingSkusBatch(restore);
+  }
+  return inserted;
 }
 
 export async function listPricingSkus(mlAccountId: string): Promise<ActionResult<NormalizedPricingSkuRow[]>> {

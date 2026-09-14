@@ -7,9 +7,51 @@ import { shippingModeToOperatorLogistica } from "@/lib/pricing/shipping-costs-ar
 
 export type SupabaseServerClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
+const SHELL_SOURCE = "ml_item_shell";
+
+export type ReusablePricingSkuCandidate = {
+  id: string;
+  sku: string | null;
+  costo: number | null;
+  ml_item_id: string | null;
+  source_file: string | null;
+};
+
+function hasProductCost(costo: number | null | undefined): boolean {
+  return costo !== null && costo !== undefined && Number.isFinite(Number(costo)) && Number(costo) > 0;
+}
+
+function normSkuKey(v: string | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const t = v.trim().toLowerCase();
+  return t.length ? t : null;
+}
+
 /**
- * Idempotent 1:1 shell: garantiza `ml_catalog_items.pricing_sku_id` apuntando a una fila `pricing_skus`
- * con `ml_item_id` estable. No inventa costo ni margen (`costo`/`margen_pct` null hasta configuración OPS).
+ * Prefer an ingested cost row over an empty ML shell. Matching order matches
+ * `resolvePricingRow`: seller_custom_field, then item_id (first SKU wins).
+ */
+export function findReusableCostPricingSku(
+  catalog: { item_id: string; seller_custom_field: string | null },
+  rows: ReusablePricingSkuCandidate[]
+): ReusablePricingSkuCandidate | null {
+  const withCost = rows.filter((r) => hasProductCost(r.costo));
+  if (withCost.length === 0) return null;
+  const bySkuKey = new Map<string, ReusablePricingSkuCandidate>();
+  for (const r of withCost) {
+    const k = normSkuKey(r.sku);
+    if (k && !bySkuKey.has(k)) bySkuKey.set(k, r);
+  }
+  const custom = normSkuKey(catalog.seller_custom_field);
+  if (custom && bySkuKey.has(custom)) return bySkuKey.get(custom) ?? null;
+  const itemKey = normSkuKey(catalog.item_id);
+  if (itemKey && bySkuKey.has(itemKey)) return bySkuKey.get(itemKey) ?? null;
+  return null;
+}
+
+/**
+ * Idempotent 1:1 link: `ml_catalog_items.pricing_sku_id` points at a `pricing_skus`
+ * row with stable `ml_item_id`. Reuses ingested cost rows when SKU matches.
  */
 export async function ensurePricingSkuForMlItem(
   supabase: SupabaseServerClient,
@@ -30,9 +72,49 @@ export async function ensurePricingSkuForMlItem(
   if (!cat) return { ok: false, error: "Publicación no encontrada en catálogo ML." };
 
   if (cat.pricing_sku_id) {
-    const { data: existing } = await supabase.from("pricing_skus").select("id").eq("id", cat.pricing_sku_id).maybeSingle();
-    if (existing?.id) return { ok: true, pricingSkuId: existing.id };
-    await supabase.from("ml_catalog_items").update({ pricing_sku_id: null }).eq("id", cat.id);
+    const { data: existing } = await supabase
+      .from("pricing_skus")
+      .select("id, sku, costo, ml_item_id, source_file")
+      .eq("id", cat.pricing_sku_id)
+      .maybeSingle();
+    if (existing?.id && hasProductCost(existing.costo as number | null)) {
+      return { ok: true, pricingSkuId: existing.id };
+    }
+    if (!existing?.id) {
+      await supabase.from("ml_catalog_items").update({ pricing_sku_id: null }).eq("id", cat.id);
+    }
+  }
+
+  const { data: accountSkus } = await supabase
+    .from("pricing_skus")
+    .select("id, sku, costo, ml_item_id, source_file")
+    .eq("ml_account_id", mlAccountId)
+    .order("updated_at", { ascending: false });
+
+  const reusable = findReusableCostPricingSku(
+    { item_id: trimmedItem, seller_custom_field: cat.seller_custom_field ?? null },
+    (accountSkus ?? []) as ReusablePricingSkuCandidate[]
+  );
+
+  if (reusable) {
+    const previousShellId =
+      cat.pricing_sku_id && cat.pricing_sku_id !== reusable.id ? cat.pricing_sku_id : null;
+    await supabase
+      .from("pricing_skus")
+      .update({ ml_item_id: null })
+      .eq("ml_account_id", mlAccountId)
+      .eq("ml_item_id", trimmedItem)
+      .neq("id", reusable.id);
+    await supabase.from("pricing_skus").update({ ml_item_id: trimmedItem }).eq("id", reusable.id);
+    await supabase.from("ml_catalog_items").update({ pricing_sku_id: reusable.id }).eq("id", cat.id);
+    if (previousShellId) {
+      await supabase.from("pricing_skus").delete().eq("id", previousShellId).eq("source_file", SHELL_SOURCE);
+    }
+    return { ok: true, pricingSkuId: reusable.id };
+  }
+
+  if (cat.pricing_sku_id) {
+    return { ok: true, pricingSkuId: cat.pricing_sku_id };
   }
 
   const { data: byMlItem } = await supabase
@@ -64,7 +146,7 @@ export async function ensurePricingSkuForMlItem(
     sku: skuKey,
     producto,
     costo: null,
-    source_file: "ml_item_shell",
+    source_file: SHELL_SOURCE,
     logistica: shellLogistica,
     publicidad_pct: 0,
     margen_pct: null,
