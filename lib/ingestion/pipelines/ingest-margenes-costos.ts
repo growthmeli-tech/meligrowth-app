@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { createAlertsBulk } from "@/lib/data-v2/alerts";
 import { createIngestionLog, updateIngestionLog } from "@/lib/data-v2/file-ingestion-log";
+import { ensurePricingSkuShellsForAccount } from "@/lib/data-v2/ensure-pricing-sku-for-ml-item";
 import { bulkReplacePricingSkusForFile } from "@/lib/data-v2/pricing-skus";
 import { createMetricSnapshot } from "@/lib/data-v2/metric-snapshots";
 import { utcTodaySnapshotDate } from "@/lib/data-v2/snapshot-date";
@@ -159,6 +160,7 @@ export async function ingestMargenesCostos(
     }
   }
   const totalAlerts = (pipe.data.persisted_alerts_count ?? 0) + extra;
+  await ensurePricingSkuShellsForAccount(mlAccountId, supabase);
   await updateIngestionLog(logId, {
     status: "success",
     rows_valid: p.valid.length,
